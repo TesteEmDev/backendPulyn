@@ -1,0 +1,361 @@
+// routes/checkpoints.js - Checkpoints
+const express = require('express');
+const router = express.Router();
+const { query, queryOne, allQuery } = require('../database');
+const { verifyToken } = require('../utils/middleware');
+const { getCheckpointTreasureStatus } = require('../utils/treasure');
+
+// ✨ NOVO: Heartbeat - Checkpoint registra que está online
+// SEM autenticação: Arduino envia heartbeat sem token
+router.post('/:checkpoint_id/heartbeat', async (req, res) => {
+  try {
+    const { checkpoint_id } = req.params;
+    const now = new Date();
+    
+    // ✅ Apenas atualizar o status - Arduino não precisa de validação
+    try {
+      await query(
+        `UPDATE checkpoints SET status = 'online', last_seen = @now WHERE id = @id`,
+        { id: checkpoint_id, now }
+      );
+    } catch (err) {
+      // Se coluna last_seen não existe, só atualiza o status
+      if (err.message.includes('last_seen')) {
+        console.log('⚠️ Coluna last_seen ainda não existe, atualizando apenas status...');
+        await query(
+          `UPDATE checkpoints SET status = 'online' WHERE id = @id`,
+          { id: checkpoint_id }
+        );
+      } else {
+        throw err;
+      }
+    }
+    
+    console.log(`💓 Heartbeat recebido do checkpoint ${checkpoint_id}`);
+    res.json({ ok: true, message: 'Checkpoint online', timestamp: now });
+  } catch (err) {
+    console.error('❌ Erro ao processar heartbeat:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/evento/:evento_id', verifyToken, async (req, res) => {
+  try {
+    const { evento_id } = req.params;
+    const checkpoints = await allQuery(
+      `SELECT * FROM checkpoints 
+       WHERE evento_id = @evento_id
+       AND empresa_id = (SELECT empresa_id FROM eventos WHERE id = @evento_id)
+       ORDER BY name`,
+      { evento_id }
+    );
+
+    res.json(checkpoints || []);
+  } catch (err) {
+    console.error('❌ Erro ao listar checkpoints:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/:id/config', verifyToken, async (req, res) => {
+  try {
+    const checkpoint = await queryOne(
+      `SELECT * FROM checkpoints 
+       WHERE id = @id AND empresa_id = @empresa_id`,
+      { id: req.params.id, empresa_id: req.user.empresa_id }
+    );
+
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+
+    // Buscar tags autorizadas
+    const tags = await allQuery(
+      'SELECT tag_uid FROM checkpoint_tags WHERE checkpoint_id = @id',
+      { id: req.params.id }
+    );
+
+    checkpoint.authorizedTags = tags.map(t => t.tag_uid);
+    checkpoint.ledColor = checkpoint.led_color || '#00FF00';
+
+    res.json(checkpoint);
+  } catch (err) {
+    console.error('❌ Erro ao buscar configuração do checkpoint:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✨ NOVO: Buscar status do território de um checkpoint
+router.get('/:id/territory', async (req, res) => {
+  try {
+    const checkpoint = await queryOne(
+      `SELECT 
+        id,
+        territory_locked_until,
+        territory_cooldown_until,
+        territory_owner_time_id
+      FROM checkpoints WHERE id = @id`,
+      { id: req.params.id }
+    );
+
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+
+    const now = new Date();
+    const isLocked = checkpoint.territory_locked_until && new Date(checkpoint.territory_locked_until) > now;
+    const isCooldown = checkpoint.territory_cooldown_until && new Date(checkpoint.territory_cooldown_until) > now;
+
+    // Se tem owner, buscar informações do time
+    let ownerTeam = null;
+    if (checkpoint.territory_owner_time_id) {
+      ownerTeam = await queryOne(
+        `SELECT id, name, color FROM times WHERE id = @id`,
+        { id: checkpoint.territory_owner_time_id }
+      );
+    }
+
+    const treasureStatus = await getCheckpointTreasureStatus(req.params.id);
+
+    res.json({
+      checkpointId: checkpoint.id,
+      isLocked,
+      isCooldown,
+      ownerTeam: ownerTeam || null,
+      lockedUntil: checkpoint.territory_locked_until,
+      cooldownUntil: checkpoint.territory_cooldown_until,
+      remainingSeconds: isLocked ? Math.max(0, Math.ceil((new Date(checkpoint.territory_locked_until) - now) / 1000)) : 0,
+      cooldownRemaining: isCooldown ? Math.max(0, Math.ceil((new Date(checkpoint.territory_cooldown_until) - now) / 1000)) : 0,
+      ...treasureStatus
+    });
+  } catch (err) {
+    console.error('❌ Erro ao buscar status do território:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST - Criar novo checkpoint
+router.post('/evento/:evento_id', verifyToken, async (req, res) => {
+  try {
+    const { evento_id } = req.params;
+    const empresa_id = req.user.empresa_id; // ✅ Pegar empresa_id do token
+    const { id, name, type, zone, ip, points, status, authorizedTags } = req.body;
+
+    // Validar campos obrigatórios
+    if (!id || !name) {
+      return res.status(400).json({ error: 'ID e Nome são obrigatórios' });
+    }
+
+    // ✅ Validar que o evento pertence à empresa do usuário
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+
+    if (evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    // Verificar se checkpoint já existe
+    const existing = await queryOne(
+      'SELECT id FROM checkpoints WHERE id = @id AND evento_id = @evento_id',
+      { id, evento_id }
+    );
+
+    if (existing) {
+      return res.status(400).json({ error: 'Checkpoint com este ID já existe' });
+    }
+
+    // ✅ Inserir novo checkpoint COM empresa_id
+    await query(`
+      INSERT INTO checkpoints (id, evento_id, empresa_id, name, type, zone, ip, points, status, authorized_tags)
+      VALUES (@id, @evento_id, @empresa_id, @name, @type, @zone, @ip, @points, @status, @authorized_tags)
+    `, {
+      id,
+      evento_id,
+      empresa_id, // ✅ NOVO: Incluir empresa_id
+      name,
+      type: type || 'NFC',
+      zone: zone || null,
+      ip: ip || null,
+      points: points || 10,
+      status: status || 'configured',
+      authorized_tags: authorizedTags ? JSON.stringify(authorizedTags) : null
+    });
+
+    console.log(`✅ Checkpoint criado: ${name} (empresa_id: ${empresa_id})`);
+    res.json({ success: true, message: 'Checkpoint criado com sucesso', id, empresa_id });
+  } catch (err) {
+    console.error('❌ Erro ao criar checkpoint:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST - Autorizar tags para checkpoint
+// SEM autenticação: Arduino envia tags sem token
+router.post('/:checkpoint_id/authorize-tags', async (req, res) => {
+  try {
+    const { checkpoint_id } = req.params;
+    const { tags } = req.body; // Array de UIDs: ["1C:AB:3A:72", "AA:BB:CC:DD"]
+
+    if (!Array.isArray(tags) || tags.length === 0) {
+      return res.status(400).json({ error: 'Tags não fornecidas ou inválidas' });
+    }
+
+    // ✅ Verificar se checkpoint existe (sem validação de empresa - é Arduino)
+    const checkpoint = await queryOne(
+      'SELECT id FROM checkpoints WHERE id = @id',
+      { id: checkpoint_id }
+    );
+
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+
+    // Limpar tags antigas
+    await query('DELETE FROM checkpoint_tags WHERE checkpoint_id = @id', { id: checkpoint_id });
+
+    // Inserir novas tags
+    for (const tag of tags) {
+      if (tag && tag.trim()) {
+        await query(
+          'INSERT INTO checkpoint_tags (checkpoint_id, tag_uid) VALUES (@checkpointId, @tagUid)',
+          { checkpointId: checkpoint_id, tagUid: tag.trim().toUpperCase() }
+        );
+      }
+    }
+
+    console.log(`✅ ${tags.length} tags autorizadas para checkpoint ${checkpoint_id}`);
+    res.json({ ok: true, message: 'Tags autorizadas com sucesso', count: tags.length });
+  } catch (err) {
+    console.error('❌ Erro ao autorizar tags:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE - Excluir checkpoint
+router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res) => {
+  try {
+    const { evento_id, checkpoint_id } = req.params;
+    const empresa_id = req.user.empresa_id;
+
+    // ✅ Validar que evento pertence à empresa
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+
+    if (evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    // ✅ Verificar se checkpoint existe E pertence à empresa
+    const checkpoint = await queryOne(
+      'SELECT id FROM checkpoints WHERE id = @id AND evento_id = @evento_id AND empresa_id = @empresa_id',
+      { id: checkpoint_id, evento_id, empresa_id }
+    );
+
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+
+    // Deletar checkpoint
+    await query(
+      'DELETE FROM checkpoints WHERE id = @id AND evento_id = @evento_id AND empresa_id = @empresa_id',
+      { id: checkpoint_id, evento_id, empresa_id }
+    );
+
+    res.json({ success: true, message: 'Checkpoint excluído com sucesso' });
+  } catch (err) {
+    console.error('❌ Erro ao excluir checkpoint:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
+  try {
+    const { evento_id, id } = req.params;
+    const empresa_id = req.user.empresa_id; // ✅ Pegar empresa_id do token
+    const { name, status, location, type, zone, ip, points, authorizedTags } = req.body;
+
+    // ✅ Validar que o evento pertence à empresa do usuário
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+
+    if (evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    // Construir UPDATE dinamicamente
+    let updateFields = [];
+    let params = { id, evento_id };
+
+    if (name !== undefined) {
+      updateFields.push('name = @name');
+      params.name = name;
+    }
+    if (status !== undefined) {
+      updateFields.push('status = @status');
+      params.status = status;
+    }
+    if (location !== undefined) {
+      updateFields.push('location = @location');
+      params.location = location;
+    }
+    if (type !== undefined) {
+      updateFields.push('type = @type');
+      params.type = type;
+    }
+    if (zone !== undefined) {
+      updateFields.push('zone = @zone');
+      params.zone = zone;
+    }
+    if (ip !== undefined) {
+      updateFields.push('ip = @ip');
+      params.ip = ip;
+    }
+    if (points !== undefined) {
+      updateFields.push('points = @points');
+      params.points = points;
+    }
+    if (authorizedTags !== undefined) {
+      updateFields.push('authorized_tags = @authorized_tags');
+      params.authorized_tags = authorizedTags ? JSON.stringify(authorizedTags) : null;
+    }
+
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'Nenhum campo para atualizar' });
+    }
+
+    const updateQuery = `
+      UPDATE checkpoints 
+      SET ${updateFields.join(', ')}
+      WHERE id = @id AND evento_id = @evento_id AND empresa_id = @empresa_id
+    `;
+    
+    params.empresa_id = empresa_id; // ✅ Validar empresa_id
+
+    await query(updateQuery, params);
+
+    res.json({ success: true, message: 'Configuração salva com sucesso' });
+  } catch (err) {
+    console.error('❌ Erro ao salvar configuração:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
