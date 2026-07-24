@@ -11,21 +11,32 @@ router.get('/', verifyToken, async (req, res) => {
     const evento_id = req.query.evento_id ? String(req.query.evento_id) : null;
 
     let whereClause = 'b.empresa_id = @empresa_id';
+    let eventoSelect = 'b.evento_id';
     const params = { empresa_id };
 
     if (evento_id) {
       const evento = await queryOne(
-        'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+        'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@evento_id)',
         { evento_id }
       );
       if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-      if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+      if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(empresa_id).toLowerCase()) {
         return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
       }
 
-      // O evento é a fonte do escopo. Para master, permite consultar o evento escolhido
-      // sem remover o isolamento dos usuários comuns.
-      whereClause = 'b.evento_id = @evento_id AND b.empresa_id = @evento_empresa_id';
+      // O evento é a fonte do escopo. Aceita tanto o vínculo direto quanto o legado
+      // em evento_brincadeiras, sempre mantendo o isolamento pela empresa do evento.
+      whereClause = `LOWER(b.empresa_id) = LOWER(@evento_empresa_id)
+        AND (
+          LOWER(b.evento_id) = LOWER(@evento_id)
+          OR EXISTS (
+            SELECT 1
+            FROM evento_brincadeiras eb
+            WHERE LOWER(eb.brincadeira_id) = LOWER(b.id)
+              AND LOWER(eb.evento_id) = LOWER(@evento_id)
+          )
+        )`;
+      eventoSelect = '@evento_id AS evento_id';
       params.evento_id = evento_id;
       params.evento_empresa_id = evento.empresa_id;
     }
@@ -33,7 +44,7 @@ router.get('/', verifyToken, async (req, res) => {
     console.log(`📋 [BRINCADEIRAS] Buscando jogos${evento_id ? ` do evento ${evento_id}` : ''}`);
     const brincadeiras = await allQuery(
       `SELECT b.id, b.name, b.description, b.rules, b.type, b.duration, b.default_points,
-              b.empresa_id, b.status, b.evento_id, b.checkpoints
+              b.empresa_id, b.status, ${eventoSelect}, b.checkpoints
        FROM brincadeiras b
        WHERE ${whereClause}
        ORDER BY b.name`,

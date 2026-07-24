@@ -31,3 +31,6 @@ Thumbs.db
 # Arquivos temporários locais
 *.tmp
 *.temp
+
+# Inventário local do banco (pode conter nomes internos do schema)
+schema-export.json

@@ -4,7 +4,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 const path = require('path');
-const { query, allQuery, queryOne } = require('./database');
+const { query, allQuery, queryOne, DB_DRIVER } = require('./database');
 
 // Importar rotas
 const authRoutes = require('./routes/auth');
@@ -238,7 +238,7 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [INICIAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos WHERE id = @eventoId`,
+      `SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -247,27 +247,39 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
       console.error(`❌ [INICIAR-JOGO] Evento NÃO ENCONTRADO no banco de dados!`);
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
-    if (!isMaster(req) && eventoAntes.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req) && String(eventoAntes.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
     const selectedGame = await queryOne(
-      `SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE id = @gameId`,
+      `SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@gameId)`,
       { gameId }
     );
     if (!selectedGame) {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
-    if (!isMaster(req) && selectedGame.empresa_id !== req.user.empresa_id) {
-      return res.status(403).json({ error: 'Acesso negado: jogo não pertence à sua empresa' });
+    if (String(selectedGame.empresa_id).toLowerCase() !== String(eventoAntes.empresa_id).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: jogo e evento pertencem a empresas diferentes' });
     }
-    if (!selectedGame.evento_id || String(selectedGame.evento_id).trim().toLowerCase() !== String(eventoId).trim().toLowerCase()) {
+
+    const directEventMatch = selectedGame.evento_id
+      && String(selectedGame.evento_id).trim().toLowerCase() === String(eventoId).trim().toLowerCase();
+    const linkedEvent = directEventMatch
+      ? true
+      : await queryOne(
+        `SELECT evento_id FROM evento_brincadeiras
+         WHERE LOWER(brincadeira_id) = LOWER(@gameId)
+           AND LOWER(evento_id) = LOWER(@eventoId)`,
+        { gameId, eventoId }
+      );
+    if (!directEventMatch && !linkedEvent) {
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
     const gameType = selectedGame.type === TREASURE_GAME_TYPE ? TREASURE_GAME_TYPE : 'zone_conquest';
+    let treasureStart = null;
     if (gameType === TREASURE_GAME_TYPE) {
-      await startTreasureGame(eventoId, selectedGame.id);
+      treasureStart = await startTreasureGame(eventoId, selectedGame.id);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
     } else {
       await stopTreasureGame(eventoId);
@@ -280,14 +292,14 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
         territory_locked_until = NULL,
         territory_cooldown_until = NULL,
         last_conquered_at = NULL
-      WHERE evento_id = @eventoId
+      WHERE LOWER(evento_id) = LOWER(@eventoId)
     `, { eventoId });
     console.log(`   ✓ Territórios do evento limpos para uma nova partida`);
     
     // ✅ IMPORTANTE: Atualizar o banco de dados
     console.log(`📝 [INICIAR-JOGO] Atualizando evento no banco de dados...`);
     const updateResult = await query(
-      `UPDATE eventos SET status = @status WHERE id = @eventoId`,
+      `UPDATE eventos SET status = @status WHERE LOWER(id) = LOWER(@eventoId)`,
       { status: 'active', eventoId }
     );
     console.log(`   Atualização executada`);
@@ -295,7 +307,7 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
     // ✅ VERIFICAR SE REALMENTE ATUALIZOU
     console.log(`📋 [INICIAR-JOGO] Verificando status DEPOIS de atualizar...`);
     const eventoDepois = await queryOne(
-      `SELECT id, status FROM eventos WHERE id = @eventoId`,
+      `SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
       { eventoId }
     );
     console.log(`   Status DEPOIS: ${eventoDepois?.status || 'NÃO ENCONTRADO'}`);
@@ -335,8 +347,16 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
       payload: {
         gameId,
         gameName,
+        gameType,
         eventoId,
         startedAt: gameStatus.startedAt,
+        treasure: treasureStart ? {
+          startingTeamId: treasureStart.startingTeamId,
+          startingTeamName: treasureStart.startingTeamName,
+          turnTeamId: treasureStart.turnTeamId,
+          turnTeamName: treasureStart.turnTeamName,
+          targetCheckpointId: treasureStart.targetCheckpointId,
+        } : null,
       }
     });
     
@@ -346,8 +366,16 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
       payload: {
         gameId,
         gameName,
+        gameType,
         eventoId,
         startedAt: gameStatus.startedAt,
+        treasure: treasureStart ? {
+          startingTeamId: treasureStart.startingTeamId,
+          startingTeamName: treasureStart.startingTeamName,
+          turnTeamId: treasureStart.turnTeamId,
+          turnTeamName: treasureStart.turnTeamName,
+          targetCheckpointId: treasureStart.targetCheckpointId,
+        } : null,
       }
     });
     
@@ -1004,7 +1032,12 @@ server.listen(PORT, async () => {
   ╚═══════════════════════════════════════╝
   `);
   
-  // ✨ Executar migração 017 automaticamente no startup
+  if (DB_DRIVER !== 'postgres' && DB_DRIVER !== 'postgresql') {
+    // ✨ Executar migrações legadas do SQL Server somente no driver SQL Server
+    // Migrações PostgreSQL serão versionadas separadamente, sem T-SQL no startup.
+    console.log('🔧 Verificando e executando migrações legadas do SQL Server...\n');
+
+    // ✨ Executar migração 017 automaticamente no startup
   try {
     console.log('🔧 Verificando e executando migração 017...\n');
     
@@ -1189,6 +1222,9 @@ server.listen(PORT, async () => {
     console.log('✅ Migração 022 dos cronômetros do Caça ao Tesouro concluída!\n');
   } catch (err) {
     console.error('⚠️ Erro na migração 022 do Caça ao Tesouro:', err.message, '\n');
+  }
+  } else {
+    console.log('ℹ️ Migrações T-SQL do SQL Server ignoradas: DB_DRIVER=postgres.\n');
   }
 });
 

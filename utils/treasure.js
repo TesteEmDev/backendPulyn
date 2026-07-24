@@ -16,9 +16,18 @@ async function getGameForEvent(eventoId, brincadeiraId) {
   return queryOne(
     `SELECT b.id, b.name, b.type, b.checkpoints, b.evento_id, e.empresa_id
      FROM brincadeiras b
-     INNER JOIN eventos e ON e.id = CONVERT(NVARCHAR(36), b.evento_id)
-     WHERE b.id = @brincadeiraId
-       AND CONVERT(NVARCHAR(36), b.evento_id) = @eventoId`,
+     INNER JOIN eventos e ON LOWER(e.id) = LOWER(@eventoId)
+     WHERE LOWER(b.id) = LOWER(@brincadeiraId)
+       AND LOWER(b.empresa_id) = LOWER(e.empresa_id)
+       AND (
+         LOWER(b.evento_id) = LOWER(@eventoId)
+         OR EXISTS (
+           SELECT 1
+           FROM evento_brincadeiras eb
+           WHERE LOWER(eb.brincadeira_id) = LOWER(b.id)
+             AND LOWER(eb.evento_id) = LOWER(@eventoId)
+         )
+       )`,
     { brincadeiraId, eventoId }
   );
 }
