@@ -87,7 +87,7 @@ router.post('/', async (req, res) => {
         { uid: normalizedUid }
       );
 
-      if (pulseira && pulseira.empresa_id !== checkpoint.empresa_id) {
+      if (pulseira && String(pulseira.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
         console.log(`❌ [LEITURA] Pulseira de outra empresa no checkpoint ${checkpointId}`);
         return res.status(403).json({ ok: false, error: 'Pulseira não pertence a esta empresa' });
       }
@@ -109,7 +109,7 @@ router.post('/', async (req, res) => {
     
     // ✅ VALIDAÇÃO CROSS-TENANT/EVENTO: a criança deve pertencer ao mesmo
     // tenant e ao mesmo evento do checkpoint que recebeu a leitura.
-    if (crianca.empresa_id !== checkpoint.empresa_id) {
+    if (String(crianca.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
       console.log(`❌ [LEITURA] Violação de segurança: criança da empresa ${crianca.empresa_id} tentou usar checkpoint da empresa ${checkpoint.empresa_id}`);
       return res.status(403).json({ 
         ok: false,
@@ -117,7 +117,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    if (crianca.evento_id !== checkpoint.evento_id) {
+    if (String(crianca.evento_id).trim().toLowerCase() !== String(checkpoint.evento_id).trim().toLowerCase()) {
       console.log(`⚠️ [LEITURA] Pulseira cadastrada em outro evento: criança=${crianca.evento_id}, checkpoint=${checkpoint.evento_id}`);
       return res.json({
         ok: true,
@@ -132,7 +132,7 @@ router.post('/', async (req, res) => {
     console.log(`   ✅ [LEITURA] Pulseira cadastrada: ${crianca.name} (evento_id: ${crianca.evento_id}, empresa_id: ${crianca.empresa_id})`);
     
     // ✨ NOVO: Validar se o evento está ACTIVE antes de processar pontos
-    const evento = await queryOne('SELECT id, status FROM eventos WHERE id = @id', { id: crianca.evento_id });
+    const evento = await queryOne('SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@id)', { id: crianca.evento_id });
     
     console.log(`   📋 [LEITURA] Verificando status do evento...`);
     console.log(`      ID do Evento: ${crianca.evento_id}`);
@@ -264,7 +264,7 @@ router.post('/', async (req, res) => {
     
     // Depois que o lock inicial termina, o mesmo time não pode pontuar
     // novamente enquanto continuar sendo o dono. Apenas outro time troca o domínio.
-    if (crianca.time_id && checkpointData.territory_owner_time_id === crianca.time_id) {
+    if (crianca.time_id && String(checkpointData.territory_owner_time_id).trim().toLowerCase() === String(crianca.time_id).trim().toLowerCase()) {
       console.log(`   🏳️ [LEITURA] O time ${crianca.time_id} já domina este território`);
       return res.json({ 
         ok: true, registered: true, authorized: false,

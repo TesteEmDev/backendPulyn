@@ -4,6 +4,12 @@ const { query, queryOne, allQuery } = require('../database');
 const TREASURE_GAME_TYPE = 'treasure_hunt';
 const TREASURE_TURN_DELAY_MS = 10 * 1000;
 
+function sameId(left, right) {
+  return left !== null && left !== undefined
+    && right !== null && right !== undefined
+    && String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
+}
+
 function parseJson(value, fallback = []) {
   try {
     return value ? JSON.parse(value) : fallback;
@@ -35,7 +41,7 @@ async function getGameForEvent(eventoId, brincadeiraId) {
 async function getActiveSession(eventoId) {
   return queryOne(
     `SELECT TOP 1 * FROM caca_tesouro_partidas
-     WHERE evento_id = @eventoId AND status = 'active'
+     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'
      ORDER BY started_at DESC`,
     { eventoId }
   );
@@ -44,7 +50,7 @@ async function getActiveSession(eventoId) {
 async function getLatestSession(eventoId) {
   return queryOne(
     `SELECT TOP 1 * FROM caca_tesouro_partidas
-     WHERE evento_id = @eventoId
+     WHERE LOWER(evento_id) = LOWER(@eventoId)
      ORDER BY started_at DESC`,
     { eventoId }
   );
@@ -54,7 +60,7 @@ async function getEventCheckpoints(eventoId) {
   return allQuery(
     `SELECT id, territory_owner_time_id
      FROM checkpoints
-     WHERE evento_id = @eventoId`,
+     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
     { eventoId }
   );
 }
@@ -65,11 +71,12 @@ async function getTeamRaceTimes(eventoId, session) {
             r.started_at, r.completed_at, r.elapsed_ms
      FROM times t
      LEFT JOIN caca_tesouro_tempos r
-       ON r.time_id = t.id AND r.partida_id = @partidaId
-     WHERE t.evento_id = @eventoId
+       ON LOWER(r.time_id) = LOWER(t.id) AND LOWER(r.partida_id) = LOWER(@partidaId)
+     WHERE LOWER(t.evento_id) = LOWER(@eventoId)
        AND EXISTS (
          SELECT 1 FROM criancas c
-         WHERE c.evento_id = @eventoId AND c.time_id = t.id
+         WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+           AND LOWER(c.time_id) = LOWER(t.id)
        )
      ORDER BY t.name`,
     { eventoId, partidaId: session.id }
@@ -101,7 +108,7 @@ async function startTeamRaceTimer(partidaId, teamId, startedAt) {
   await query(
     `UPDATE caca_tesouro_tempos
      SET started_at = COALESCE(started_at, @startedAt)
-     WHERE partida_id = @partidaId AND time_id = @teamId`,
+     WHERE LOWER(partida_id) = LOWER(@partidaId) AND LOWER(time_id) = LOWER(@teamId)`,
     { partidaId, teamId, startedAt }
   );
 }
@@ -112,7 +119,9 @@ async function completeTeamRace(partidaId, teamId, completedAt) {
      SET started_at = COALESCE(started_at, @completedAt),
          completed_at = @completedAt,
          elapsed_ms = DATEDIFF_BIG(MILLISECOND, COALESCE(started_at, @completedAt), @completedAt)
-     WHERE partida_id = @partidaId AND time_id = @teamId AND completed_at IS NULL`,
+     WHERE LOWER(partida_id) = LOWER(@partidaId)
+       AND LOWER(time_id) = LOWER(@teamId)
+       AND completed_at IS NULL`,
     { partidaId, teamId, completedAt }
   );
 }
@@ -127,10 +136,11 @@ async function getParticipatingTeams(eventoId) {
   return allQuery(
     `SELECT t.id, t.name, t.color
      FROM times t
-     WHERE t.evento_id = @eventoId
+     WHERE LOWER(t.evento_id) = LOWER(@eventoId)
        AND EXISTS (
          SELECT 1 FROM criancas c
-         WHERE c.evento_id = @eventoId AND c.time_id = t.id
+         WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+           AND LOWER(c.time_id) = LOWER(t.id)
        )
      ORDER BY t.name`,
     { eventoId }
@@ -145,7 +155,7 @@ function chooseRandom(values) {
 async function stopTreasureGame(eventoId) {
   await query(
     `UPDATE caca_tesouro_partidas SET status = 'finished', finished_at = GETDATE()
-     WHERE evento_id = @eventoId AND status = 'active'`,
+     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
     { eventoId }
   );
 }
@@ -159,24 +169,40 @@ async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId 
   const checkpoints = await getEventCheckpoints(eventoId);
   const candidates = checkpoints
     // Nunca repetir imediatamente o checkpoint que acabou de ser concluído.
-    .filter(checkpoint => String(checkpoint.id) !== String(excludedCheckpointId))
+    .filter(checkpoint => !sameId(checkpoint.id, excludedCheckpointId))
     // O próximo alvo precisa ser um checkpoint que ainda não tenha a cor
     // da equipe que receberá a vez.
     .filter(checkpoint => (
       !checkpoint.territory_owner_time_id
-      || String(checkpoint.territory_owner_time_id) !== String(teamId)
+      || !sameId(checkpoint.territory_owner_time_id, teamId)
     ))
     .map(checkpoint => String(checkpoint.id));
 
-  return chooseRandom(candidates);
+  if (candidates.length) {
+    return chooseRandom(candidates);
+  }
+
+  // Não deixar uma partida ativa sem alvo. Isso pode ocorrer quando os dados
+  // de domínio já estão parcialmente preenchidos ou quando há poucos
+  // checkpoints. Neste caso, permite repetir qualquer checkpoint diferente
+  // do último; se houver apenas um, repete o próprio checkpoint.
+  const fallbackCandidates = checkpoints
+    .filter(checkpoint => !sameId(checkpoint.id, excludedCheckpointId))
+    .map(checkpoint => String(checkpoint.id));
+
+  if (fallbackCandidates.length) {
+    return chooseRandom(fallbackCandidates);
+  }
+
+  return excludedCheckpointId ? String(excludedCheckpointId) : null;
 }
 
 async function getTeamOwnershipProgress(eventoId, teamId) {
   const result = await queryOne(
     `SELECT COUNT(*) AS total,
-       SUM(CASE WHEN territory_owner_time_id = @teamId THEN 1 ELSE 0 END) AS owned
+       SUM(CASE WHEN LOWER(territory_owner_time_id) = LOWER(@teamId) THEN 1 ELSE 0 END) AS owned
      FROM checkpoints
-     WHERE evento_id = @eventoId`,
+     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
     { eventoId, teamId }
   );
 
@@ -248,7 +274,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
         timeId: team.id,
         // O cronômetro da equipe sorteada começa no início da partida.
         // O da outra equipe começa quando sua primeira vez for liberada.
-        startedAt: String(team.id) === String(startingTeam.id) ? now : null,
+        startedAt: sameId(team.id, startingTeam.id) ? now : null,
       }
     );
   }
@@ -271,7 +297,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
 
 async function getCheckpointTreasureStatus(checkpointId) {
   const checkpoint = await queryOne(
-    'SELECT id, evento_id FROM checkpoints WHERE id = @checkpointId',
+    'SELECT id, evento_id FROM checkpoints WHERE LOWER(id) = LOWER(@checkpointId)',
     { checkpointId }
   );
   if (!checkpoint) return { gameType: 'none', treasureTarget: false };
@@ -282,7 +308,7 @@ async function getCheckpointTreasureStatus(checkpointId) {
   const completedCheckpointIds = parseJson(session.completed_checkpoint_ids, []);
   return {
     gameType: TREASURE_GAME_TYPE,
-    treasureTarget: String(session.target_checkpoint_id) === String(checkpointId),
+    treasureTarget: sameId(session.target_checkpoint_id, checkpointId),
     treasureRound: session.round_number,
     treasureTargetCheckpointId: session.target_checkpoint_id,
     treasureCompletedCheckpoints: completedCheckpointIds,
@@ -364,14 +390,19 @@ async function getTreasureEventStatus(eventoId) {
 async function getTeamsProgress(eventoId, session) {
   const teams = await allQuery(
     `SELECT t.id, t.name, t.color,
-       (SELECT COUNT(*) FROM criancas c WHERE c.evento_id = @eventoId AND c.time_id = t.id) AS total,
+       (SELECT COUNT(*) FROM criancas c
+        WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+          AND LOWER(c.time_id) = LOWER(t.id)) AS total,
        (SELECT COUNT(*) FROM caca_tesouro_scans s
-        WHERE s.partida_id = @partidaId AND s.round_number = @roundNumber AND s.time_id = t.id) AS scanned
+        WHERE LOWER(s.partida_id) = LOWER(@partidaId)
+          AND s.round_number = @roundNumber
+          AND LOWER(s.time_id) = LOWER(t.id)) AS scanned
      FROM times t
-     WHERE t.evento_id = @eventoId
+     WHERE LOWER(t.evento_id) = LOWER(@eventoId)
        AND EXISTS (
          SELECT 1 FROM criancas c
-         WHERE c.evento_id = @eventoId AND c.time_id = t.id
+         WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+           AND LOWER(c.time_id) = LOWER(t.id)
        )
      ORDER BY t.name`,
     { eventoId, partidaId: session.id, roundNumber: session.round_number }
@@ -400,7 +431,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     ? await queryOne('SELECT name FROM times WHERE id = @timeId', { timeId: turnTeamId })
     : null;
 
-  if (turnTeamId && String(turnTeamId) !== String(crianca.time_id)) {
+  if (turnTeamId && !sameId(turnTeamId, crianca.time_id)) {
     return {
       handled: true,
       accepted: false,
@@ -422,7 +453,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     };
   }
 
-  if (String(session.target_checkpoint_id) !== String(checkpointId)) {
+  if (!sameId(session.target_checkpoint_id, checkpointId)) {
     return {
       handled: true,
       accepted: false,
@@ -436,7 +467,8 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   }
 
   const members = await allQuery(
-    `SELECT id FROM criancas WHERE evento_id = @eventoId AND time_id = @timeId`,
+    `SELECT id FROM criancas
+     WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(time_id) = LOWER(@timeId)`,
     { eventoId, timeId: crianca.time_id }
   );
   if (!members.length) {
@@ -445,13 +477,17 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
 
   const alreadyScanned = await queryOne(
     `SELECT id FROM caca_tesouro_scans
-     WHERE partida_id = @partidaId AND round_number = @roundNumber AND crianca_id = @criancaId`,
+     WHERE LOWER(partida_id) = LOWER(@partidaId)
+       AND round_number = @roundNumber
+       AND LOWER(crianca_id) = LOWER(@criancaId)`,
     { partidaId: session.id, roundNumber: session.round_number, criancaId: crianca.id }
   );
   if (alreadyScanned) {
     const duplicateCount = await queryOne(
       `SELECT COUNT(*) AS total FROM caca_tesouro_scans
-       WHERE partida_id = @partidaId AND round_number = @roundNumber AND time_id = @timeId`,
+       WHERE LOWER(partida_id) = LOWER(@partidaId)
+         AND round_number = @roundNumber
+         AND LOWER(time_id) = LOWER(@timeId)`,
       { partidaId: session.id, roundNumber: session.round_number, timeId: crianca.time_id }
     );
     return {
@@ -489,7 +525,9 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     if (String(error.message || '').toLowerCase().includes('unique')) {
       const duplicateCount = await queryOne(
         `SELECT COUNT(*) AS total FROM caca_tesouro_scans
-         WHERE partida_id = @partidaId AND round_number = @roundNumber AND time_id = @timeId`,
+         WHERE LOWER(partida_id) = LOWER(@partidaId)
+           AND round_number = @roundNumber
+           AND LOWER(time_id) = LOWER(@timeId)`,
         { partidaId: session.id, roundNumber: session.round_number, timeId: crianca.time_id }
       );
       return {
@@ -506,7 +544,9 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
 
   const countResult = await queryOne(
     `SELECT COUNT(*) AS total FROM caca_tesouro_scans
-     WHERE partida_id = @partidaId AND round_number = @roundNumber AND time_id = @timeId`,
+     WHERE LOWER(partida_id) = LOWER(@partidaId)
+       AND round_number = @roundNumber
+       AND LOWER(time_id) = LOWER(@timeId)`,
     { partidaId: session.id, roundNumber: session.round_number, timeId: crianca.time_id }
   );
   const scanned = Number(countResult?.total || 0);
@@ -539,7 +579,8 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   await query(
     `UPDATE checkpoints SET territory_owner_time_id = @timeId,
        territory_locked_until = NULL, territory_cooldown_until = NULL, last_conquered_at = @now
-     WHERE id = @checkpointId AND evento_id = @eventoId`,
+     WHERE LOWER(id) = LOWER(@checkpointId)
+       AND LOWER(evento_id) = LOWER(@eventoId)`,
     { timeId: crianca.time_id, now, checkpointId, eventoId }
   );
 
@@ -552,7 +593,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   const raceFinished = raceTimes.length === 2 && raceTimes.every(teamRace => teamRace.completed);
   const winningTeam = raceFinished ? getFastestCompletedTeam(raceTimes) : null;
   const currentTeamRace = raceTimes.find(
-    teamRace => String(teamRace.teamId) === String(crianca.time_id)
+    teamRace => sameId(teamRace.teamId, crianca.time_id)
   ) || null;
   const unfinishedTeams = raceTimes.filter(teamRace => !teamRace.completed);
 
@@ -561,7 +602,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   const nextTurnTeam = raceFinished
     ? null
     : ownership.won
-      ? unfinishedTeams.find(teamRace => String(teamRace.teamId) !== String(crianca.time_id))
+      ? unfinishedTeams.find(teamRace => !sameId(teamRace.teamId, crianca.time_id))
         || unfinishedTeams[0]
         || null
       : currentTeamRace;
@@ -633,7 +674,8 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
 
   if (raceFinished) {
     await query(
-      `UPDATE eventos SET status = 'scheduled' WHERE id = @eventoId AND status = 'active'`,
+      `UPDATE eventos SET status = 'scheduled'
+       WHERE LOWER(id) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
   }
@@ -643,7 +685,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     accepted: true,
     teamComplete: true,
     roundComplete: true,
-    roundNumber: session.round_number,
+    roundNumber: raceFinished ? session.round_number : session.round_number + 1,
     finished: raceFinished,
     scanned,
     total: members.length,

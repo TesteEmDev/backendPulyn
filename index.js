@@ -102,7 +102,8 @@ global.broadcastToEvent = (eventoId, message) => {
   console.log(`📡 Broadcasting para evento ${eventoId}: ${typeof message === 'object' ? message.type : message}`);
   
   wss.clients.forEach((client) => {
-    if (client.readyState === 1 && client.eventoId === eventoId) {
+    if (client.readyState === 1
+      && String(client.eventoId || '').trim().toLowerCase() === String(eventoId || '').trim().toLowerCase()) {
       client.send(msgStr);
     }
   });
@@ -648,7 +649,8 @@ let currentGameType = 'none';
 
 // Permite que o processamento NFC encerre o estado global quando a última etapa termina.
 global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString()) => {
-  if (gameStatus.eventoId && String(gameStatus.eventoId) !== String(eventoId)) return;
+  if (gameStatus.eventoId
+    && String(gameStatus.eventoId).trim().toLowerCase() !== String(eventoId).trim().toLowerCase()) return;
 
   gameStatus = {
     isRunning: false,

@@ -22,11 +22,12 @@ router.get('/checkpoints/:checkpointId/status', async (req, res) => {
 router.get('/eventos/:eventoId/status', verifyToken, async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @eventoId',
+      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
       { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req)
+      && String(evento.empresa_id).trim().toLowerCase() !== String(req.user.empresa_id).trim().toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
