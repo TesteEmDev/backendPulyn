@@ -119,7 +119,10 @@ async function completeTeamRace(partidaId, teamId, completedAt) {
     `UPDATE caca_tesouro_tempos
      SET started_at = COALESCE(started_at, @completedAt),
          completed_at = @completedAt,
-         elapsed_ms = DATEDIFF_BIG(MILLISECOND, COALESCE(started_at, @completedAt), @completedAt)
+         elapsed_ms = CASE
+           WHEN started_at IS NULL THEN 0
+           ELSE DATEDIFF_BIG(MILLISECOND, started_at, @completedAt)
+         END
      WHERE LOWER(partida_id) = LOWER(@partidaId)
        AND LOWER(time_id) = LOWER(@teamId)
        AND completed_at IS NULL`,
