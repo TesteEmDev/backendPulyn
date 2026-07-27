@@ -5,6 +5,33 @@ const { query, queryOne, allQuery } = require('../database');
 const { verifyToken } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 
+function sameId(left, right) {
+  return left !== null && left !== undefined
+    && right !== null && right !== undefined
+    && String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
+}
+
+function removeCheckpointFromJson(value, checkpointId) {
+  if (!value) return { changed: false, value };
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) return { changed: false, value };
+
+    const filtered = parsed.filter(item => {
+      const itemId = item && typeof item === 'object' ? item.id : item;
+      return !sameId(itemId, checkpointId);
+    });
+
+    return {
+      changed: filtered.length !== parsed.length,
+      value: JSON.stringify(filtered),
+    };
+  } catch {
+    return { changed: false, value };
+  }
+}
+
 // ✨ NOVO: Heartbeat - Checkpoint registra que está online
 // SEM autenticação: Arduino envia heartbeat sem token
 router.post('/:checkpoint_id/heartbeat', async (req, res) => {
@@ -243,9 +270,8 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
     const { evento_id, checkpoint_id } = req.params;
     const empresa_id = req.user.empresa_id;
 
-    // ✅ Validar que evento pertence à empresa
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@id)',
       { id: evento_id }
     );
 
@@ -253,13 +279,15 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (evento.empresa_id !== empresa_id) {
+    if (!sameId(evento.empresa_id, empresa_id)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // ✅ Verificar se checkpoint existe E pertence à empresa
     const checkpoint = await queryOne(
-      'SELECT id FROM checkpoints WHERE id = @id AND evento_id = @evento_id AND empresa_id = @empresa_id',
+      `SELECT id FROM checkpoints
+       WHERE LOWER(id) = LOWER(@id)
+         AND LOWER(evento_id) = LOWER(@evento_id)
+         AND LOWER(empresa_id) = LOWER(@empresa_id)`,
       { id: checkpoint_id, evento_id, empresa_id }
     );
 
@@ -267,10 +295,101 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
 
-    // Deletar checkpoint
+    // Não alterar a estrutura de uma partida enquanto o jogo está ativo.
+    const activeTreasure = await queryOne(
+      `SELECT id FROM caca_tesouro_partidas
+       WHERE LOWER(evento_id) = LOWER(@evento_id) AND status = 'active'`,
+      { evento_id }
+    );
+    if (activeTreasure) {
+      return res.status(409).json({
+        error: 'Não é possível excluir checkpoint enquanto o Caça ao Tesouro está ativo. Finalize o jogo primeiro.',
+      });
+    }
+
+    // Remover o checkpoint de históricos JSON de partidas encerradas.
+    const treasureSessions = await allQuery(
+      `SELECT id, target_checkpoint_id, completed_checkpoint_ids
+       FROM caca_tesouro_partidas
+       WHERE LOWER(evento_id) = LOWER(@evento_id)`,
+      { evento_id }
+    );
+    for (const session of treasureSessions) {
+      const completed = removeCheckpointFromJson(session.completed_checkpoint_ids, checkpoint_id);
+      const targetWasDeleted = sameId(session.target_checkpoint_id, checkpoint_id);
+      if (completed.changed || targetWasDeleted) {
+        await query(
+          `UPDATE caca_tesouro_partidas
+           SET target_checkpoint_id = @targetCheckpointId,
+               completed_checkpoint_ids = @completedCheckpointIds
+           WHERE LOWER(id) = LOWER(@partidaId)`,
+          {
+            partidaId: session.id,
+            targetCheckpointId: targetWasDeleted ? null : session.target_checkpoint_id,
+            completedCheckpointIds: completed.changed
+              ? completed.value
+              : session.completed_checkpoint_ids,
+          }
+        );
+      }
+    }
+
+    // Remover referências serializadas da configuração dos jogos do evento.
+    const brincadeiras = await allQuery(
+      `SELECT id, checkpoints
+       FROM brincadeiras
+       WHERE LOWER(empresa_id) = LOWER(@empresa_id)
+         AND (
+           LOWER(evento_id) = LOWER(@evento_id)
+           OR EXISTS (
+             SELECT 1 FROM evento_brincadeiras eb
+             WHERE LOWER(eb.brincadeira_id) = LOWER(brincadeiras.id)
+               AND LOWER(eb.evento_id) = LOWER(@evento_id)
+           )
+         )`,
+      { empresa_id: evento.empresa_id, evento_id }
+    );
+    for (const brincadeira of brincadeiras) {
+      const cleaned = removeCheckpointFromJson(brincadeira.checkpoints, checkpoint_id);
+      if (cleaned.changed) {
+        await query(
+          `UPDATE brincadeiras SET checkpoints = @checkpoints
+           WHERE LOWER(id) = LOWER(@brincadeiraId)`,
+          { brincadeiraId: brincadeira.id, checkpoints: cleaned.value }
+        );
+      }
+    }
+
+    // As FKs do schema não usam ON DELETE CASCADE; limpar dependências antes
+    // do registro principal evita a violação de FK sem afetar outros eventos.
     await query(
-      'DELETE FROM checkpoints WHERE id = @id AND evento_id = @evento_id AND empresa_id = @empresa_id',
-      { id: checkpoint_id, evento_id, empresa_id }
+      `DELETE FROM caca_tesouro_scans
+       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)
+         AND LOWER(evento_id) = LOWER(@evento_id)`,
+      { checkpointId: checkpoint.id, evento_id }
+    );
+    await query(
+      `DELETE FROM pontuacoes
+       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)
+         AND LOWER(evento_id) = LOWER(@evento_id)`,
+      { checkpointId: checkpoint.id, evento_id }
+    );
+    await query(
+      `DELETE FROM leituras
+       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)`,
+      { checkpointId: checkpoint.id }
+    );
+    await query(
+      `DELETE FROM checkpoint_tags
+       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)`,
+      { checkpointId: checkpoint.id }
+    );
+    await query(
+      `DELETE FROM checkpoints
+       WHERE LOWER(id) = LOWER(@checkpointId)
+         AND LOWER(evento_id) = LOWER(@evento_id)
+         AND LOWER(empresa_id) = LOWER(@empresa_id)`,
+      { checkpointId: checkpoint.id, evento_id, empresa_id }
     );
 
     res.json({ success: true, message: 'Checkpoint excluído com sucesso' });
