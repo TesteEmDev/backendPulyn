@@ -242,6 +242,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
 
   await stopTreasureGame(eventoId);
   const now = new Date();
+  const initialTurnAvailableAt = new Date(now.getTime() + TREASURE_TURN_DELAY_MS);
   const targetCheckpointId = chooseRandom(ids);
   const partidaId = uuidv4();
 
@@ -259,11 +260,11 @@ async function startTreasureGame(eventoId, brincadeiraId) {
       brincadeiraId,
       startingTeamId: startingTeam.id,
       turnTeamId: startingTeam.id,
-      turnAvailableAt: now,
+      turnAvailableAt: initialTurnAvailableAt,
       targetCheckpointId,
       completedCheckpointIds: JSON.stringify([]),
       startedAt: now,
-      roundStartedAt: now,
+      roundStartedAt: initialTurnAvailableAt,
     }
   );
 
@@ -277,9 +278,9 @@ async function startTreasureGame(eventoId, brincadeiraId) {
         partidaId,
         eventoId,
         timeId: team.id,
-        // O cronômetro da equipe sorteada começa no início da partida.
-        // O da outra equipe começa quando sua primeira vez for liberada.
-        startedAt: sameId(team.id, startingTeam.id) ? now : null,
+        // A equipe sorteada começa a correr depois dos 10 segundos de preparação.
+        // O cronômetro da outra equipe começa quando sua primeira vez for liberada.
+        startedAt: sameId(team.id, startingTeam.id) ? initialTurnAvailableAt : null,
       }
     );
   }
@@ -293,7 +294,10 @@ async function startTreasureGame(eventoId, brincadeiraId) {
     startingTeamName: startingTeam.name,
     turnTeamId: startingTeam.id,
     turnTeamName: startingTeam.name,
-    turnAvailableAt: now,
+    turnAvailableAt: initialTurnAvailableAt.toISOString(),
+    turnRemainingSeconds: TREASURE_TURN_DELAY_MS / 1000,
+    turnWaitSeconds: TREASURE_TURN_DELAY_MS / 1000,
+    initialWait: true,
     targetCheckpointId,
     completedCheckpointIds: [],
     status: 'active',
@@ -372,6 +376,7 @@ async function getTreasureEventStatus(eventoId) {
   const turnRemainingSeconds = turnAvailableAt && turnAvailableAt > new Date()
     ? Math.ceil((turnAvailableAt.getTime() - Date.now()) / 1000)
     : 0;
+  const initialWait = Number(session.round_number) === 1 && turnRemainingSeconds > 0;
 
   return {
     active: true,
@@ -384,6 +389,7 @@ async function getTreasureEventStatus(eventoId) {
     turnTeamName: turnTeam?.name || null,
     turnAvailableAt: session.turn_available_at || null,
     turnRemainingSeconds,
+    initialWait,
     targetCheckpointId: session.target_checkpoint_id,
     completedCheckpointIds: parseJson(session.completed_checkpoint_ids, []),
     totalCheckpoints: checkpoints.length,
