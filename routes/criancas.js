@@ -207,6 +207,76 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
   }
 });
 
+// Excluir participante do evento
+router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, res) => {
+  try {
+    const allowedRoles = ['admin', 'reception', 'game_master'];
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Acesso negado para excluir participantes' });
+    }
+
+    const { evento_id, crianca_id } = req.params;
+    const crianca = await queryOne(
+      `SELECT * FROM criancas
+       WHERE id = @criancaId
+       AND evento_id = @eventoId
+       AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      {
+        criancaId: crianca_id,
+        eventoId: evento_id,
+        empresaId: req.user.empresa_id,
+        isMaster: isMaster(req) ? 1 : 0
+      }
+    );
+
+    if (!crianca) {
+      return res.status(404).json({ error: 'Participante não encontrado' });
+    }
+
+    // Liberar a pulseira antes de remover a criança por causa da FK pulseiras.crianca_id.
+    await query(
+      `UPDATE pulseiras
+       SET status = @status, crianca_id = NULL
+       WHERE crianca_id = @criancaId
+       AND empresa_id = @empresaId`,
+      { status: 'disponivel', criancaId: crianca_id, empresaId: crianca.empresa_id }
+    );
+
+    // Remover registros que possuem FK obrigatória para a criança.
+    await query('DELETE FROM crianca_conquistas WHERE crianca_id = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM caca_tesouro_scans WHERE crianca_id = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM pontuacoes WHERE crianca_id = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM leituras WHERE crianca_id = @criancaId', { criancaId: crianca_id });
+
+    // Manter a pontuação do time consistente com a remoção do participante.
+    if (crianca.time_id && crianca.scores) {
+      await query(
+        `UPDATE times
+         SET points = CASE
+           WHEN points >= @scores THEN points - @scores
+           ELSE 0
+         END
+         WHERE id = @timeId AND evento_id = @eventoId`,
+        { scores: crianca.scores, timeId: crianca.time_id, eventoId: evento_id }
+      );
+    }
+
+    await query(
+      `DELETE FROM criancas
+       WHERE id = @criancaId
+       AND evento_id = @eventoId
+       AND empresa_id = @empresaId`,
+      { criancaId: crianca_id, eventoId: evento_id, empresaId: crianca.empresa_id }
+    );
+
+    console.log(`✅ Participante ${crianca.name} (${crianca_id}) excluído do evento ${evento_id}`);
+    res.json({ ok: true, message: 'Participante excluído com sucesso' });
+  } catch (err) {
+    console.error('❌ Erro ao excluir participante:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Desvincular pulseira
 router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
   try {
