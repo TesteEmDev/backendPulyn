@@ -60,7 +60,8 @@ async function getEventCheckpoints(eventoId) {
   return allQuery(
     `SELECT id, territory_owner_time_id
      FROM checkpoints
-     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+     WHERE LOWER(evento_id) = LOWER(@eventoId)
+       AND LOWER(status) = 'online'`,
     { eventoId }
   );
 }
@@ -202,7 +203,8 @@ async function getTeamOwnershipProgress(eventoId, teamId) {
     `SELECT COUNT(*) AS total,
        SUM(CASE WHEN LOWER(territory_owner_time_id) = LOWER(@teamId) THEN 1 ELSE 0 END) AS owned
      FROM checkpoints
-     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+     WHERE LOWER(evento_id) = LOWER(@eventoId)
+       AND LOWER(status) = 'online'`,
     { eventoId, teamId }
   );
 
@@ -224,7 +226,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
   // O primeiro alvo pode ser qualquer checkpoint do evento.
   const ids = await getEventCheckpointIds(eventoId);
   if (!ids.length) {
-    throw new Error('O Caça ao Tesouro precisa de pelo menos um checkpoint válido');
+    throw new Error('O Caça ao Tesouro precisa de pelo menos um checkpoint online');
   }
 
   const participatingTeams = await getParticipatingTeams(eventoId);
@@ -297,10 +299,17 @@ async function startTreasureGame(eventoId, brincadeiraId) {
 
 async function getCheckpointTreasureStatus(checkpointId) {
   const checkpoint = await queryOne(
-    'SELECT id, evento_id FROM checkpoints WHERE LOWER(id) = LOWER(@checkpointId)',
+    'SELECT id, evento_id, status FROM checkpoints WHERE LOWER(id) = LOWER(@checkpointId)',
     { checkpointId }
   );
   if (!checkpoint) return { gameType: 'none', treasureTarget: false };
+  if (String(checkpoint.status || '').trim().toLowerCase() !== 'online') {
+    return {
+      gameType: 'none',
+      treasureTarget: false,
+      checkpointOffline: true,
+    };
+  }
 
   const session = await getActiveSession(checkpoint.evento_id);
   if (!session) return { gameType: 'none', treasureTarget: false };
@@ -421,6 +430,21 @@ async function getTeamsProgress(eventoId, session) {
 async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeiraId, uid, now }) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
+
+  const checkpointStatus = await queryOne(
+    `SELECT status FROM checkpoints
+     WHERE LOWER(id) = LOWER(@checkpointId)
+       AND LOWER(evento_id) = LOWER(@eventoId)`,
+    { checkpointId, eventoId }
+  );
+  if (!checkpointStatus || String(checkpointStatus.status || '').trim().toLowerCase() !== 'online') {
+    return {
+      handled: true,
+      accepted: false,
+      error: 'Este checkpoint está offline e não pode ser usado no Caça ao Tesouro',
+      message: 'Este checkpoint está offline e não pode ser usado no Caça ao Tesouro',
+    };
+  }
 
   if (!crianca.time_id) {
     return { handled: true, accepted: false, error: 'Criança não pertence a uma equipe' };

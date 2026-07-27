@@ -34,19 +34,24 @@ router.post('/', async (req, res) => {
     }
     
     // O checkpoint define a empresa e o evento da leitura.
-    const checkpoint = await queryOne('SELECT id, empresa_id, evento_id FROM checkpoints WHERE id = @id', { id: checkpointId });
+    const checkpoint = await queryOne('SELECT id, empresa_id, evento_id, status FROM checkpoints WHERE id = @id', { id: checkpointId });
     if (!checkpoint) {
       console.log(`❌ [LEITURA] Checkpoint não encontrado: ${checkpointId}`);
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
     
-    // ✨ NOVO: Atualizar status do checkpoint para 'online' quando receber leitura
-    try {
-      await query(
-        `UPDATE checkpoints SET status = 'online', last_seen = @now WHERE id = @checkpointId`,
-        { checkpointId, now }
-      );
-    } catch (err) {
+    const treasureSession = await getActiveSession(checkpoint.evento_id);
+    const checkpointIsOnline = String(checkpoint.status || '').trim().toLowerCase() === 'online';
+
+    // Durante o Caça ao Tesouro, um checkpoint offline não deve voltar a ser
+    // considerado online apenas porque recebeu uma tentativa de leitura.
+    if (!treasureSession || checkpointIsOnline) {
+      try {
+        await query(
+          `UPDATE checkpoints SET status = 'online', last_seen = @now WHERE id = @checkpointId`,
+          { checkpointId, now }
+        );
+      } catch (err) {
       // Se coluna last_seen não existe ainda, só atualiza o status
       if (err.message.includes('last_seen')) {
         console.log('⚠️ Coluna last_seen ainda não existe, atualizando apenas status...');
@@ -56,6 +61,7 @@ router.post('/', async (req, res) => {
         );
       } else {
         throw err;
+      }
       }
     }
     
@@ -161,8 +167,20 @@ router.post('/', async (req, res) => {
     }
     
     // Caça ao Tesouro usa uma regra própria e não pontua como Zona.
-    const treasureSession = await getActiveSession(checkpoint.evento_id);
     if (treasureSession) {
+      if (!checkpointIsOnline) {
+        const offlineMessage = 'Este checkpoint está offline e não pode ser usado no Caça ao Tesouro';
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: false,
+          treasure: true,
+          treasureAccepted: false,
+          error: offlineMessage,
+          message: offlineMessage,
+        });
+      }
+
       const treasureResult = await processTreasureScan({
         eventoId: checkpoint.evento_id,
         checkpointId,
