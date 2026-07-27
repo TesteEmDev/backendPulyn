@@ -356,6 +356,8 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
           startingTeamName: treasureStart.startingTeamName,
           turnTeamId: treasureStart.turnTeamId,
           turnTeamName: treasureStart.turnTeamName,
+          turnAvailableAt: treasureStart.turnAvailableAt,
+          turnWaitSeconds: 0,
           targetCheckpointId: treasureStart.targetCheckpointId,
         } : null,
       }
@@ -375,6 +377,8 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
           startingTeamName: treasureStart.startingTeamName,
           turnTeamId: treasureStart.turnTeamId,
           turnTeamName: treasureStart.turnTeamName,
+          turnAvailableAt: treasureStart.turnAvailableAt,
+          turnWaitSeconds: 0,
           targetCheckpointId: treasureStart.targetCheckpointId,
         } : null,
       }
