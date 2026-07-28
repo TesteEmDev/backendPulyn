@@ -1029,7 +1029,21 @@ app.use((err, req, res, next) => {
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3001;
-server.listen(PORT, async () => {
+
+async function startServer() {
+  try {
+    // O schema familiar precisa existir antes de aceitar requisições.
+    // Caso contrário, /api/familias/pending pode retornar 500 durante o deploy.
+    await ensureFamilySchema();
+    console.log('✅ Schema de famílias verificado antes de iniciar o servidor.\n');
+  } catch (err) {
+    console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
+    clearInterval(interval);
+    clearInterval(offlineCheckInterval);
+    process.exit(1);
+  }
+
+  server.listen(PORT, async () => {
   console.log(`
   ╔═══════════════════════════════════════╗
   ║   🚀 API Pulyn iniciada              ║
@@ -1248,12 +1262,12 @@ server.listen(PORT, async () => {
     console.log('ℹ️ Migrações T-SQL do SQL Server ignoradas: DB_DRIVER=postgres.\n');
   }
 
-  try {
-    await ensureFamilySchema();
-    console.log('✅ Schema de famílias verificado.\n');
-  } catch (err) {
-    console.error('⚠️ Erro ao preparar schema de famílias:', err.message, '\n');
-  }
+  });
+}
+
+startServer().catch((err) => {
+  console.error('❌ Falha fatal ao iniciar a API:', err);
+  process.exit(1);
 });
 
 module.exports = { app, server, wss };
