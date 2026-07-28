@@ -40,6 +40,21 @@ router.post('/', async (req, res) => {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
     
+    const broadcastData = {
+      type: 'NFC_READING_DETECTED',
+      payload: {
+        braceletCode: normalizedUid,
+        timestamp: now.toISOString(),
+        checkpointId,
+        eventoId: checkpoint.evento_id
+      }
+    };
+
+    // A leitura é enviada também quando a pulseira ainda não existe no banco,
+    // pois as telas de recepção precisam poder cadastrá-la pelo NFC.
+    console.log(`\n📱 [LEITURA] Pulseira lida: ${normalizedUid} (original: ${uid})`);
+    broadcast(broadcastData);
+
     const treasureSession = await getActiveSession(checkpoint.evento_id);
     const checkpointIsOnline = String(checkpoint.status || '').trim().toLowerCase() === 'online';
 
@@ -89,21 +104,6 @@ router.post('/', async (req, res) => {
         message: 'Pulseira ainda não está cadastrada'
       });
     }
-
-    // A leitura de uma pulseira disponível também precisa chegar à tela de
-    // check-in para que ela possa ser vinculada a uma criança.
-    const broadcastData = {
-      type: 'NFC_READING_DETECTED',
-      payload: {
-        braceletCode: normalizedUid,
-        timestamp: now.toISOString(),
-        checkpointId,
-        eventoId: checkpoint.evento_id
-      }
-    };
-
-    console.log(`\n📱 [LEITURA] Pulseira lida: ${normalizedUid} (original: ${uid})`);
-    broadcast(broadcastData);
 
     const braceletStatus = String(pulseira.status || '').trim().toLowerCase();
     if (braceletStatus !== 'em_uso' || !pulseira.crianca_id) {
