@@ -38,6 +38,10 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     const { evento_id } = req.params;
     const id = uuidv4();
 
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Nome da criança é obrigatório' });
+    }
+
     if (braceletCode && !normalizedBraceletCode) {
       return res.status(400).json({ error: 'Código da pulseira inválido' });
     }
@@ -49,8 +53,28 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     }
     const empresaId = evento.empresa_id;
 
-    if (req.user.empresa_id !== empresaId) {
+    if (!isMaster(req) && String(req.user.empresa_id) !== String(empresaId)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+
+    if (timeId) {
+      const time = await queryOne(
+        `SELECT id FROM times
+         WHERE id = @timeId AND evento_id = @eventoId
+           AND (empresa_id = @empresaId OR @isMaster = 1)`,
+        { timeId, eventoId: evento_id, empresaId, isMaster: isMaster(req) ? 1 : 0 }
+      );
+      if (!time) return res.status(400).json({ error: 'Time não pertence ao evento selecionado' });
+    }
+
+    if (normalizedBraceletCode) {
+      const pulseira = await queryOne(
+        `SELECT code, status FROM pulseiras
+         WHERE ${uidSqlExpression('code')} = @code AND empresa_id = @empresaId`,
+        { code: normalizedBraceletCode, empresaId }
+      );
+      if (!pulseira) return res.status(400).json({ error: 'Pulseira não encontrada nesta empresa' });
+      if (pulseira.status !== 'disponivel') return res.status(400).json({ error: 'Pulseira não está disponível' });
     }
     
     if (normalizedBraceletCode) {
@@ -314,10 +338,16 @@ router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (re
 // Desvincular pulseira
 router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
   try {
+    const allowedRoles = ['admin', 'reception', 'game_master'];
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Acesso negado para desvincular pulseiras' });
+    }
     const { crianca_id } = req.params;
-    
-    // Verificar se criança existe e tem pulseira
-    const crianca = await queryOne('SELECT * FROM criancas WHERE id = @id', { id: crianca_id });
+    const crianca = await queryOne(
+      `SELECT * FROM criancas
+       WHERE id = @id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+    );
     
     if (!crianca) {
       return res.status(404).json({ error: 'Criança não encontrada' });
@@ -329,8 +359,11 @@ router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
     
     const braceletCode = crianca.bracelet_code;
     
-    // Desvincular pulseira da criança
-    await query('UPDATE criancas SET bracelet_code = NULL WHERE id = @criancaId', { criancaId: crianca_id });
+    await query(
+      `UPDATE criancas SET bracelet_code = NULL
+       WHERE id = @criancaId AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      { criancaId: crianca_id, empresaId: crianca.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+    );
     
     // ✅ NOVO: Atualizar status da pulseira de volta para "disponível"
     await query(

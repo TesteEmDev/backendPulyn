@@ -81,11 +81,20 @@ router.put('/:code/status', verifyToken, async (req, res) => {
     const { code } = req.params;
     const { status } = req.body;
     const empresa_id = req.user.empresa_id;
+    const allowedStatuses = ['disponivel', 'em_uso', 'perdida', 'bloqueada'];
+    const allowedRoles = ['admin', 'reception', 'game_master'];
+
+    if (!allowedStatuses.includes(status)) {
+      return res.status(400).json({ error: 'Status de pulseira inválido' });
+    }
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Acesso negado para alterar pulseiras' });
+    }
     
     // Verificar que a pulseira pertence à empresa (ou master)
     const normalizedCode = normalizeUid(code);
     const pulseira = await queryOne(
-      `SELECT empresa_id FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
+      `SELECT empresa_id, crianca_id FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
       { code: normalizedCode }
     );
     
@@ -98,11 +107,25 @@ router.put('/:code/status', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: pulseira não pertence a esta empresa' });
     }
     
+    if (status !== 'em_uso' && pulseira.crianca_id) {
+      await query(
+        `UPDATE criancas SET bracelet_code = NULL
+         WHERE id = @criancaId AND empresa_id = @empresaId`,
+        { criancaId: pulseira.crianca_id, empresaId: pulseira.empresa_id }
+      );
+    }
+
     await query(
-      `UPDATE pulseiras SET status = @status 
-       WHERE ${uidSqlExpression('code')} = @code 
-       AND empresa_id = @empresa_id`, 
-      { code: normalizedCode, status, empresa_id: pulseira.empresa_id }
+      `UPDATE pulseiras SET status = @status,
+       crianca_id = @criancaId
+       WHERE ${uidSqlExpression('code')} = @code
+       AND empresa_id = @empresa_id`,
+      {
+        code: normalizedCode,
+        status,
+        criancaId: status === 'em_uso' ? pulseira.crianca_id : null,
+        empresa_id: pulseira.empresa_id,
+      }
     );
     res.json({ ok: true });
   } catch (err) {

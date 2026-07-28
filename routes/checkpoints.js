@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
-const { verifyToken } = require('../utils/middleware');
+const { verifyToken, isMaster } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 
 function sameId(left, right) {
@@ -39,7 +39,16 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
     const { checkpoint_id } = req.params;
     const now = new Date();
     
-    // ✅ Apenas atualizar o status - Arduino não precisa de validação
+    const checkpoint = await queryOne(
+      'SELECT id FROM checkpoints WHERE id = @id',
+      { id: checkpoint_id }
+    );
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+
+    // O Arduino envia heartbeat sem JWT; a existência do checkpoint ainda é
+    // validada para não aceitar IDs arbitrários.
     try {
       await query(
         `UPDATE checkpoints SET status = 'online', last_seen = @now WHERE id = @id`,
@@ -69,12 +78,25 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
 router.get('/evento/:evento_id', verifyToken, async (req, res) => {
   try {
     const { evento_id } = req.params;
-    const checkpoints = await allQuery(
-      `SELECT * FROM checkpoints 
-       WHERE evento_id = @evento_id
-       AND empresa_id = (SELECT empresa_id FROM eventos WHERE id = @evento_id)
-       ORDER BY name`,
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
       { evento_id }
+    );
+
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+
+    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    const checkpoints = await allQuery(
+      `SELECT * FROM checkpoints
+       WHERE evento_id = @evento_id
+         AND empresa_id = @empresa_id
+       ORDER BY name`,
+      { evento_id, empresa_id: evento.empresa_id }
     );
 
     res.json(checkpoints || []);
@@ -183,7 +205,7 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && !sameId(evento.empresa_id, empresa_id)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
@@ -415,7 +437,7 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && !sameId(evento.empresa_id, empresa_id)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 

@@ -65,7 +65,33 @@ router.post('/', async (req, res) => {
       }
     }
     
-    // UID canônico: aceita tanto 7C3A1672 quanto 7C:3A:16:72.
+    // A pulseira precisa existir, pertencer à mesma empresa e estar ativa.
+    // Isso evita processar uma criança cujo vínculo foi removido ou bloqueado.
+    const pulseira = await queryOne(
+      `SELECT code, empresa_id, status, crianca_id
+       FROM pulseiras
+       WHERE ${uidSqlExpression('code')} = @uid`,
+      { uid: normalizedUid }
+    );
+
+    if (pulseira && String(pulseira.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
+      console.log(`❌ [LEITURA] Pulseira de outra empresa no checkpoint ${checkpointId}`);
+      return res.status(403).json({ ok: false, error: 'Pulseira não pertence a esta empresa' });
+    }
+
+    if (!pulseira) {
+      console.log('   ⚠️ [LEITURA] Pulseira não cadastrada ainda');
+      return res.json({
+        ok: true,
+        registered: false,
+        braceletExists: false,
+        braceletCode: normalizedUid,
+        message: 'Pulseira ainda não está cadastrada'
+      });
+    }
+
+    // A leitura de uma pulseira disponível também precisa chegar à tela de
+    // check-in para que ela possa ser vinculada a uma criança.
     const broadcastData = {
       type: 'NFC_READING_DETECTED',
       payload: {
@@ -75,41 +101,39 @@ router.post('/', async (req, res) => {
         eventoId: checkpoint.evento_id
       }
     };
-    
+
     console.log(`\n📱 [LEITURA] Pulseira lida: ${normalizedUid} (original: ${uid})`);
     broadcast(broadcastData);
-    
-    // Aceita registros antigos com dois-pontos, hífen ou espaços.
+
+    const braceletStatus = String(pulseira.status || '').trim().toLowerCase();
+    if (braceletStatus !== 'em_uso' || !pulseira.crianca_id) {
+      console.log(`   ⚠️ [LEITURA] Pulseira não está vinculada a uma criança ativa (status: ${pulseira.status})`);
+      return res.json({
+        ok: true,
+        registered: false,
+        braceletExists: true,
+        braceletStatus: pulseira.status,
+        braceletCode: normalizedUid,
+        message: 'Pulseira cadastrada, mas ainda não está vinculada a uma criança'
+      });
+    }
+
     const crianca = await queryOne(
       `SELECT c.* FROM criancas c
-       WHERE ${uidSqlExpression('c.bracelet_code')} = @uid`,
-      { uid: normalizedUid }
+       WHERE c.id = @criancaId
+         AND ${uidSqlExpression('c.bracelet_code')} = @uid`,
+      { criancaId: pulseira.crianca_id, uid: normalizedUid }
     );
-    
+
     if (!crianca) {
-      const pulseira = await queryOne(
-        `SELECT code, empresa_id, status, crianca_id FROM pulseiras
-         WHERE ${uidSqlExpression('code')} = @uid`,
-        { uid: normalizedUid }
-      );
-
-      if (pulseira && String(pulseira.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
-        console.log(`❌ [LEITURA] Pulseira de outra empresa no checkpoint ${checkpointId}`);
-        return res.status(403).json({ ok: false, error: 'Pulseira não pertence a esta empresa' });
-      }
-
-      console.log(pulseira
-        ? '   ⚠️ [LEITURA] Pulseira existe, mas ainda não está vinculada a uma criança'
-        : '   ⚠️ [LEITURA] Pulseira não cadastrada ainda');
-
-      return res.json({ 
-        ok: true, 
+      console.log('   ⚠️ [LEITURA] Vínculo da pulseira inconsistente com a criança');
+      return res.json({
+        ok: true,
         registered: false,
-        braceletExists: Boolean(pulseira),
+        braceletExists: true,
+        braceletStatus: pulseira.status,
         braceletCode: normalizedUid,
-        message: pulseira
-          ? 'Pulseira cadastrada, mas ainda não está vinculada a uma criança'
-          : 'Pulseira ainda não está cadastrada'
+        message: 'Pulseira cadastrada, mas o vínculo precisa ser revisado'
       });
     }
     
@@ -280,37 +304,108 @@ router.post('/', async (req, res) => {
       });
     }
     
-    // Depois que o lock inicial termina, o mesmo time não pode pontuar
-    // novamente enquanto continuar sendo o dono. Apenas outro time troca o domínio.
-    if (crianca.time_id && String(checkpointData.territory_owner_time_id).trim().toLowerCase() === String(crianca.time_id).trim().toLowerCase()) {
-      console.log(`   🏳️ [LEITURA] O time ${crianca.time_id} já domina este território`);
-      return res.json({ 
+    if (!crianca.time_id) {
+      return res.json({
+        ok: true,
+        registered: true,
+        authorized: false,
+        braceletCode: normalizedUid,
+        error: 'Criança sem time associado',
+        message: 'Atribua a criança a um time antes de iniciar o jogo'
+      });
+    }
+
+    const ownerIsSameTeam = String(checkpointData.territory_owner_time_id || '').trim().toLowerCase()
+      === String(crianca.time_id).trim().toLowerCase();
+
+    // Depois que o lock termina, o mesmo time respeita o cooldown de 60s.
+    if (ownerIsSameTeam && isCooldown) {
+      const remainingSeconds = Math.ceil((new Date(checkpointData.territory_cooldown_until) - now) / 1000);
+      console.log(`   ⏳ [LEITURA] Time já conquistou este território; cooldown de ${remainingSeconds}s`);
+      return res.json({
         ok: true, registered: true, authorized: false,
         braceletCode: normalizedUid,
         teamAlreadyOwns: true,
-        error: 'Seu time já domina este território',
-        message: 'Seu time já domina este território'
+        remainingSeconds,
+        error: `Seu time já conquistou! Aguarde ${remainingSeconds}s`,
+        message: `Seu time já conquistou! Aguarde ${remainingSeconds}s`
       });
     }
     
     const leituraId = uuidv4();
     const pointsAwarded = checkpointData.points || 10;
     const lockDuration = 15000;  // 15 segundos de lock (ninguém consegue)
-    const cooldownDuration = 0;  // Sem cooldown adicional - após lock, libera pra todos
+    const cooldownDuration = 60000;  // 60 segundos para o mesmo time
     
     const lockedUntil = new Date(now.getTime() + lockDuration);
-    const cooldownUntil = new Date(now.getTime() + lockDuration);  // Mesmo que lockedUntil
+    const cooldownUntil = new Date(now.getTime() + cooldownDuration);
     
     console.log(`🎨 [LEITURA] Buscando cor do time para criança: ${crianca.name} (time_id: ${crianca.time_id})`);
     
-    await query(`
+    // A atualização condicional torna a conquista atômica: duas leituras
+    // simultâneas não podem passar pelo mesmo checkpoint e pontuar duas vezes.
+    const territoryUpdate = await query(`
       UPDATE checkpoints SET 
         territory_owner_time_id = @timeId,
         territory_locked_until = @lockedUntil,
         territory_cooldown_until = @cooldownUntil,
         last_conquered_at = @now
       WHERE id = @checkpointId
-    `, { timeId: crianca.time_id, lockedUntil, cooldownUntil, now, checkpointId });
+        AND evento_id = @eventoId
+        AND empresa_id = @empresaId
+        AND (territory_locked_until IS NULL OR territory_locked_until <= @now)
+        AND (
+          territory_owner_time_id IS NULL
+          OR LOWER(CAST(territory_owner_time_id AS VARCHAR(36))) <> LOWER(CAST(@timeId AS VARCHAR(36)))
+          OR territory_cooldown_until IS NULL
+          OR territory_cooldown_until <= @now
+        )
+    `, {
+      timeId: crianca.time_id,
+      lockedUntil,
+      cooldownUntil,
+      now,
+      checkpointId,
+      eventoId: crianca.evento_id,
+      empresaId: crianca.empresa_id,
+    });
+
+    const updatedTerritory = territoryUpdate.rowsAffected?.[0] || 0;
+    if (updatedTerritory === 0) {
+      const current = await queryOne(
+        'SELECT territory_locked_until, territory_cooldown_until, territory_owner_time_id FROM checkpoints WHERE id = @id',
+        { id: checkpointId }
+      );
+      const currentLocked = current?.territory_locked_until && new Date(current.territory_locked_until) > now;
+      const currentOwnerIsSame = String(current?.territory_owner_time_id || '').trim().toLowerCase()
+        === String(crianca.time_id).trim().toLowerCase();
+      const currentCooldown = current?.territory_cooldown_until && new Date(current.territory_cooldown_until) > now;
+      const remainingSeconds = currentLocked
+        ? Math.ceil((new Date(current.territory_locked_until) - now) / 1000)
+        : currentCooldown && currentOwnerIsSame
+          ? Math.ceil((new Date(current.territory_cooldown_until) - now) / 1000)
+          : 0;
+
+      return res.json({
+        ok: true,
+        registered: true,
+        authorized: false,
+        braceletCode: normalizedUid,
+        territoryLocked: Boolean(currentLocked),
+        teamAlreadyOwns: Boolean(currentOwnerIsSame && currentCooldown),
+        remainingSeconds,
+        error: currentLocked
+          ? `Território ocupado! Aguarde ${remainingSeconds}s`
+          : currentOwnerIsSame && currentCooldown
+            ? `Seu time já conquistou! Aguarde ${remainingSeconds}s`
+            : 'Território foi conquistado por outra leitura',
+        message: currentLocked
+          ? `Território ocupado! Aguarde ${remainingSeconds}s`
+          : currentOwnerIsSame && currentCooldown
+            ? `Seu time já conquistou! Aguarde ${remainingSeconds}s`
+            : 'Território foi conquistado por outra leitura'
+      });
+    }
     
     // ✅ Atualizar pontos (isso acontece quando evento está ativo)
     console.log(`💯 [LEITURA] Atualizando scores da criança e do time...`);
