@@ -30,10 +30,10 @@ router.get('/eventos/:evento_id/ranking/criancas', verifyToken, async (req, res)
       FROM criancas c
       LEFT JOIN times t ON c.time_id = t.id
       WHERE c.evento_id = @evento_id 
-        AND c.empresa_id = @empresa_id
+        AND (c.empresa_id = @empresa_id OR @isMaster = 1)
         AND c.status = 'active'
       ORDER BY c.scores DESC
-    `, { evento_id, empresa_id });
+    `, { evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);
   } catch (err) {
@@ -67,10 +67,10 @@ router.get('/eventos/:evento_id/ranking/times', verifyToken, async (req, res) =>
       FROM times t
       LEFT JOIN criancas c ON c.time_id = t.id AND c.status = 'active'
       WHERE t.evento_id = @evento_id
-        AND t.empresa_id = @empresa_id
+        AND (t.empresa_id = @empresa_id OR @isMaster = 1)
       GROUP BY t.id, t.name, t.color, t.points, t.created_at, t.evento_id, t.empresa_id
       ORDER BY t.points DESC
-    `, { evento_id, empresa_id });
+    `, { evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);
   } catch (err) {

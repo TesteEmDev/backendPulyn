@@ -30,17 +30,28 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     
     // Checkpoints online
     const onlineCheckpoints = await queryOne(`
-      SELECT COUNT(*) as count FROM checkpoints WHERE status = 'online'
+      SELECT COUNT(*) as count
+      FROM checkpoints c
+      LEFT JOIN empresas emp ON c.empresa_id = emp.id
+      WHERE c.status = 'online' AND emp.nome != 'Master Admin'
     `);
     
     // Crianças ativas hoje
     const activeChildren = await queryOne(`
-      SELECT COUNT(*) as count FROM criancas WHERE CAST(GETDATE() AS DATE) = CAST(created_at AS DATE)
+      SELECT COUNT(*) as count
+      FROM criancas c
+      LEFT JOIN empresas emp ON c.empresa_id = emp.id
+      WHERE CAST(GETDATE() AS DATE) = CAST(c.created_at AS DATE)
+        AND emp.nome != 'Master Admin'
     `);
     
     // Checkpoints offline
     const offlineCheckpoints = await queryOne(`
-      SELECT COUNT(*) as count FROM checkpoints WHERE status = 'offline' OR status IS NULL
+      SELECT COUNT(*) as count
+      FROM checkpoints c
+      LEFT JOIN empresas emp ON c.empresa_id = emp.id
+      WHERE (c.status = 'offline' OR c.status IS NULL)
+        AND emp.nome != 'Master Admin'
     `);
     
     // Total de clientes (excluindo Master Admin)
@@ -82,8 +93,8 @@ router.get('/clients', verifyToken, async (req, res) => {
         estado as state,
         status,
         [plano] as plan,
-        ISNULL([latitude], -15.7975) as lat,
-        ISNULL([longitude], -47.8919) as lng
+        ISNULL([latitude], NULL) as lat,
+        ISNULL([longitude], NULL) as lng
       FROM empresas
       WHERE nome != 'Master Admin'
       ORDER BY nome

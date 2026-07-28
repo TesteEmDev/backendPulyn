@@ -71,7 +71,7 @@ router.post('/login', async (req, res) => {
       success: true,
       token: token,
       user: {
-        id: login.empresa_id,
+        id: login.id,
         name: login.empresa_nome,
         email: login.email,
         role: login.role,

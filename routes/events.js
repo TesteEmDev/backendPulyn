@@ -275,14 +275,26 @@ router.post('/:evento_id/start-game', verifyToken, async (req, res) => {
     const { brincadeiraId } = req.body;
     const evento_id = req.params.evento_id;
     
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
     // Buscar a brincadeira para pegar o tipo
     const brincadeira = await queryOne(
-      'SELECT id, type, game_type FROM brincadeiras WHERE id = @id',
+      'SELECT id, type, game_type, empresa_id FROM brincadeiras WHERE id = @id',
       { id: brincadeiraId }
     );
     
     if (!brincadeira) {
       return res.status(404).json({ error: 'Jogo não encontrado' });
+    }
+    if (!isMaster(req) && brincadeira.empresa_id && brincadeira.empresa_id !== req.user.empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
     
     const gameType = brincadeira.game_type || brincadeira.type || 'standard';
@@ -318,6 +330,11 @@ router.post('/:evento_id/start-game', verifyToken, async (req, res) => {
 router.post('/:evento_id/stop-game', verifyToken, async (req, res) => {
   try {
     const evento_id = req.params.evento_id;
+    const evento = await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @id', { id: evento_id });
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
     
     // Atualizar evento para pausar jogo
     await query(

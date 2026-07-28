@@ -27,7 +27,6 @@ router.get('/metrics', verifyToken, async (req, res) => {
       activeEvents: activeEvents?.count || 0,
       totalChildren: totalChildren?.count || 0,
       avgEventsPerClient: clients?.count > 0 ? Math.round((totalEvents?.count || 0) / clients.count) : 0,
-      growthYoY: '+400%',
     });
   } catch (err) {
     console.error('❌ Erro ao buscar métricas:', err);
@@ -161,7 +160,7 @@ router.get('/revenue-by-plan', verifyToken, async (req, res) => {
           ELSE 0
         END) as revenue
       FROM empresas e
-      WHERE e.nome != 'Master Admin'
+      WHERE e.nome != 'Master Admin' AND e.status = 'active'
       GROUP BY e.plano
     `);
     

@@ -23,6 +23,10 @@ const rankingRoutes = require('./routes/ranking');
 const logsRoutes = require('./routes/logs');
 const loginsRoutes = require('./routes/logins');
 const treasureRoutes = require('./routes/treasure');
+const planosRoutes = require('./routes/planos');
+const monitoringRoutes = require('./routes/monitoring');
+const supportRoutes = require('./routes/support');
+const messagesRoutes = require('./routes/messages');
 const { verifyToken, isMaster } = require('./utils/middleware');
 const {
   TREASURE_GAME_TYPE,
@@ -999,6 +1003,12 @@ app.use('/api/logins', loginsRoutes);
 
 // Caça ao Tesouro
 app.use('/api/treasure', treasureRoutes);
+
+// Recursos do dashboard master
+app.use('/api/planos', planosRoutes);
+app.use('/api/monitoring', monitoringRoutes);
+app.use('/api/support', supportRoutes);
+app.use('/api/messages', messagesRoutes);
 
 // Servir arquivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));

@@ -151,6 +151,19 @@ CREATE TABLE IF NOT EXISTS "evento_brincadeiras" (
   "created_at" timestamptz DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS "support_tickets" (
+  "id" varchar(36) PRIMARY KEY,
+  "empresa_id" varchar(36),
+  "client" varchar(255) NOT NULL,
+  "subject" varchar(255) NOT NULL,
+  "status" varchar(20) NOT NULL DEFAULT 'aberto',
+  "priority" varchar(20) NOT NULL DEFAULT 'media',
+  "description" text,
+  "assignee" varchar(255),
+  "created_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updated_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS "eventos" (
   "id" varchar(36) NOT NULL,
   "cliente_id" varchar(36),

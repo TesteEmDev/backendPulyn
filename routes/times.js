@@ -39,12 +39,17 @@ router.get('/', verifyToken, async (req, res) => {
 router.get('/eventos/:evento_id/times', verifyToken, async (req, res) => {
   try {
     const empresa_id = req.user.empresa_id;
+    const evento = await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @evento_id', { evento_id: req.params.evento_id });
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
 
     const times = await allQuery(
       `SELECT * FROM times 
-       WHERE evento_id = @evento_id AND empresa_id = @empresa_id 
+       WHERE evento_id = @evento_id AND (empresa_id = @empresa_id OR @isMaster = 1)
        ORDER BY points DESC`,
-      { evento_id: req.params.evento_id, empresa_id }
+      { evento_id: req.params.evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 }
     );
 
     res.json(times);
@@ -63,15 +68,16 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'nome e cor são obrigatórios' });
     }
 
-    // ✅ VERIFICAR EMPRESA
-    const empresa = await queryOne(
-      'SELECT id FROM empresas WHERE id = @id',
-      { id: empresa_id }
-    );
-
-    if (!empresa) {
-      return res.status(403).json({ error: 'Empresa não encontrada' });
+    const evento = evento_id
+      ? await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @evento_id', { evento_id })
+      : null;
+    if (evento_id && !evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (evento && !isMaster(req) && evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
+    const targetEmpresaId = evento?.empresa_id || empresa_id;
+    const empresa = await queryOne('SELECT id FROM empresas WHERE id = @id', { id: targetEmpresaId });
+    if (!empresa) return res.status(403).json({ error: 'Empresa não encontrada' });
 
     // ✅ CRIAR
     const id = uuidv4();
@@ -79,11 +85,11 @@ router.post('/', verifyToken, async (req, res) => {
     await query(
       `INSERT INTO times (id, evento_id, empresa_id, name, color) 
        VALUES (@id, @evento_id, @empresa_id, @name, @color)`,
-      { id, evento_id: evento_id || null, empresa_id, name, color }
+      { id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color }
     );
 
     console.log(`✅ Time criado: ${name} (empresa: ${empresa_id}${evento_id ? `, evento: ${evento_id}` : ', sem evento'})`);
-    res.json({ id, evento_id: evento_id || null, empresa_id, name, color, points: 0 });
+    res.json({ id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color, points: 0 });
   } catch (err) {
     console.error('❌ Erro ao criar time:', err);
     res.status(500).json({ error: err.message });
