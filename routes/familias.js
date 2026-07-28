@@ -251,7 +251,7 @@ router.get('/pending', verifyToken, async (req, res) => {
       JOIN eventos e ON e.id = c.evento_id
       LEFT JOIN times t ON t.id = c.time_id
       WHERE l.status = 'pending'
-        AND (@eventoId IS NULL OR e.id = @eventoId)
+        AND (CAST(@eventoId AS VARCHAR(36)) IS NULL OR e.id = CAST(@eventoId AS VARCHAR(36)))
         AND (@isMaster = 1 OR l.empresa_id = @empresaId)
       ORDER BY l.created_at ASC
     `, { eventoId, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 });
