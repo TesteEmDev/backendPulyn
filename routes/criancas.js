@@ -136,6 +136,25 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     if (!crianca) {
       return res.status(404).json({ error: 'Criança não encontrada' });
     }
+
+    const nextTimeId = timeId === undefined ? crianca.time_id : (timeId || null);
+    if (nextTimeId) {
+      const targetTime = await queryOne(
+        `SELECT id FROM times
+         WHERE id = @timeId
+           AND evento_id = @eventoId
+           AND (empresa_id = @empresaId OR @isMaster = 1)`,
+        {
+          timeId: nextTimeId,
+          eventoId: evento_id,
+          empresaId: crianca.empresa_id,
+          isMaster: isMaster(req) ? 1 : 0,
+        }
+      );
+      if (!targetTime) {
+        return res.status(400).json({ error: 'Time não pertence ao evento selecionado' });
+      }
+    }
     
     // Se está mudando de pulseira, verificar se a nova pulseira existe e está disponível
     if (normalizedBraceletCode && normalizedBraceletCode !== normalizeUid(crianca.bracelet_code || '')) {
@@ -200,9 +219,19 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
         criancaId: crianca_id,
         eventoId: evento_id,
         empresaId: crianca.empresa_id,
-        timeId: timeId || crianca.time_id
+        timeId: nextTimeId
       }
     );
+
+    const affectedTeamIds = [...new Set([crianca.time_id, nextTimeId].filter(Boolean))];
+    for (const affectedTeamId of affectedTeamIds) {
+      await query(
+        `UPDATE times
+         SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
+         WHERE id = @timeId`,
+        { timeId: affectedTeamId }
+      );
+    }
     
     console.log(`✅ Criança ${crianca.name} atualizada com pulseira ${normalizedBraceletCode}`);
     res.json({ ok: true, message: 'Criança atualizada com sucesso' });

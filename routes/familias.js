@@ -131,9 +131,12 @@ router.post('/invites/:token/register', async (req, res) => {
       return res.status(410).json({ error: invite.status === 'expired' ? 'Convite expirado' : 'Convite já utilizado', status: invite.status });
     }
 
-    const { name, parentName, email, password, relationship = 'responsável', child } = req.body;
+    const { name, parentName, email, password, relationship = 'responsável', child, children: requestedChildren } = req.body;
     const familyName = String(parentName || name || '').trim();
     const normalizedEmail = String(email || '').trim().toLowerCase();
+    const childrenPayload = Array.isArray(requestedChildren)
+      ? requestedChildren
+      : (child ? [child] : []);
     if (!familyName || !normalizedEmail || !password) {
       return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios' });
     }
@@ -143,8 +146,11 @@ router.post('/invites/:token/register', async (req, res) => {
     if (String(password).length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
-    if (!invite.linked_child_id && (!child?.name || !String(child.name).trim())) {
-      return res.status(400).json({ error: 'Informe o nome da criança' });
+    if (!invite.linked_child_id && (childrenPayload.length === 0 || childrenPayload.length > 10)) {
+      return res.status(400).json({ error: 'Informe entre 1 e 10 crianças' });
+    }
+    if (!invite.linked_child_id && childrenPayload.some((item) => !item?.name || !String(item.name).trim())) {
+      return res.status(400).json({ error: 'Informe o nome de todas as crianças' });
     }
 
     const existingLogin = await queryOne(
@@ -184,35 +190,42 @@ router.post('/invites/:token/register', async (req, res) => {
         });
       }
 
-      let childId = invite.linked_child_id;
-      if (!childId) {
-        childId = crypto.randomUUID();
-        await query(`
-          INSERT INTO criancas
-            (id, evento_id, empresa_id, time_id, name, nickname, age, avatar, scores, status)
-          VALUES (@id, @eventoId, @empresaId, NULL, @childName, @nickname, @age, '👤', 0, 'pending')
-        `, {
-          id: childId,
-          eventoId: invite.evento_id,
-          empresaId: invite.empresa_id,
-          childName: String(child.name).trim(),
-          nickname: String(child.nickname || child.name).trim(),
-          age: Number.isFinite(Number(child.age)) ? Number(child.age) : null,
-        });
+      const childIds = [];
+      if (invite.linked_child_id) {
+        childIds.push(invite.linked_child_id);
+      } else {
+        for (const childData of childrenPayload) {
+          const childId = crypto.randomUUID();
+          await query(`
+            INSERT INTO criancas
+              (id, evento_id, empresa_id, time_id, name, nickname, age, avatar, scores, status)
+            VALUES (@id, @eventoId, @empresaId, NULL, @childName, @nickname, @age, '👤', 0, 'pending')
+          `, {
+            id: childId,
+            eventoId: invite.evento_id,
+            empresaId: invite.empresa_id,
+            childName: String(childData.name).trim(),
+            nickname: String(childData.nickname || childData.name).trim(),
+            age: Number.isFinite(Number(childData.age)) ? Number(childData.age) : null,
+          });
+          childIds.push(childId);
+        }
       }
 
-      const linkId = crypto.randomUUID();
-      await query(`
-        INSERT INTO family_child_links
-          (id, login_id, crianca_id, empresa_id, relationship, status)
-        VALUES (@id, @loginId, @childId, @empresaId, @relationship, 'pending')
-      `, {
-        id: linkId,
-        loginId,
-        childId,
-        empresaId: invite.empresa_id,
-        relationship: String(relationship).trim().slice(0, 50) || 'responsável',
-      });
+      for (const childId of childIds) {
+        const linkId = crypto.randomUUID();
+        await query(`
+          INSERT INTO family_child_links
+            (id, login_id, crianca_id, empresa_id, relationship, status)
+          VALUES (@id, @loginId, @childId, @empresaId, @relationship, 'pending')
+        `, {
+          id: linkId,
+          loginId,
+          childId,
+          empresaId: invite.empresa_id,
+          relationship: String(relationship).trim().slice(0, 50) || 'responsável',
+        });
+      }
 
       await query(`
         UPDATE family_invites SET status = 'used', used_at = GETDATE()
@@ -223,7 +236,9 @@ router.post('/invites/:token/register', async (req, res) => {
         success: true,
         message: 'Cadastro realizado. Aguarde a aprovação da recepção.',
         status: 'pending',
-        childId,
+        childId: childIds[0],
+        childIds,
+        childrenCount: childIds.length,
       });
     } catch (registrationError) {
       await query(`UPDATE family_invites SET status = 'pending' WHERE id = @id AND status = 'processing'`, { id: invite.id }).catch(() => {});
@@ -235,29 +250,49 @@ router.post('/invites/:token/register', async (req, res) => {
   }
 });
 // Pendências visíveis apenas para recepção/admin/master.
+async function listFamilyLinks(status, eventoId, req) {
+  return allQuery(`
+    SELECT l.id as link_id, l.status as link_status, l.relationship, l.created_at as requested_at,
+           u.id as login_id, u.email, u.family_name,
+           c.id as crianca_id, c.name as crianca_name, c.nickname, c.age, c.avatar,
+           c.bracelet_code, c.scores, c.status as crianca_status,
+           e.id as evento_id, e.name as evento_name, e.date as evento_date,
+           t.id as time_id, t.name as time_name, t.color as time_color
+    FROM family_child_links l
+    JOIN logins u ON u.id = l.login_id
+    JOIN criancas c ON c.id = l.crianca_id
+    JOIN eventos e ON e.id = c.evento_id
+    LEFT JOIN times t ON t.id = c.time_id
+    WHERE l.status = @status
+      AND (CAST(@eventoId AS VARCHAR(36)) IS NULL OR e.id = CAST(@eventoId AS VARCHAR(36)))
+      AND (@isMaster = 1 OR l.empresa_id = @empresaId)
+    ORDER BY l.created_at ASC
+  `, {
+    status,
+    eventoId,
+    empresaId: req.user.empresa_id,
+    isMaster: isMaster(req) ? 1 : 0,
+  });
+}
+
 router.get('/pending', verifyToken, async (req, res) => {
   try {
     if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
-    const eventoId = req.query.evento_id || null;
-    const pending = await allQuery(`
-      SELECT l.id as link_id, l.status as link_status, l.relationship, l.created_at as requested_at,
-             u.id as login_id, u.email, u.family_name,
-             c.id as crianca_id, c.name as crianca_name, c.nickname, c.age, c.status as crianca_status,
-             e.id as evento_id, e.name as evento_name, e.date as evento_date,
-             t.id as time_id, t.name as time_name, t.color as time_color
-      FROM family_child_links l
-      JOIN logins u ON u.id = l.login_id
-      JOIN criancas c ON c.id = l.crianca_id
-      JOIN eventos e ON e.id = c.evento_id
-      LEFT JOIN times t ON t.id = c.time_id
-      WHERE l.status = 'pending'
-        AND (CAST(@eventoId AS VARCHAR(36)) IS NULL OR e.id = CAST(@eventoId AS VARCHAR(36)))
-        AND (@isMaster = 1 OR l.empresa_id = @empresaId)
-      ORDER BY l.created_at ASC
-    `, { eventoId, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 });
+    const pending = await listFamilyLinks('pending', req.query.evento_id || null, req);
     res.json(pending);
   } catch (err) {
     console.error('❌ Erro ao listar aprovações familiares:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/approved', verifyToken, async (req, res) => {
+  try {
+    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+    const approved = await listFamilyLinks('approved', req.query.evento_id || null, req);
+    res.json(approved);
+  } catch (err) {
+    console.error('❌ Erro ao listar famílias aprovadas:', err);
     res.status(500).json({ error: err.message });
   }
 });
