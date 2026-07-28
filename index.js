@@ -27,6 +27,8 @@ const planosRoutes = require('./routes/planos');
 const monitoringRoutes = require('./routes/monitoring');
 const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
+const familiasRoutes = require('./routes/familias');
+const { ensureFamilySchema } = require('./migrations/family');
 const { verifyToken, isMaster } = require('./utils/middleware');
 const {
   TREASURE_GAME_TYPE,
@@ -1009,6 +1011,7 @@ app.use('/api/planos', planosRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/familias', familiasRoutes);
 
 // Servir arquivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1243,6 +1246,13 @@ server.listen(PORT, async () => {
   }
   } else {
     console.log('ℹ️ Migrações T-SQL do SQL Server ignoradas: DB_DRIVER=postgres.\n');
+  }
+
+  try {
+    await ensureFamilySchema();
+    console.log('✅ Schema de famílias verificado.\n');
+  } catch (err) {
+    console.error('⚠️ Erro ao preparar schema de famílias:', err.message, '\n');
   }
 });
 

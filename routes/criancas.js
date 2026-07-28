@@ -5,6 +5,11 @@ const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 
+router.use(verifyToken, (req, res, next) => {
+  if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
+  next();
+});
+
 // Listar crianças de um evento
 router.get('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
   try {

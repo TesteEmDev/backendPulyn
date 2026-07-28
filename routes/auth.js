@@ -18,11 +18,12 @@ router.post('/login', async (req, res) => {
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.id, l.email, l.password, l.status, l.role, e.id as empresa_id, e.nome as empresa_nome, e.[plano]
+      `SELECT l.id, l.email, l.password, l.status, l.role, l.family_name,
+              e.id as empresa_id, e.nome as empresa_nome, e.[plano]
        FROM logins l
        JOIN empresas e ON l.empresa_id = e.id
-       WHERE l.email = @email AND l.status = 'active'`,
-      { email }
+       WHERE LOWER(l.email) = LOWER(@email)`,
+      { email: String(email).trim() }
     );
 
     if (!login) {
@@ -32,6 +33,12 @@ router.post('/login', async (req, res) => {
     // Comparar senha (base64)
     const hashedPassword = Buffer.from(password).toString('base64');
     if (login.password !== hashedPassword) {
+      return res.status(401).json({ error: 'Email ou senha incorretos' });
+    }
+    if (login.status === 'pending') {
+      return res.status(403).json({ error: 'Sua conta familiar aguarda aprovação da recepção', code: 'FAMILY_PENDING' });
+    }
+    if (login.status !== 'active') {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
     }
 
@@ -72,7 +79,7 @@ router.post('/login', async (req, res) => {
       token: token,
       user: {
         id: login.id,
-        name: login.empresa_nome,
+        name: login.family_name || login.empresa_nome,
         email: login.email,
         role: login.role,
         redirect: roleRedirects[login.role] || '/admin',

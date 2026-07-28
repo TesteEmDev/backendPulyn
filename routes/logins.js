@@ -4,6 +4,11 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 
+router.use(verifyToken, (req, res, next) => {
+  if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
+  next();
+});
+
 // ==================== LISTAR USUÁRIOS DA EMPRESA ====================
 
 // GET /api/logins/empresa/:empresa_id
