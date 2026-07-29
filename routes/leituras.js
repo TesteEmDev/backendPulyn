@@ -23,6 +23,61 @@ function broadcast(data) {
   }
 }
 
+router.post('/reception', async (req, res) => {
+  try {
+    const { checkpointId, uid } = req.body;
+    const normalizedUid = normalizeUid(uid);
+    const now = new Date();
+
+    if (!checkpointId || !normalizedUid) {
+      return res.status(400).json({ error: 'checkpointId e uid são obrigatórios' });
+    }
+
+    // O checkpoint fornece o evento para que somente a recepção daquele evento
+    // receba o broadcast. Nenhuma regra de jogo é executada nesta rota.
+    const checkpoint = await queryOne(
+      'SELECT id, empresa_id, evento_id FROM checkpoints WHERE id = @id',
+      { id: checkpointId }
+    );
+
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint de recepção não encontrado' });
+    }
+
+    const pulseira = await queryOne(
+      `SELECT code, status, crianca_id
+       FROM pulseiras
+       WHERE ${uidSqlExpression('code')} = @uid
+         AND LOWER(empresa_id) = LOWER(@empresaId)`,
+      { uid: normalizedUid, empresaId: checkpoint.empresa_id }
+    );
+
+    const registered = Boolean(pulseira);
+
+    broadcast({
+      type: 'NFC_READING_DETECTED',
+      payload: {
+        braceletCode: normalizedUid,
+        timestamp: now.toISOString(),
+        checkpointId,
+        eventoId: checkpoint.evento_id,
+        source: 'reception',
+      },
+    });
+
+    return res.json({
+      ok: true,
+      registered,
+      braceletCode: normalizedUid,
+      braceletStatus: pulseira?.status || null,
+      message: registered ? 'Pulseira detectada' : 'Pulseira ainda não cadastrada',
+    });
+  } catch (err) {
+    console.error('❌ Erro na leitura de recepção:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/', async (req, res) => {
   try {
     const { checkpointId, uid, brincadeiraId, signal } = req.body;
