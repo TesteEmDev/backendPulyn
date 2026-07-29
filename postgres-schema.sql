@@ -559,3 +559,20 @@ DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__zona
   ALTER TABLE "zonas" ADD CONSTRAINT "FK__zonas__evento_id__25518C17" FOREIGN KEY ("evento_id") REFERENCES "eventos" ("id");
 END IF; END $$;
 
+
+-- Estado persistido por evento. O endpoint do checkpoint usa este estado
+-- após reinicialização do backend, sem depender de variáveis globais.
+CREATE TABLE IF NOT EXISTS "event_game_state" (
+  "evento_id" varchar(36) PRIMARY KEY,
+  "empresa_id" varchar(36) NOT NULL,
+  "mode" varchar(20) NOT NULL DEFAULT 'idle',
+  "game_type" varchar(50) NOT NULL DEFAULT 'none',
+  "game_id" varchar(36),
+  "game_name" varchar(255),
+  "started_at" timestamptz,
+  "stopped_at" timestamptz,
+  "updated_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS "idx_event_game_state_empresa"
+  ON "event_game_state" ("empresa_id");

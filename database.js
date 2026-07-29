@@ -1,5 +1,6 @@
 // database.js - camada de acesso com suporte opt-in a SQL Server e PostgreSQL
 const path = require('path');
+const { AsyncLocalStorage } = require('async_hooks');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const sql = require('mssql');
@@ -22,6 +23,7 @@ const sqlServerConfig = {
 };
 
 let pool = null;
+const transactionStorage = new AsyncLocalStorage();
 
 function postgresConfig() {
   const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
@@ -154,22 +156,63 @@ async function connectDB() {
   }
 }
 
+function normalizePostgresResult(result) {
+  return {
+    ...result,
+    recordset: result.rows,
+    rowsAffected: [result.rowCount || 0]
+  };
+}
+
+function createSqlServerExecutor(requestFactory) {
+  return {
+    async query(sqlQuery, params = {}) {
+      const request = requestFactory();
+      Object.keys(params).forEach(key => request.input(key, params[key]));
+      return request.query(sqlQuery);
+    },
+    async queryOne(sqlQuery, params = {}) {
+      const result = await this.query(sqlQuery, params);
+      return result.recordset[0];
+    },
+    async allQuery(sqlQuery, params = {}) {
+      const result = await this.query(sqlQuery, params);
+      return result.recordset;
+    }
+  };
+}
+
+function createPostgresExecutor(client) {
+  return {
+    async query(sqlQuery, params = {}) {
+      const bound = bindNamedParameters(adaptPostgresSql(sqlQuery), params);
+      return normalizePostgresResult(await client.query(bound.text, bound.values));
+    },
+    async queryOne(sqlQuery, params = {}) {
+      const result = await this.query(sqlQuery, params);
+      return result.recordset[0];
+    },
+    async allQuery(sqlQuery, params = {}) {
+      const result = await this.query(sqlQuery, params);
+      return result.recordset;
+    }
+  };
+}
+
 async function query(sqlQuery, params = {}) {
+  const activeTransaction = transactionStorage.getStore();
+  if (activeTransaction) {
+    return activeTransaction.query(sqlQuery, params);
+  }
+
   if (!pool) await connectDB();
 
   if (isPostgres) {
     const bound = bindNamedParameters(adaptPostgresSql(sqlQuery), params);
-    const result = await pool.query(bound.text, bound.values);
-    return {
-      ...result,
-      recordset: result.rows,
-      rowsAffected: [result.rowCount || 0]
-    };
+    return normalizePostgresResult(await pool.query(bound.text, bound.values));
   }
 
-  const request = pool.request();
-  Object.keys(params).forEach(key => request.input(key, params[key]));
-  return request.query(sqlQuery);
+  return createSqlServerExecutor(() => pool.request()).query(sqlQuery, params);
 }
 
 async function queryOne(sqlQuery, params = {}) {
@@ -182,6 +225,48 @@ async function allQuery(sqlQuery, params = {}) {
   return result.recordset;
 }
 
+// Executa várias operações na mesma conexão/transação. O callback recebe
+// query/queryOne/allQuery transacionais e não deve usar os helpers globais.
+async function withTransaction(work) {
+  if (!pool) await connectDB();
+
+  if (isPostgres) {
+    const client = await pool.connect();
+    const executor = createPostgresExecutor(client);
+    try {
+      await client.query('BEGIN');
+      const result = await transactionStorage.run(executor, () => work(executor));
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (rollbackError) {
+        console.error('❌ Erro ao desfazer transação PostgreSQL:', rollbackError.message);
+      }
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+  const executor = createSqlServerExecutor(() => new sql.Request(transaction));
+  try {
+    const result = await transactionStorage.run(executor, () => work(executor));
+    await transaction.commit();
+    return result;
+  } catch (error) {
+    try {
+      await transaction.rollback();
+    } catch (rollbackError) {
+      console.error('❌ Erro ao desfazer transação SQL Server:', rollbackError.message);
+    }
+    throw error;
+  }
+}
+
 async function closeDB() {
   if (!pool) return;
   if (isPostgres) {
@@ -192,4 +277,4 @@ async function closeDB() {
   pool = null;
 }
 
-module.exports = { connectDB, closeDB, query, queryOne, allQuery, sql, DB_DRIVER };
+module.exports = { connectDB, closeDB, query, queryOne, allQuery, withTransaction, sql, DB_DRIVER };

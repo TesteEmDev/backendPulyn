@@ -29,7 +29,9 @@ const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
 const { ensureFamilySchema } = require('./migrations/family');
-const { verifyToken, isMaster } = require('./utils/middleware');
+const { ensureGameStateSchema } = require('./migrations/gameState');
+const { getGameState, saveGameState } = require('./utils/gameState');
+const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
 const {
   TREASURE_GAME_TYPE,
   getGameForEvent,
@@ -120,6 +122,26 @@ global.broadcastAll = (message) => {
   global.broadcast(message);
 };
 
+async function persistEventMode(eventoId, mode, gameType = currentGameType, details = {}) {
+  if (!eventoId || eventoId === 'global') return;
+  const evento = await queryOne(
+    'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+    { eventoId }
+  );
+  if (!evento) return;
+
+  await saveGameState({
+    eventoId: evento.id,
+    empresaId: evento.empresa_id,
+    mode,
+    gameType: gameType || 'none',
+    gameId: details.gameId || null,
+    gameName: details.gameName || null,
+    startedAt: details.startedAt || null,
+    stoppedAt: details.stoppedAt || null,
+  });
+}
+
 // Middleware
 app.use(express.json());
 app.use(cors());
@@ -158,6 +180,9 @@ wss.on('connection', (ws, req) => {
         if (validModes.includes(data.mode)) {
           currentMode = data.mode;
           if (data.mode !== 'game') currentGameType = 'none';
+          persistEventMode(eventoId, currentMode, currentGameType).catch((error) => {
+            console.error('❌ Erro ao persistir modo do evento:', error.message);
+          });
           console.log(`🎯 Modo atualizado via WebSocket: ${currentMode} (evento: ${eventoId})`);
         }
       }
@@ -199,7 +224,7 @@ app.get('/api/arduino/mode', async (req, res) => {
   res.json({ mode: currentArduinoMode });
 });
 
-app.post('/api/arduino/mode', async (req, res) => {
+app.post('/api/arduino/mode', verifyToken, requireRole('master'), async (req, res) => {
   const { mode } = req.body;
   if (mode) {
     currentArduinoMode = mode;
@@ -221,7 +246,7 @@ let gameStatus = {
   startedAt: null,
 };
 
-app.get('/api/debug/game-status', async (req, res) => {
+app.get('/api/debug/game-status', verifyToken, requireRole('admin', 'reception', 'game_master', 'display', 'master'), async (req, res) => {
   res.json({
     status: gameStatus,
     connectedClients: wss.clients.size,
@@ -229,7 +254,7 @@ app.get('/api/debug/game-status', async (req, res) => {
   });
 });
 
-app.post('/api/debug/start-game', verifyToken, async (req, res) => {
+app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const { gameId, gameName, eventoId } = req.body;
     
@@ -343,6 +368,11 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
     // Atualizar o tipo do jogo para o Arduino
     currentGameType = gameType;
     currentMode = 'game';
+    await persistEventMode(eventoId, 'game', gameType, {
+      gameId,
+      gameName: selectedGame.name || gameName,
+      startedAt: gameStatus.startedAt,
+    });
     console.log(`🎯 [INICIAR-JOGO] Modo alterado para: game (${gameType})`);
     
     console.log(`🎮 [INICIAR-JOGO] Jogo iniciado com sucesso!`);
@@ -421,7 +451,7 @@ app.post('/api/debug/start-game', verifyToken, async (req, res) => {
   }
 });
 
-app.post('/api/debug/stop-game', verifyToken, async (req, res) => {
+app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const { eventoId } = req.body;
     
@@ -501,6 +531,9 @@ app.post('/api/debug/stop-game', verifyToken, async (req, res) => {
     currentGameType = 'none';
     // ✨ NOVO: Atualizar modo para 'idle'
     currentMode = 'idle';
+    await persistEventMode(eventoId, 'idle', 'none', {
+      stoppedAt: new Date().toISOString(),
+    });
     console.log(`🎯 [PARAR-JOGO] Modo alterado para: idle`);
     
     console.log(`⛔ [PARAR-JOGO] Jogo parado com sucesso!`);
@@ -554,11 +587,21 @@ app.post('/api/debug/stop-game', verifyToken, async (req, res) => {
 });
 
 // DEBUG: Reset territory lock de um checkpoint
-app.post('/api/debug/reset-territory/:checkpointId', async (req, res) => {
+app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
-    const checkpointId = req.params.checkpointId;
+    const checkpoint = await queryOne(
+      'SELECT id, empresa_id FROM checkpoints WHERE id = @checkpointId',
+      { checkpointId }
+    );
+    if (!checkpoint) {
+      return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+    if (!isMaster(req) && String(checkpoint.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: checkpoint não pertence à sua empresa' });
+    }
+
     await query(
-      `UPDATE checkpoints SET 
+      `UPDATE checkpoints SET
         territory_locked_until = NULL,
         territory_cooldown_until = NULL,
         territory_owner_time_id = NULL
@@ -574,13 +617,15 @@ app.post('/api/debug/reset-territory/:checkpointId', async (req, res) => {
 });
 
 // DEBUG: Reset ALL territories
-app.post('/api/debug/reset-all-territories', async (req, res) => {
+app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
+    const territoryScope = isMaster(req) ? '' : ' WHERE empresa_id = @empresaId';
     await query(
-      `UPDATE checkpoints SET 
+      `UPDATE checkpoints SET
         territory_locked_until = NULL,
         territory_cooldown_until = NULL,
-        territory_owner_time_id = NULL`
+        territory_owner_time_id = NULL${territoryScope ? territoryScope : ''}`,
+      isMaster(req) ? {} : { empresaId: req.user.empresa_id }
     );
     console.log(`✅ Todos os territory locks foram resetados`);
     res.json({ ok: true, message: 'Todos os territory locks resetados' });
@@ -591,9 +636,19 @@ app.post('/api/debug/reset-all-territories', async (req, res) => {
 });
 
 // ✨ NOVO: Reset pontos de um evento
-app.post('/api/debug/reset-scores/:eventoId', async (req, res) => {
+app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const { eventoId } = req.params;
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      { eventoId }
+    );
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+    if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
     
     console.log(`🔄 Resetando pontos do evento ${eventoId}...`);
     
@@ -674,6 +729,9 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
   };
   currentGameType = 'none';
   currentMode = 'idle';
+  persistEventMode(eventoId, 'idle', 'none', { stoppedAt: finishedAt }).catch((error) => {
+    console.error('❌ Erro ao persistir encerramento do evento:', error.message);
+  });
 
   const payload = { eventoId, stoppedAt: finishedAt, automatic: true };
   global.broadcast({ type: 'GAME_STOPPED', payload });
@@ -685,19 +743,58 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
 };
 
 app.get('/api/debug/checkpoint-mode', async (req, res) => {
-  res.json({ mode: currentMode, gameType: currentGameType });
+  try {
+    const checkpointId = req.query.checkpointId;
+    if (checkpointId) {
+      const checkpoint = await queryOne(
+        'SELECT evento_id FROM checkpoints WHERE id = @checkpointId',
+        { checkpointId }
+      );
+      if (checkpoint?.evento_id) {
+        const eventState = await getGameState(checkpoint.evento_id);
+        if (eventState) {
+          return res.json({
+            mode: eventState.mode,
+            gameType: eventState.game_type,
+            eventoId: eventState.evento_id,
+            updatedAt: eventState.updated_at,
+          });
+        }
+      }
+    }
+
+    res.json({ mode: currentMode, gameType: currentGameType });
+  } catch (err) {
+    console.error('❌ Erro ao consultar modo do checkpoint:', err);
+    res.status(500).json({ error: 'Não foi possível consultar o modo do checkpoint' });
+  }
 });
 
 // DEBUG: Set checkpoint mode
-app.post('/api/debug/checkpoint-mode', async (req, res) => {
+app.post('/api/debug/checkpoint-mode', verifyToken, requireRole('admin', 'game_master', 'master', 'reception'), async (req, res) => {
   const { mode, eventoId } = req.body;
   const validModes = ['idle', 'checkin', 'bracelets', 'participants', 'game'];
   
   if (!validModes.includes(mode)) {
     return res.status(400).json({ error: `Mode deve ser um de: ${validModes.join(', ')}` });
   }
+
+  if (eventoId) {
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      { eventoId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+  }
   
   currentMode = mode;
+  if (mode !== 'game') currentGameType = 'none';
+  if (eventoId) {
+    await persistEventMode(eventoId, currentMode, currentGameType);
+  }
   console.log(`🎯 Modo do checkpoint alterado para: ${mode} ${eventoId ? `(evento: ${eventoId})` : '(global)'}`);
   
   // ✨ NOVO: Broadcast apenas para o evento se especificado, senão global
@@ -716,7 +813,7 @@ app.post('/api/debug/checkpoint-mode', async (req, res) => {
 });
 
 // DEBUG: Fix bracelet statuses (converter "desvinculada" para "disponivel")
-app.post('/api/debug/fix-bracelet-status', async (req, res) => {
+app.post('/api/debug/fix-bracelet-status', verifyToken, requireRole('master'), async (req, res) => {
   try {
     console.log(`🔧 Corrigindo status de pulseiras...`);
     
@@ -736,7 +833,7 @@ app.post('/api/debug/fix-bracelet-status', async (req, res) => {
 });
 
 // DEBUG: List all bracelet statuses
-app.get('/api/debug/bracelet-statuses', async (req, res) => {
+app.get('/api/debug/bracelet-statuses', verifyToken, requireRole('admin', 'reception', 'game_master', 'master'), async (req, res) => {
   try {
     const result = await allQuery(`
       SELECT DISTINCT status, COUNT(*) as total 
@@ -753,7 +850,7 @@ app.get('/api/debug/bracelet-statuses', async (req, res) => {
 });
 
 // DEBUG: Reset ALL bracelet statuses to "disponível"
-app.post('/api/debug/reset-all-bracelets', async (req, res) => {
+app.post('/api/debug/reset-all-bracelets', verifyToken, requireRole('master'), async (req, res) => {
   try {
     console.log(`🔄 Resetando todas as pulseiras para 'disponível'...`);
     
@@ -769,7 +866,7 @@ app.post('/api/debug/reset-all-bracelets', async (req, res) => {
 });
 
 // ✨ NOVO: Deletar checkpoints sem empresa_id
-app.post('/api/debug/delete-checkpoints-without-empresa', async (req, res) => {
+app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
     console.log(`🗑️  Deletando checkpoints sem empresa_id...`);
     
@@ -844,7 +941,7 @@ app.post('/api/debug/delete-checkpoints-without-empresa', async (req, res) => {
 });
 
 // ✨ NOVO: Listar checkpoints sem empresa_id
-app.get('/api/debug/list-checkpoints-without-empresa', async (req, res) => {
+app.get('/api/debug/list-checkpoints-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
     console.log(`📋 Listando checkpoints sem empresa_id...`);
     
@@ -869,7 +966,7 @@ app.get('/api/debug/list-checkpoints-without-empresa', async (req, res) => {
 });
 
 // ✨ NOVO: Limpar todas as crianças, pulseiras e resetar checkpoints
-app.post('/api/debug/clear-all-children', async (req, res) => {
+app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), async (req, res) => {
   try {
     console.log(`🗑️  Iniciando limpeza de crianças, pulseiras e checkpoints...`);
     
@@ -913,7 +1010,7 @@ app.post('/api/debug/clear-all-children', async (req, res) => {
 });
 
 // DEBUG: Assign all bracelets to children (status = 'em_uso')
-app.post('/api/debug/assign-all-bracelets', async (req, res) => {
+app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), async (req, res) => {
   try {
     console.log(`🔗 Vinculando todas as pulseiras com crianças...`);
     
@@ -1035,7 +1132,8 @@ async function startServer() {
     // O schema familiar precisa existir antes de aceitar requisições.
     // Caso contrário, /api/familias/pending pode retornar 500 durante o deploy.
     await ensureFamilySchema();
-    console.log('✅ Schema de famílias verificado antes de iniciar o servidor.\n');
+    await ensureGameStateSchema();
+    console.log('✅ Schema de famílias e estado do jogo verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);

@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { saveGameState } = require('../utils/gameState');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -275,7 +276,7 @@ router.get('/:evento_id/active-game', verifyToken, async (req, res) => {
 });
 
 // Iniciar jogo (define o tipo de jogo e ativa o evento)
-router.post('/:evento_id/start-game', verifyToken, async (req, res) => {
+router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const { brincadeiraId } = req.body;
     const evento_id = req.params.evento_id;
@@ -291,7 +292,7 @@ router.post('/:evento_id/start-game', verifyToken, async (req, res) => {
 
     // Buscar a brincadeira para pegar o tipo
     const brincadeira = await queryOne(
-      'SELECT id, type, game_type, empresa_id FROM brincadeiras WHERE id = @id',
+      'SELECT id, name, type, game_type, empresa_id FROM brincadeiras WHERE id = @id',
       { id: brincadeiraId }
     );
     
@@ -319,6 +320,16 @@ router.post('/:evento_id/start-game', verifyToken, async (req, res) => {
       }
     );
     
+    await saveGameState({
+      eventoId: evento_id,
+      empresaId: evento.empresa_id,
+      mode: 'game',
+      gameType,
+      gameId: brincadeira.id,
+      gameName: brincadeira.name || null,
+      startedAt: new Date(),
+    });
+
     res.json({ 
       success: true, 
       message: 'Jogo iniciado!',
@@ -332,7 +343,7 @@ router.post('/:evento_id/start-game', verifyToken, async (req, res) => {
 });
 
 // Parar jogo
-router.post('/:evento_id/stop-game', verifyToken, async (req, res) => {
+router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const evento_id = req.params.evento_id;
     const evento = await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @id', { id: evento_id });
@@ -354,6 +365,14 @@ router.post('/:evento_id/stop-game', verifyToken, async (req, res) => {
       }
     );
     
+    await saveGameState({
+      eventoId: evento_id,
+      empresaId: evento.empresa_id,
+      mode: 'idle',
+      gameType: 'none',
+      stoppedAt: new Date(),
+    });
+
     res.json({ success: true, message: 'Jogo parado!' });
   } catch (err) {
     console.error('❌ Erro ao parar jogo:', err);

@@ -27,6 +27,16 @@ function isMaster(req) {
   return req.user && req.user.role === 'master';
 }
 
+function requireRole(...roles) {
+  const allowedRoles = new Set(roles.flat());
+  return (req, res, next) => {
+    if (!req.user || !allowedRoles.has(req.user.role)) {
+      return res.status(403).json({ error: 'Permissão insuficiente para esta operação' });
+    }
+    next();
+  };
+}
+
 function broadcast(data) {
   if (global.wsServer) {
     global.wsServer.clients.forEach((client) => {
@@ -39,6 +49,7 @@ function broadcast(data) {
 
 module.exports = {
   verifyToken,
+  requireRole,
   isMaster,
   broadcast,
 };
