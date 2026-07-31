@@ -12,7 +12,7 @@ router.get('/metrics', verifyToken, async (req, res) => {
     }
 
     const totalEvents = await queryOne('SELECT COUNT(*) as count FROM eventos WHERE empresa_id IS NOT NULL');
-    const totalCheckpoints = await queryOne('SELECT COUNT(*) as count FROM checkpoints');
+    const totalCheckpoints = await queryOne("SELECT COUNT(*) as count FROM checkpoints WHERE LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'");
     const activeEvents = await queryOne("SELECT COUNT(*) as count FROM eventos WHERE status = 'active' AND empresa_id IS NOT NULL");
     const totalChildren = await queryOne('SELECT COUNT(*) as count FROM criancas');
     
@@ -119,6 +119,7 @@ router.get('/checkpoints-over-time', verifyToken, async (req, res) => {
         CONVERT(VARCHAR(7), ISNULL(data_criacao, GETDATE()), 120) as month,
         COUNT(DISTINCT id) as checkpoints
       FROM checkpoints
+      WHERE LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
       GROUP BY CONVERT(VARCHAR(7), ISNULL(data_criacao, GETDATE()), 120)
       ORDER BY CONVERT(VARCHAR(7), ISNULL(data_criacao, GETDATE()), 120) ASC
     `);

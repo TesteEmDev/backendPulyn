@@ -93,7 +93,10 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
     }
     const validCheckpoints = await allQuery(
-      `SELECT id FROM checkpoints WHERE evento_id = @evento_id AND empresa_id = @empresa_id`,
+      `SELECT id FROM checkpoints
+       WHERE evento_id = @evento_id
+         AND empresa_id = @empresa_id
+         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
       { evento_id, empresa_id: evento.empresa_id }
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
@@ -166,8 +169,23 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'O jogo e o evento devem pertencer à mesma empresa' });
     }
     
+    const selectedCheckpointIds = Array.isArray(checkpoints)
+      ? checkpoints.map(cp => String(cp.id || cp)).filter(Boolean)
+      : [];
     const checkpointsJson = checkpoints ? JSON.stringify(checkpoints) : null;
-    
+
+    const validCheckpoints = await allQuery(
+      `SELECT id FROM checkpoints
+       WHERE evento_id = @evento_id
+         AND empresa_id = @empresa_id
+         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
+      { evento_id: targetEventoId, empresa_id: evento.empresa_id }
+    );
+    const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
+    if (selectedCheckpointIds.length === 0 || selectedCheckpointIds.some(id => !validCheckpointIds.has(id))) {
+      return res.status(400).json({ error: 'Selecione apenas checkpoints de jogo pertencentes ao evento' });
+    }
+
     await query(
       `UPDATE brincadeiras SET name = @name, description = @description, rules = @rules, 
        type = @type, duration = @duration, default_points = @default_points, status = @status,

@@ -30,6 +30,7 @@ const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
+const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
 const {
@@ -77,7 +78,8 @@ const offlineCheckInterval = setInterval(async () => {
     await require('./database').query(
       `UPDATE checkpoints 
        SET status = 'offline' 
-       WHERE status = 'online' 
+       WHERE status = 'online'
+       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
        AND (last_seen IS NULL OR last_seen < @fiveMinutesAgo)`,
       { fiveMinutesAgo }
     );
@@ -325,6 +327,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         territory_cooldown_until = NULL,
         last_conquered_at = NULL
       WHERE LOWER(evento_id) = LOWER(@eventoId)
+        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
     `, { eventoId });
     console.log(`   ✓ Territórios do evento limpos para uma nova partida`);
     
@@ -488,6 +491,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
         territory_cooldown_until = NULL,
         last_conquered_at = NULL
       WHERE evento_id = @eventoId
+        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
     `, { eventoId });
     console.log(`   ✓ Domínios dos checkpoints encerrados`);
     
@@ -590,14 +594,14 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
 app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const checkpoint = await queryOne(
-      'SELECT id, empresa_id FROM checkpoints WHERE id = @checkpointId',
+      'SELECT id, empresa_id, checkpoint_purpose FROM checkpoints WHERE id = @checkpointId',
       { checkpointId }
     );
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
-    if (!isMaster(req) && String(checkpoint.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
-      return res.status(403).json({ error: 'Acesso negado: checkpoint não pertence à sua empresa' });
+    if (String(checkpoint.checkpoint_purpose || 'game').toLowerCase() === 'reception') {
+      return res.status(409).json({ error: 'O checkpoint da recepção não possui território de jogo' });
     }
 
     await query(
@@ -619,7 +623,9 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
 // DEBUG: Reset ALL territories
 app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
-    const territoryScope = isMaster(req) ? '' : ' WHERE empresa_id = @empresaId';
+    const territoryScope = isMaster(req)
+      ? " WHERE LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'"
+      : " WHERE empresa_id = @empresaId AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'";
     await query(
       `UPDATE checkpoints SET
         territory_locked_until = NULL,
@@ -668,7 +674,12 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
     
     // 3. Limpar histórico de leituras (opcional)
     await query(
-      `DELETE FROM leituras WHERE checkpoint_id IN (SELECT id FROM checkpoints WHERE evento_id = @eventoId)`,
+      `DELETE FROM leituras
+       WHERE checkpoint_id IN (
+         SELECT id FROM checkpoints
+         WHERE evento_id = @eventoId
+           AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+       )`,
       { eventoId }
     );
     console.log(`   ✓ Histórico de leituras deletado`);
@@ -686,7 +697,8 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
         territory_locked_until = NULL,
         territory_cooldown_until = NULL,
         territory_owner_time_id = NULL
-       WHERE evento_id = @eventoId`,
+       WHERE evento_id = @eventoId
+         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
       { eventoId }
     );
     console.log(`   ✓ Territories resetados`);
@@ -1133,7 +1145,8 @@ async function startServer() {
     // Caso contrário, /api/familias/pending pode retornar 500 durante o deploy.
     await ensureFamilySchema();
     await ensureGameStateSchema();
-    console.log('✅ Schema de famílias e estado do jogo verificados antes de iniciar o servidor.\n');
+    await ensureCheckpointPurposeSchema();
+    console.log('✅ Schema de famílias, estado do jogo e finalidade dos checkpoints verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);

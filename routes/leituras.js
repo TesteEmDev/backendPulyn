@@ -95,7 +95,7 @@ router.post('/reception', async (req, res) => {
     // O checkpoint fornece o evento para que somente a recepção daquele evento
     // receba o broadcast. Nenhuma regra de jogo é executada nesta rota.
     const checkpoint = await queryOne(
-      'SELECT id, empresa_id, evento_id FROM checkpoints WHERE id = @id',
+      'SELECT id, empresa_id, evento_id, checkpoint_purpose FROM checkpoints WHERE id = @id AND LOWER(COALESCE(checkpoint_purpose, \'game\')) = \'reception\'',
       { id: checkpointId }
     );
 
@@ -149,10 +149,14 @@ router.post('/', async (req, res) => {
     }
     
     // O checkpoint define a empresa e o evento da leitura.
-    const checkpoint = await queryOne('SELECT id, empresa_id, evento_id, status FROM checkpoints WHERE id = @id', { id: checkpointId });
+    const checkpoint = await queryOne('SELECT id, empresa_id, evento_id, status, checkpoint_purpose FROM checkpoints WHERE id = @id', { id: checkpointId });
     if (!checkpoint) {
       console.log(`❌ [LEITURA] Checkpoint não encontrado: ${checkpointId}`);
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+    if (String(checkpoint.checkpoint_purpose || 'game').trim().toLowerCase() === 'reception') {
+      console.log(`❌ [LEITURA] Checkpoint de recepção rejeitado na rota de jogo: ${checkpointId}`);
+      return res.status(409).json({ ok: false, error: 'Use a rota de recepção para este checkpoint' });
     }
 
     const processedReading = await findProcessedReading(readingId, checkpoint);

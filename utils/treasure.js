@@ -61,7 +61,8 @@ async function getEventCheckpoints(eventoId) {
     `SELECT id, territory_owner_time_id
      FROM checkpoints
      WHERE LOWER(evento_id) = LOWER(@eventoId)
-       AND LOWER(status) = 'online'`,
+       AND LOWER(status) = 'online'
+       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
     { eventoId }
   );
 }
@@ -207,7 +208,8 @@ async function getTeamOwnershipProgress(eventoId, teamId) {
        SUM(CASE WHEN LOWER(territory_owner_time_id) = LOWER(@teamId) THEN 1 ELSE 0 END) AS owned
      FROM checkpoints
      WHERE LOWER(evento_id) = LOWER(@eventoId)
-       AND LOWER(status) = 'online'`,
+       AND LOWER(status) = 'online'
+       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
     { eventoId, teamId }
   );
 
@@ -306,10 +308,13 @@ async function startTreasureGame(eventoId, brincadeiraId) {
 
 async function getCheckpointTreasureStatus(checkpointId) {
   const checkpoint = await queryOne(
-    'SELECT id, evento_id, status FROM checkpoints WHERE LOWER(id) = LOWER(@checkpointId)',
+    `SELECT id, evento_id, status, checkpoint_purpose FROM checkpoints WHERE LOWER(id) = LOWER(@checkpointId)`,
     { checkpointId }
   );
   if (!checkpoint) return { gameType: 'none', treasureTarget: false };
+  if (String(checkpoint.checkpoint_purpose || 'game').trim().toLowerCase() === 'reception') {
+    return { gameType: 'none', treasureTarget: false };
+  }
   if (String(checkpoint.status || '').trim().toLowerCase() !== 'online') {
     return {
       gameType: 'none',
@@ -441,12 +446,14 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   if (!session) return null;
 
   const checkpointStatus = await queryOne(
-    `SELECT status FROM checkpoints
+    `SELECT status, checkpoint_purpose FROM checkpoints
      WHERE LOWER(id) = LOWER(@checkpointId)
        AND LOWER(evento_id) = LOWER(@eventoId)`,
     { checkpointId, eventoId }
   );
-  if (!checkpointStatus || String(checkpointStatus.status || '').trim().toLowerCase() !== 'online') {
+  if (String(checkpointStatus?.checkpoint_purpose || 'game').trim().toLowerCase() === 'reception'
+      || !checkpointStatus
+      || String(checkpointStatus.status || '').trim().toLowerCase() !== 'online') {
     return {
       handled: true,
       accepted: false,
@@ -613,7 +620,8 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     `UPDATE checkpoints SET territory_owner_time_id = @timeId,
        territory_locked_until = NULL, territory_cooldown_until = NULL, last_conquered_at = @now
      WHERE LOWER(id) = LOWER(@checkpointId)
-       AND LOWER(evento_id) = LOWER(@eventoId)`,
+       AND LOWER(evento_id) = LOWER(@eventoId)
+       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
     { timeId: crianca.time_id, now, checkpointId, eventoId }
   );
 

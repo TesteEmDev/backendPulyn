@@ -36,6 +36,7 @@ async function loadMonitoringData() {
     allQuery(`
       SELECT id, evento_id, empresa_id, name, status, last_seen, ip, zone, points
       FROM checkpoints
+      WHERE LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
     `),
     allQuery(`
       SELECT id, empresa_id, name, [date] AS event_date, [time] AS event_time, created_at

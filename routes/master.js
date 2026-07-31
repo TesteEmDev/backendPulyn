@@ -33,7 +33,9 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       SELECT COUNT(*) as count
       FROM checkpoints c
       LEFT JOIN empresas emp ON c.empresa_id = emp.id
-      WHERE c.status = 'online' AND emp.nome != 'Master Admin'
+      WHERE c.status = 'online'
+        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
+        AND emp.nome != 'Master Admin'
     `);
     
     // Crianças ativas hoje
@@ -51,6 +53,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
       FROM checkpoints c
       LEFT JOIN empresas emp ON c.empresa_id = emp.id
       WHERE (c.status = 'offline' OR c.status IS NULL)
+        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
         AND emp.nome != 'Master Admin'
     `);
     
@@ -161,6 +164,7 @@ router.get('/alerts', verifyToken, async (req, res) => {
         FORMAT(GETDATE(), 'HH:mm') as time
       FROM checkpoints
       WHERE status = 'offline'
+        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
     `);
     
     console.log(`✅ ${alerts?.length || 0} alertas carregados`);

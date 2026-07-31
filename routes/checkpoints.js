@@ -95,6 +95,7 @@ router.get('/evento/:evento_id', verifyToken, async (req, res) => {
       `SELECT * FROM checkpoints
        WHERE evento_id = @evento_id
          AND empresa_id = @empresa_id
+         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
        ORDER BY name`,
       { evento_id, empresa_id: evento.empresa_id }
     );
@@ -142,13 +143,17 @@ router.get('/:id/territory', async (req, res) => {
         id,
         territory_locked_until,
         territory_cooldown_until,
-        territory_owner_time_id
+        territory_owner_time_id,
+        checkpoint_purpose
       FROM checkpoints WHERE id = @id`,
       { id: req.params.id }
     );
 
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+    if (String(checkpoint.checkpoint_purpose || 'game').toLowerCase() === 'reception') {
+      return res.status(404).json({ error: 'Checkpoint de recepção não possui território de jogo' });
     }
 
     const now = new Date();
@@ -221,14 +226,15 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
 
     // ✅ Inserir novo checkpoint COM empresa_id
     await query(`
-      INSERT INTO checkpoints (id, evento_id, empresa_id, name, type, zone, ip, points, status, authorized_tags)
-      VALUES (@id, @evento_id, @empresa_id, @name, @type, @zone, @ip, @points, @status, @authorized_tags)
+      INSERT INTO checkpoints (id, evento_id, empresa_id, name, type, checkpoint_purpose, zone, ip, points, status, authorized_tags)
+      VALUES (@id, @evento_id, @empresa_id, @name, @type, @checkpoint_purpose, @zone, @ip, @points, @status, @authorized_tags)
     `, {
       id,
       evento_id,
       empresa_id, // ✅ NOVO: Incluir empresa_id
       name,
       type: type || 'NFC',
+      checkpoint_purpose: 'game',
       zone: zone || null,
       ip: ip || null,
       points: points || 10,
@@ -306,7 +312,7 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
     }
 
     const checkpoint = await queryOne(
-      `SELECT id FROM checkpoints
+      `SELECT id, checkpoint_purpose FROM checkpoints
        WHERE LOWER(id) = LOWER(@id)
          AND LOWER(evento_id) = LOWER(@evento_id)
          AND LOWER(empresa_id) = LOWER(@empresa_id)`,
@@ -315,6 +321,10 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
 
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    }
+
+    if (String(checkpoint.checkpoint_purpose || 'game').toLowerCase() === 'reception') {
+      return res.status(409).json({ error: 'O checkpoint da recepção não pode ser excluído por esta tela' });
     }
 
     // Não alterar a estrutura de uma partida enquanto o jogo está ativo.

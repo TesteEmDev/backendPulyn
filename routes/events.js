@@ -404,6 +404,7 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
       SELECT * FROM checkpoints 
       WHERE evento_id = @evento_id
       AND empresa_id = @empresa_id
+      AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
       ORDER BY name ASC
     `, { evento_id, empresa_id });
     res.json(checkpoints);

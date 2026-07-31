@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS "checkpoints" (
   "evento_id" varchar(36) NOT NULL,
   "name" varchar(100) NOT NULL,
   "type" varchar(20) DEFAULT 'NFC',
+  "checkpoint_purpose" varchar(20) DEFAULT 'game',
   "ip" varchar(15),
   "zone" varchar(100),
   "led_color" varchar(20) DEFAULT '#00FF00',
