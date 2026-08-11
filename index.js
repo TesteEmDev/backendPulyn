@@ -23,6 +23,7 @@ const rankingRoutes = require('./routes/ranking');
 const logsRoutes = require('./routes/logs');
 const loginsRoutes = require('./routes/logins');
 const treasureRoutes = require('./routes/treasure');
+const monsterRoutes = require('./routes/monster');
 const planosRoutes = require('./routes/planos');
 const monitoringRoutes = require('./routes/monitoring');
 const supportRoutes = require('./routes/support');
@@ -31,6 +32,7 @@ const familiasRoutes = require('./routes/familias');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
+const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
 const {
@@ -39,6 +41,11 @@ const {
   startTreasureGame,
   stopTreasureGame,
 } = require('./utils/treasure');
+const {
+  MONSTER_GAME_TYPE,
+  startMonsterGame,
+  stopMonsterGame,
+} = require('./utils/monster');
 
 const app = express();
 const server = http.createServer(app);
@@ -310,13 +317,22 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
-    const gameType = selectedGame.type === TREASURE_GAME_TYPE ? TREASURE_GAME_TYPE : 'zone_conquest';
+    const gameType = selectedGame.type === TREASURE_GAME_TYPE
+      ? TREASURE_GAME_TYPE
+      : selectedGame.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
     let treasureStart = null;
+    let monsterStart = null;
     if (gameType === TREASURE_GAME_TYPE) {
       treasureStart = await startTreasureGame(eventoId, selectedGame.id);
+      await stopMonsterGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
+    } else if (gameType === MONSTER_GAME_TYPE) {
+      monsterStart = await startMonsterGame(eventoId, selectedGame.id);
+      await stopTreasureGame(eventoId);
+      console.log(`   ✓ Caça ao Monstro iniciado com checkpoint especial`);
     } else {
       await stopTreasureGame(eventoId);
+      await stopMonsterGame(eventoId);
     }
 
     // Cada novo início começa sem domínio visual da partida anterior.
@@ -400,6 +416,11 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
           initialWait: treasureStart.initialWait,
           targetCheckpointId: treasureStart.targetCheckpointId,
         } : null,
+        monster: monsterStart ? {
+          monsterHp: monsterStart.monsterHp,
+          monsterMaxHp: monsterStart.monsterMaxHp,
+          monsterSpecialCheckpoint: monsterStart.monsterSpecialCheckpoint,
+        } : null,
       }
     });
     
@@ -421,6 +442,11 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
           turnWaitSeconds: treasureStart.turnWaitSeconds,
           initialWait: treasureStart.initialWait,
           targetCheckpointId: treasureStart.targetCheckpointId,
+        } : null,
+        monster: monsterStart ? {
+          monsterHp: monsterStart.monsterHp,
+          monsterMaxHp: monsterStart.monsterMaxHp,
+          monsterSpecialCheckpoint: monsterStart.monsterSpecialCheckpoint,
         } : null,
       }
     });
@@ -482,6 +508,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     }
 
     await stopTreasureGame(eventoId);
+    await stopMonsterGame(eventoId);
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
@@ -743,6 +770,40 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
   currentMode = 'idle';
   persistEventMode(eventoId, 'idle', 'none', { stoppedAt: finishedAt }).catch((error) => {
     console.error('❌ Erro ao persistir encerramento do evento:', error.message);
+  });
+
+  const payload = { eventoId, stoppedAt: finishedAt, automatic: true };
+  global.broadcast({ type: 'GAME_STOPPED', payload });
+  global.broadcastToEvent(eventoId, { type: 'GAME_STOPPED', payload });
+  global.broadcastToEvent(eventoId, {
+    type: 'CHECKPOINT_MODE_CHANGED',
+    payload: { mode: 'idle', gameType: 'none', eventoId, timestamp: finishedAt },
+  });
+};
+
+global.finishMonsterGameState = (eventoId, finishedAt = new Date().toISOString()) => {
+  if (gameStatus.eventoId
+    && String(gameStatus.eventoId).trim().toLowerCase() !== String(eventoId).trim().toLowerCase()) return;
+
+  gameStatus = {
+    isRunning: false,
+    gameId: null,
+    gameName: null,
+    gameType: 'none',
+    eventoId: null,
+    startedAt: null,
+  };
+  currentGameType = 'none';
+  currentMode = 'idle';
+  query(
+    `UPDATE eventos SET status = 'scheduled', active_brincadeira_id = NULL, active_game_type = 'none'
+     WHERE LOWER(id) = LOWER(@eventoId)`,
+    { eventoId }
+  ).catch((error) => {
+    console.error('❌ Erro ao limpar jogo ativo do evento após derrota do monstro:', error.message);
+  });
+  persistEventMode(eventoId, 'idle', 'none', { stoppedAt: finishedAt }).catch((error) => {
+    console.error('❌ Erro ao persistir encerramento do Caça ao Monstro:', error.message);
   });
 
   const payload = { eventoId, stoppedAt: finishedAt, automatic: true };
@@ -1115,6 +1176,9 @@ app.use('/api/logins', loginsRoutes);
 // Caça ao Tesouro
 app.use('/api/treasure', treasureRoutes);
 
+// Caça ao Monstro
+app.use('/api/monster', monsterRoutes);
+
 // Recursos do dashboard master
 app.use('/api/planos', planosRoutes);
 app.use('/api/monitoring', monitoringRoutes);
@@ -1146,7 +1210,8 @@ async function startServer() {
     await ensureFamilySchema();
     await ensureGameStateSchema();
     await ensureCheckpointPurposeSchema();
-    console.log('✅ Schema de famílias, estado do jogo e finalidade dos checkpoints verificados antes de iniciar o servidor.\n');
+    await ensureMonsterHuntSchema();
+    console.log('✅ Schema de famílias, estado do jogo, finalidade dos checkpoints e Caça ao Monstro verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);

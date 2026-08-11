@@ -4,6 +4,16 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { saveGameState } = require('../utils/gameState');
+const {
+  MONSTER_GAME_TYPE,
+  startMonsterGame,
+  stopMonsterGame,
+} = require('../utils/monster');
+const {
+  TREASURE_GAME_TYPE,
+  startTreasureGame,
+  stopTreasureGame,
+} = require('../utils/treasure');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -303,7 +313,20 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
     
-    const gameType = brincadeira.game_type || brincadeira.type || 'standard';
+    const rawGameType = brincadeira.type || brincadeira.game_type || 'standard';
+    const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE].includes(rawGameType)
+      ? rawGameType
+      : rawGameType || 'standard';
+    if (gameType === MONSTER_GAME_TYPE) {
+      await startMonsterGame(evento_id, brincadeira.id);
+      await stopTreasureGame(evento_id);
+    } else if (gameType === TREASURE_GAME_TYPE) {
+      await startTreasureGame(evento_id, brincadeira.id);
+      await stopMonsterGame(evento_id);
+    } else {
+      await stopMonsterGame(evento_id);
+      await stopTreasureGame(evento_id);
+    }
     
     // Atualizar evento para ativar jogo
     await query(
@@ -353,6 +376,8 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
     }
     
     // Atualizar evento para pausar jogo
+    await stopMonsterGame(evento_id);
+    await stopTreasureGame(evento_id);
     await query(
       `UPDATE eventos 
        SET status = @status, 

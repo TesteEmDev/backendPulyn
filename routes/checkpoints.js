@@ -4,6 +4,7 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
+const { getCheckpointMonsterStatus } = require('../utils/monster');
 
 function sameId(left, right) {
   return left !== null && left !== undefined
@@ -170,6 +171,7 @@ router.get('/:id/territory', async (req, res) => {
     }
 
     const treasureStatus = await getCheckpointTreasureStatus(req.params.id);
+    const monsterStatus = await getCheckpointMonsterStatus(req.params.id);
 
     res.json({
       checkpointId: checkpoint.id,
@@ -180,7 +182,8 @@ router.get('/:id/territory', async (req, res) => {
       cooldownUntil: checkpoint.territory_cooldown_until,
       remainingSeconds: isLocked ? Math.max(0, Math.ceil((new Date(checkpoint.territory_locked_until) - now) / 1000)) : 0,
       cooldownRemaining: isCooldown ? Math.max(0, Math.ceil((new Date(checkpoint.territory_cooldown_until) - now) / 1000)) : 0,
-      ...treasureStatus
+      ...treasureStatus,
+      ...monsterStatus
     });
   } catch (err) {
     console.error('❌ Erro ao buscar status do território:', err);
@@ -339,6 +342,17 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
       });
     }
 
+    const activeMonster = await queryOne(
+      `SELECT id FROM monster_hunt_partidas
+       WHERE LOWER(evento_id) = LOWER(@evento_id) AND status = 'active'`,
+      { evento_id }
+    );
+    if (activeMonster) {
+      return res.status(409).json({
+        error: 'Não é possível excluir checkpoint enquanto o Caça ao Monstro está ativo. Finalize o jogo primeiro.',
+      });
+    }
+
     // Remover o checkpoint de históricos JSON de partidas encerradas.
     const treasureSessions = await allQuery(
       `SELECT id, target_checkpoint_id, completed_checkpoint_ids
@@ -394,6 +408,12 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
 
     // As FKs do schema não usam ON DELETE CASCADE; limpar dependências antes
     // do registro principal evita a violação de FK sem afetar outros eventos.
+    await query(
+      `DELETE FROM monster_hunt_scans
+       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)
+         AND LOWER(evento_id) = LOWER(@evento_id)`,
+      { checkpointId: checkpoint.id, evento_id }
+    );
     await query(
       `DELETE FROM caca_tesouro_scans
        WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)

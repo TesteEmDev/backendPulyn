@@ -68,7 +68,7 @@ router.post('/', verifyToken, async (req, res) => {
   try {
     const { name, description, rules, type, duration, default_points, evento_id, checkpoints } = req.body;
     const empresa_id = req.user.empresa_id;
-    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt'];
+    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
 
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
@@ -135,7 +135,7 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { name, description, rules, type, duration, default_points, status, evento_id, checkpoints } = req.body;
     const empresa_id = req.user.empresa_id;
-    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt'];
+    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
     }

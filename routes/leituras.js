@@ -9,6 +9,11 @@ const {
   getActiveSession,
   processTreasureScan,
 } = require('../utils/treasure');
+const {
+  getActiveMonsterGame,
+  getMonsterEventStatus,
+  processMonsterScan,
+} = require('../utils/monster');
 
 function getRandomIdleColor() {
   const color = randomBytes(3).toString('hex').toUpperCase();
@@ -33,11 +38,15 @@ async function findProcessedReading(readingId, checkpoint) {
 
   const existing = await queryOne(
     `SELECT l.id, l.checkpoint_id, l.authorized, l.points_awarded,
-            l.uid, l.crianca_id, l.brincadeira_id, c.name AS crianca_name,
-            c.time_id, t.color AS team_color
+            l.uid, l.crianca_id, l.brincadeira_id, c.evento_id,
+            c.name AS crianca_name, c.time_id, t.name AS team_name, t.color AS team_color,
+            ms.attack_type AS monster_attack_type, ms.damage AS monster_damage,
+            ms.monster_hp_after, ms.monster_defeated, mp.max_hp AS monster_max_hp
      FROM leituras l
      LEFT JOIN criancas c ON c.id = l.crianca_id
      LEFT JOIN times t ON t.id = c.time_id
+     LEFT JOIN monster_hunt_scans ms ON ms.leitura_id = l.id
+     LEFT JOIN monster_hunt_partidas mp ON mp.id = ms.partida_id
      WHERE l.id = @readingId`,
     { readingId }
   );
@@ -56,6 +65,10 @@ async function sendProcessedReading(res, reading) {
     ? await queryOne('SELECT type FROM brincadeiras WHERE id = @id', { id: reading.brincadeira_id })
     : null;
   const isTreasure = game?.type === 'treasure_hunt';
+  const isMonster = game?.type === 'monster_hunt' || Boolean(reading.monster_attack_type);
+  const monsterStatus = isMonster && reading.evento_id
+    ? await getMonsterEventStatus(reading.evento_id)
+    : null;
 
   return res.json({
     ok: true,
@@ -65,12 +78,23 @@ async function sendProcessedReading(res, reading) {
     readingId: reading.id,
     braceletCode: reading.uid,
     criancaName: reading.crianca_name || undefined,
+    teamName: reading.team_name || undefined,
     teamColor: reading.team_color || '',
     points: Number(reading.points_awarded || 0),
     treasure: isTreasure,
     treasureAccepted: isTreasure && Boolean(reading.authorized),
     treasureTeamComplete: false,
-    message: 'Leitura já processada anteriormente',
+    monster: isMonster,
+    monsterAccepted: false,
+    attackType: isMonster ? reading.monster_attack_type : undefined,
+    damage: isMonster ? Number(reading.monster_damage || 0) : undefined,
+    monsterHp: isMonster ? Number(reading.monster_hp_after || 0) : undefined,
+    monsterMaxHp: isMonster ? Number(reading.monster_max_hp || 100) : undefined,
+    monsterDefeated: isMonster && Boolean(reading.monster_defeated),
+    alreadyScanned: isMonster,
+    progress: isMonster ? (monsterStatus?.progress || []) : undefined,
+    teamsProgress: isMonster ? (monsterStatus?.teamsProgress || monsterStatus?.progress || []) : undefined,
+    message: isMonster ? 'Leitura do monstro já processada anteriormente' : 'Leitura já processada anteriormente',
   });
 }
 
@@ -85,6 +109,12 @@ function broadcast(data) {
         client.send(JSON.stringify(data));
       }
     });
+  }
+}
+
+function broadcastEvent(data) {
+  if (global.broadcastToEvent && data.payload?.eventoId) {
+    global.broadcastToEvent(data.payload.eventoId, data);
   }
 }
 
@@ -189,6 +219,7 @@ router.post('/', async (req, res) => {
     broadcast(broadcastData);
 
     const treasureSession = await getActiveSession(checkpoint.evento_id);
+    const monsterSession = await getActiveMonsterGame(checkpoint.evento_id);
     const checkpointIsOnline = String(checkpoint.status || '').trim().toLowerCase() === 'online';
 
     // Durante o Caça ao Tesouro, um checkpoint offline não deve voltar a ser
@@ -326,6 +357,97 @@ router.post('/', async (req, res) => {
       });
     }
     
+    // Caça ao Monstro tem prioridade sobre o fluxo de território e confirma
+    // scan, HP, vencedor e leitura na mesma transação.
+    if (monsterSession) {
+      let monsterResult = null;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          monsterResult = await withTransaction(async (tx) => {
+            const result = await processMonsterScan({
+              eventoId: checkpoint.evento_id,
+              checkpointId,
+              crianca,
+              brincadeiraId: monsterSession.brincadeira_id,
+              uid: normalizedUid,
+              leituraId,
+              now,
+            });
+            if (result?.accepted && !result.alreadyScanned) {
+              await tx.query(
+                `INSERT INTO leituras
+                  (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
+                   points_awarded, signal_strength, empresa_id)
+                 VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
+                         0, @signal, @empresaId)`,
+                {
+                  id: leituraId,
+                  checkpointId,
+                  criancaId: crianca.id,
+                  uid: normalizedUid,
+                  brincadeiraId: monsterSession.brincadeira_id,
+                  signal: signal || -45,
+                  empresaId: crianca.empresa_id,
+                }
+              );
+            }
+            return result;
+          });
+          break;
+        } catch (error) {
+          if (error.code === 'MONSTER_VERSION_CONFLICT' && attempt < 2) continue;
+          throw error;
+        }
+      }
+
+      if (monsterResult) {
+        if (monsterResult.accepted && !monsterResult.alreadyScanned) {
+          const eventType = monsterResult.monsterDefeated
+            ? 'MONSTER_DEFEATED'
+            : monsterResult.attackType === 'special_attack'
+              ? 'MONSTER_SPECIAL_ATTACK'
+              : 'MONSTER_PROGRESS';
+          broadcastEvent({
+            type: eventType,
+            payload: {
+              ...monsterResult,
+              checkpointId,
+              criancaId: crianca.id,
+              criancaName: crianca.name,
+              timeId: crianca.time_id,
+              eventoId: checkpoint.evento_id,
+            },
+          });
+        }
+
+        if (monsterResult.monsterDefeated && typeof global.finishMonsterGameState === 'function') {
+          global.finishMonsterGameState(checkpoint.evento_id, now.toISOString());
+        }
+
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: Boolean(monsterResult.accepted),
+          braceletCode: normalizedUid,
+          readingId: leituraId,
+          monster: true,
+          monsterAccepted: Boolean(monsterResult.accepted),
+          attackType: monsterResult.attackType || null,
+          damage: Number(monsterResult.damage || 0),
+          monsterHp: Number(monsterResult.monsterHp || 0),
+          monsterMaxHp: Number(monsterResult.monsterMaxHp || monsterSession.max_hp || 100),
+          monsterDefeated: Boolean(monsterResult.monsterDefeated),
+          alreadyScanned: Boolean(monsterResult.alreadyScanned),
+          progress: monsterResult.progress || [],
+          teamsProgress: monsterResult.teamsProgress || monsterResult.progress || [],
+          teamName: monsterResult.teamName || null,
+          teamColor: monsterResult.teamColor || '',
+          error: monsterResult.error,
+          message: monsterResult.message || 'Leitura do monstro processada',
+        });
+      }
+    }
+
     // Caça ao Tesouro usa uma regra própria e não pontua como Zona.
     if (treasureSession) {
       if (!checkpointIsOnline) {
