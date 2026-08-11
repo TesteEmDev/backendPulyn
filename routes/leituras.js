@@ -2,12 +2,18 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
+const { randomBytes } = require('crypto');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const {
   getActiveSession,
   processTreasureScan,
 } = require('../utils/treasure');
+
+function getRandomIdleColor() {
+  const color = randomBytes(3).toString('hex').toUpperCase();
+  return `#${color === '000000' ? 'FFFFFF' : color}`;
+}
 
 function getReadingId(req, bodyReadingId) {
   const candidate = bodyReadingId || req.get('Idempotency-Key');
@@ -307,13 +313,16 @@ router.post('/', async (req, res) => {
     }
     
     if (evento.status !== 'active') {
+      const randomColor = getRandomIdleColor();
       console.log(`   ⚠️ [LEITURA] Evento NÃO está ativo (status: ${evento.status}). BLOQUEANDO pontos!`);
+      console.log(`   🎨 [LEITURA] Cor aleatória fora de jogo: ${randomColor}`);
       return res.json({ 
         ok: true, 
         registered: true, 
         braceletCode: normalizedUid,
         authorized: false,
-        message: 'Jogo não foi iniciado ainda. Inicie o jogo no Game Master para começar a contar pontos.'
+        randomColor,
+        message: 'Leitura fora de jogo. Nenhum ponto foi contabilizado.'
       });
     }
     
