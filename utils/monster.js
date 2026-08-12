@@ -3,7 +3,7 @@ const { query, queryOne, allQuery } = require('../database');
 
 const MONSTER_GAME_TYPE = 'monster_hunt';
 const MONSTER_DEFAULTS = Object.freeze({
-  maxHp: 100,
+  maxHp: 500,
   normalDamage: 10,
   specialCheckpointDamage: 30,
   specialAttackDamage: 50,
@@ -67,7 +67,7 @@ async function getMonsterProgress(eventoId, partidaId) {
     SELECT t.id, t.name, t.color,
       (SELECT COUNT(*) FROM criancas c
        WHERE LOWER(c.evento_id) = LOWER(@eventoId) AND LOWER(c.time_id) = LOWER(t.id)) AS total,
-      (SELECT COUNT(*) FROM monster_hunt_scans s
+      (SELECT COUNT(DISTINCT s.crianca_id) FROM monster_hunt_scans s
        WHERE LOWER(s.partida_id) = LOWER(@partidaId) AND LOWER(s.time_id) = LOWER(t.id)) AS scanned
     FROM times t
     WHERE LOWER(t.evento_id) = LOWER(@eventoId)
@@ -236,15 +236,52 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
   });
   if (!team) return { handled: true, accepted: false, error: 'Equipe não pertence ao evento' };
 
-  const existing = await queryOne(`
-    SELECT id, attack_type, damage, monster_hp_after, monster_defeated
-    FROM monster_hunt_scans
-    WHERE LOWER(partida_id) = LOWER(@partidaId) AND LOWER(crianca_id) = LOWER(@criancaId)`, {
-    partidaId: session.id, criancaId: crianca.id,
-  });
   const progressBefore = await getMonsterProgress(eventoId, session.id);
   const currentBefore = progressBefore.find(item => sameId(item.teamId, crianca.time_id));
-  if (existing) return getMonsterScanResult(session, existing, progressBefore, currentBefore);
+  const lastCheckpointScan = await queryOne(`
+    SELECT TOP 1 scanned_at
+    FROM monster_hunt_scans
+    WHERE LOWER(partida_id) = LOWER(@partidaId)
+      AND LOWER(checkpoint_id) = LOWER(@checkpointId)
+    ORDER BY scanned_at DESC`, {
+    partidaId: session.id, checkpointId,
+  });
+  const checkpointCooldownSeconds = 15;
+  const lastScanAt = lastCheckpointScan?.scanned_at ? new Date(lastCheckpointScan.scanned_at).getTime() : 0;
+  const remainingSeconds = lastScanAt
+    ? Math.max(0, checkpointCooldownSeconds - Math.floor((Date.now() - lastScanAt) / 1000))
+    : 0;
+
+  if (remainingSeconds > 0) {
+    return {
+      handled: true,
+      accepted: false,
+      alreadyScanned: false,
+      checkpointLocked: true,
+      remainingSeconds,
+      checkpointCooldownSeconds,
+      monsterAccepted: false,
+      damage: 0,
+      monsterHp: Number(session.hp),
+      monsterMaxHp: Number(session.max_hp),
+      monsterDefeated: session.status === 'completed',
+      progress: progressBefore,
+      teamsProgress: progressBefore,
+      teamId: team.id,
+      teamName: team.name,
+      teamColor: team.color || '',
+      message: `Checkpoint bloqueado. Aguarde ${remainingSeconds}s`,
+    };
+  }
+
+  const childTeamScan = await queryOne(`
+    SELECT TOP 1 id
+    FROM monster_hunt_scans
+    WHERE LOWER(partida_id) = LOWER(@partidaId)
+      AND LOWER(crianca_id) = LOWER(@criancaId)`, {
+    partidaId: session.id, criancaId: crianca.id,
+  });
+  const childAlreadyAttacked = Boolean(childTeamScan);
 
   const members = await allQuery(`
     SELECT id FROM criancas
@@ -252,7 +289,9 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     eventoId, timeId: crianca.time_id,
   });
   const teamScannedBefore = Number(currentBefore?.scanned || 0);
-  const isSpecialAttack = teamScannedBefore + 1 >= members.length && members.length > 0;
+  const isSpecialAttack = !childAlreadyAttacked
+    && teamScannedBefore + 1 >= members.length
+    && members.length > 0;
   const isSpecialCheckpoint = sameId(session.special_checkpoint_id, checkpointId);
   const attackType = isSpecialAttack ? 'special_attack' : isSpecialCheckpoint ? 'special_checkpoint' : 'normal';
   const damage = isSpecialAttack
@@ -323,6 +362,9 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     teamId: team.id,
     teamName: team.name,
     teamColor: team.color || '',
+    checkpointLocked: false,
+    remainingSeconds: 0,
+    checkpointCooldownSeconds: 15,
     message: monsterDefeated ? `O monstro foi derrotado pelo ${team.name}!` : `Ataque confirmado: -${damage} HP`,
   };
 }

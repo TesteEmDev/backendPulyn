@@ -11,8 +11,8 @@ async function ensureMonsterHuntSchema() {
         evento_id varchar(36) NOT NULL,
         brincadeira_id varchar(36),
         status varchar(20) NOT NULL DEFAULT 'active',
-        hp integer NOT NULL DEFAULT 100,
-        max_hp integer NOT NULL DEFAULT 100,
+        hp integer NOT NULL DEFAULT 500,
+        max_hp integer NOT NULL DEFAULT 500,
         normal_damage integer NOT NULL DEFAULT 10,
         special_checkpoint_damage integer NOT NULL DEFAULT 30,
         special_attack_damage integer NOT NULL DEFAULT 50,
@@ -44,7 +44,9 @@ async function ensureMonsterHuntSchema() {
         scanned_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_monster_hunt_scan_child ON monster_hunt_scans (partida_id, crianca_id)');
+    await query('ALTER TABLE monster_hunt_scans DROP CONSTRAINT IF EXISTS "UQ_monster_hunt_scan_child"');
+    await query('DROP INDEX IF EXISTS uq_monster_hunt_scan_child');
+    await query('CREATE INDEX IF NOT EXISTS idx_monster_hunt_scans_checkpoint ON monster_hunt_scans (partida_id, checkpoint_id, scanned_at)');
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_monster_hunt_scan_reading ON monster_hunt_scans (leitura_id) WHERE leitura_id IS NOT NULL');
     await query('CREATE INDEX IF NOT EXISTS idx_monster_hunt_partidas_evento ON monster_hunt_partidas (empresa_id, evento_id, status)');
     await query('CREATE INDEX IF NOT EXISTS idx_monster_hunt_scans_evento ON monster_hunt_scans (empresa_id, evento_id, partida_id)');
@@ -60,8 +62,8 @@ async function ensureMonsterHuntSchema() {
         evento_id NVARCHAR(36) NOT NULL,
         brincadeira_id NVARCHAR(36) NULL,
         status NVARCHAR(20) NOT NULL DEFAULT 'active',
-        hp INT NOT NULL DEFAULT 100,
-        max_hp INT NOT NULL DEFAULT 100,
+        hp INT NOT NULL DEFAULT 500,
+        max_hp INT NOT NULL DEFAULT 500,
         normal_damage INT NOT NULL DEFAULT 10,
         special_checkpoint_damage INT NOT NULL DEFAULT 30,
         special_attack_damage INT NOT NULL DEFAULT 50,
@@ -98,8 +100,12 @@ async function ensureMonsterHuntSchema() {
     END
   `);
   await query(`
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_monster_hunt_scan_child' AND object_id = OBJECT_ID('dbo.monster_hunt_scans'))
-      CREATE UNIQUE INDEX uq_monster_hunt_scan_child ON monster_hunt_scans (partida_id, crianca_id)
+    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_monster_hunt_scan_child' AND object_id = OBJECT_ID('dbo.monster_hunt_scans'))
+      DROP INDEX uq_monster_hunt_scan_child ON monster_hunt_scans
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_monster_hunt_scans_checkpoint' AND object_id = OBJECT_ID('dbo.monster_hunt_scans'))
+      CREATE INDEX idx_monster_hunt_scans_checkpoint ON monster_hunt_scans (partida_id, checkpoint_id, scanned_at)
   `);
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_monster_hunt_scan_reading' AND object_id = OBJECT_ID('dbo.monster_hunt_scans'))

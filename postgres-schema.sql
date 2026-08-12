@@ -585,8 +585,8 @@ CREATE TABLE IF NOT EXISTS "monster_hunt_partidas" (
   "evento_id" varchar(36) NOT NULL,
   "brincadeira_id" varchar(36),
   "status" varchar(20) NOT NULL DEFAULT 'active',
-  "hp" integer NOT NULL DEFAULT 100,
-  "max_hp" integer NOT NULL DEFAULT 100,
+  "hp" integer NOT NULL DEFAULT 500,
+  "max_hp" integer NOT NULL DEFAULT 500,
   "normal_damage" integer NOT NULL DEFAULT 10,
   "special_checkpoint_damage" integer NOT NULL DEFAULT 30,
   "special_attack_damage" integer NOT NULL DEFAULT 50,
@@ -614,9 +614,11 @@ CREATE TABLE IF NOT EXISTS "monster_hunt_scans" (
   "monster_hp_after" integer NOT NULL,
   "monster_defeated" boolean NOT NULL DEFAULT false,
   "version" integer NOT NULL DEFAULT 0,
-  "scanned_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  CONSTRAINT "UQ_monster_hunt_scan_child" UNIQUE ("partida_id", "crianca_id")
+  "scanned_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS "idx_monster_hunt_scans_checkpoint"
+  ON "monster_hunt_scans" ("partida_id", "checkpoint_id", "scanned_at");
 
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_monster_hunt_scan_reading"
   ON "monster_hunt_scans" ("leitura_id") WHERE "leitura_id" IS NOT NULL;
