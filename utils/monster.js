@@ -18,6 +18,22 @@ function parseJson(value, fallback = []) {
   try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
 }
 
+async function getCheckpointCooldownSeconds(brincadeiraId, checkpointId) {
+  if (!brincadeiraId) return 15;
+
+  const game = await queryOne(
+    'SELECT checkpoints FROM brincadeiras WHERE LOWER(id) = LOWER(@brincadeiraId)',
+    { brincadeiraId }
+  );
+  const configuredCheckpoint = parseJson(game?.checkpoints, []).find((item) =>
+    item && typeof item === 'object' && sameId(item.id, checkpointId)
+  );
+  const configuredCooldown = Number(configuredCheckpoint?.cooldown);
+
+  if (!Number.isInteger(configuredCooldown) || configuredCooldown < 1) return 15;
+  return Math.min(configuredCooldown, 120);
+}
+
 function isUniqueError(error) {
   return /unique|duplicate|constraint/i.test(String(error?.message || ''));
 }
@@ -154,15 +170,13 @@ async function getCheckpointMonsterStatus(checkpointId) {
   const checkpoint = await queryOne(`
     SELECT id, evento_id, checkpoint_purpose FROM checkpoints WHERE LOWER(id) = LOWER(@checkpointId)`, { checkpointId });
   if (!checkpoint || String(checkpoint.checkpoint_purpose || 'game').toLowerCase() === 'reception') {
-    return { monsterActive: false, monsterSpecialCheckpoint: false };
+    return { monsterActive: false };
   }
   const session = await getActiveMonsterGame(checkpoint.evento_id);
-  if (!session) return { monsterActive: false, monsterSpecialCheckpoint: false };
+  if (!session) return { monsterActive: false };
   return {
     gameType: MONSTER_GAME_TYPE,
     monsterActive: true,
-    monsterSpecialCheckpoint: sameId(session.special_checkpoint_id, checkpointId),
-    monsterSpecialCheckpointId: session.special_checkpoint_id,
     monsterHp: Number(session.hp),
     monsterMaxHp: Number(session.max_hp),
     monsterDefeated: false,
@@ -190,8 +204,6 @@ async function getMonsterEventStatus(eventoId) {
     monsterHp: Number(session.hp),
     monsterMaxHp: Number(session.max_hp),
     monsterDefeated: session.status === 'completed',
-    monsterSpecialCheckpoint: session.special_checkpoint_id || null,
-    monsterSpecialCheckpointId: session.special_checkpoint_id || null,
     winnerTeamId: winner?.id || null,
     winnerTeamName: winner?.name || null,
     winnerTeamColor: winner?.color || null,
@@ -246,7 +258,10 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     ORDER BY scanned_at DESC`, {
     partidaId: session.id, checkpointId,
   });
-  const checkpointCooldownSeconds = 15;
+  const checkpointCooldownSeconds = await getCheckpointCooldownSeconds(
+    session.brincadeira_id || brincadeiraId,
+    checkpointId
+  );
   const lastScanAt = lastCheckpointScan?.scanned_at ? new Date(lastCheckpointScan.scanned_at).getTime() : 0;
   const remainingSeconds = lastScanAt
     ? Math.max(0, checkpointCooldownSeconds - Math.floor((Date.now() - lastScanAt) / 1000))
@@ -364,7 +379,7 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     teamColor: team.color || '',
     checkpointLocked: false,
     remainingSeconds: 0,
-    checkpointCooldownSeconds: 15,
+    checkpointCooldownSeconds,
     message: monsterDefeated ? `O monstro foi derrotado pelo ${team.name}!` : `Ataque confirmado: -${damage} HP`,
   };
 }
