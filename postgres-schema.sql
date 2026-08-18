@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS "criancas" (
   "name" varchar(100) NOT NULL,
   "nickname" varchar(100),
   "age" integer,
-  "avatar" varchar(10) DEFAULT '??',
+  "avatar" varchar(64) DEFAULT '??',
   "bracelet_code" varchar(50),
   "scores" integer DEFAULT 0,
   "status" varchar(20) DEFAULT 'active',

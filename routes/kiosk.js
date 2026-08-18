@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { getAvatarForCreate } = require('../utils/avatar');
 
 const router = express.Router();
 const CLOSED_EVENT_STATUSES = new Set(['completed', 'cancelled', 'canceled', 'finished']);
@@ -133,6 +134,11 @@ router.post('/participants', async (req, res) => {
     const { eventId, name, nickname, age, avatar, braceletCode, timeId } = req.body || {};
     const code = normalizeUid(braceletCode);
     const cleanName = String(name || '').trim();
+    const avatarValue = getAvatarForCreate(avatar);
+
+    if (!avatarValue) {
+      return res.status(400).json({ error: 'Avatar inválido' });
+    }
 
     if (!eventId || !cleanName || !code || !timeId) {
       return res.status(400).json({ error: 'Evento, nome, time e pulseira são obrigatórios' });
@@ -193,7 +199,7 @@ router.post('/participants', async (req, res) => {
           name: cleanName,
           nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
           age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
-          avatar: String(avatar || '👤').slice(0, 10),
+          avatar: avatarValue,
           code,
         }
       );
@@ -216,7 +222,7 @@ router.post('/participants', async (req, res) => {
         name: cleanName,
         nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
         age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
-        avatar: String(avatar || '👤').slice(0, 10),
+        avatar: avatarValue,
         braceletCode: code,
         timeId: team.id,
         teamName: team.name,

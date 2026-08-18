@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { getAvatarForCreate } = require('../utils/avatar');
 const { saveGameState } = require('../utils/gameState');
 const {
   MONSTER_GAME_TYPE,
@@ -130,9 +131,14 @@ router.get('/:evento_id/criancas', verifyToken, async (req, res) => {
 router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
   try {
     const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
+    const avatarValue = getAvatarForCreate(avatar);
     const evento_id = req.params.evento_id;
     const empresa_id = req.user.empresa_id;
     const id = uuidv4();
+
+    if (!avatarValue) {
+      return res.status(400).json({ error: 'Avatar inválido' });
+    }
     
     // 1. Validar evento e verificar permissão
     const evento = await queryOne('SELECT empresa_id FROM eventos WHERE id = @id', { id: evento_id });
@@ -165,7 +171,7 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
         name, 
         nickname, 
         age: parseInt(age) || 0, 
-        avatar: avatar || '👧', 
+        avatar: avatarValue,
         bracelet_code: braceletCode || null
       }
     );
@@ -187,7 +193,7 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
       );
     }
     
-    res.json({ id, name, nickname, age, avatar, braceletCode, timeId, scores: 0, empresa_id: evento.empresa_id });
+    res.json({ id, name, nickname, age, avatar: avatarValue, braceletCode, timeId, scores: 0, empresa_id: evento.empresa_id });
   } catch (err) {
     console.error('❌ Erro ao criar criança:', err);
     res.status(500).json({ error: err.message });

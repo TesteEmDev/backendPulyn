@@ -37,6 +37,7 @@ const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpos
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
 const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
+const { ensureAvatarSchema } = require('./migrations/avatar');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
 const WS_JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
@@ -1277,6 +1278,7 @@ async function startServer() {
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
     await ensureMonsterHuntSchema();
+    await ensureAvatarSchema();
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints e Caça ao Monstro verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);

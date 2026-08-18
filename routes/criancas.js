@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { getAvatarForCreate, isAdventurerAvatarId } = require('../utils/avatar');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -35,8 +36,13 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
   try {
     const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
+    const avatarValue = getAvatarForCreate(avatar);
     const { evento_id } = req.params;
     const id = uuidv4();
+
+    if (!avatarValue) {
+      return res.status(400).json({ error: 'Avatar inválido' });
+    }
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({ error: 'Nome da criança é obrigatório' });
@@ -91,7 +97,7 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     await query(
       `INSERT INTO criancas (id, evento_id, empresa_id, time_id, name, nickname, age, avatar, bracelet_code) 
        VALUES (@id, @evento_id, @empresa_id, @timeId, @name, @nickname, @age, @avatar, @braceletCode)`,
-      { id, evento_id, empresa_id: empresaId, timeId, name, nickname, age: parseInt(age), avatar: avatar || '👤', braceletCode: normalizedBraceletCode }
+      { id, evento_id, empresa_id: empresaId, timeId, name, nickname, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode }
     );
     
     if (normalizedBraceletCode) {
@@ -108,7 +114,7 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, name, nickname, age, avatar, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, name, nickname, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -159,6 +165,13 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     
     if (!crianca) {
       return res.status(404).json({ error: 'Criança não encontrada' });
+    }
+
+    const nextAvatar = avatar === undefined || avatar === crianca.avatar
+      ? crianca.avatar
+      : (isAdventurerAvatarId(avatar) ? avatar : null);
+    if (nextAvatar === null) {
+      return res.status(400).json({ error: 'Avatar inválido' });
     }
 
     const nextTimeId = timeId === undefined ? crianca.time_id : (timeId || null);
@@ -238,7 +251,7 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
         name: name || crianca.name, 
         nickname: nickname || crianca.nickname, 
         age: age ? parseInt(age) : crianca.age, 
-        avatar: avatar || crianca.avatar,
+        avatar: nextAvatar,
         braceletCode: normalizedBraceletCode,
         criancaId: crianca_id,
         eventoId: evento_id,
