@@ -196,7 +196,7 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
   try {
     const { evento_id } = req.params;
     const empresa_id = req.user.empresa_id; // ✅ Pegar empresa_id do token
-    const { id, name, type, zone, ip, points, status, authorizedTags } = req.body;
+    const { id, name, type, zone, ip, points, status, authorizedTags, mapX, mapY } = req.body;
 
     // Validar campos obrigatórios
     if (!id || !name) {
@@ -229,8 +229,8 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
 
     // ✅ Inserir novo checkpoint COM empresa_id
     await query(`
-      INSERT INTO checkpoints (id, evento_id, empresa_id, name, type, checkpoint_purpose, zone, ip, points, status, authorized_tags)
-      VALUES (@id, @evento_id, @empresa_id, @name, @type, @checkpoint_purpose, @zone, @ip, @points, @status, @authorized_tags)
+      INSERT INTO checkpoints (id, evento_id, empresa_id, name, type, checkpoint_purpose, zone, ip, points, status, authorized_tags, map_x, map_y)
+      VALUES (@id, @evento_id, @empresa_id, @name, @type, @checkpoint_purpose, @zone, @ip, @points, @status, @authorized_tags, @map_x, @map_y)
     `, {
       id,
       evento_id,
@@ -242,7 +242,9 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
       ip: ip || null,
       points: points || 10,
       status: status || 'configured',
-      authorized_tags: authorizedTags ? JSON.stringify(authorizedTags) : null
+      authorized_tags: authorizedTags ? JSON.stringify(authorizedTags) : null,
+      map_x: Number.isFinite(Number(mapX)) ? Math.round(Number(mapX)) : null,
+      map_y: Number.isFinite(Number(mapY)) ? Math.round(Number(mapY)) : null
     });
 
     console.log(`✅ Checkpoint criado: ${name} (empresa_id: ${empresa_id})`);
@@ -455,7 +457,7 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
   try {
     const { evento_id, id } = req.params;
     const empresa_id = req.user.empresa_id; // ✅ Pegar empresa_id do token
-    const { name, status, location, type, zone, ip, points, authorizedTags } = req.body;
+    const { name, status, location, type, zone, ip, points, authorizedTags, mapX, mapY } = req.body;
 
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
@@ -506,6 +508,14 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
     if (authorizedTags !== undefined) {
       updateFields.push('authorized_tags = @authorized_tags');
       params.authorized_tags = authorizedTags ? JSON.stringify(authorizedTags) : null;
+    }
+    if (mapX !== undefined) {
+      updateFields.push('map_x = @map_x');
+      params.map_x = Number.isFinite(Number(mapX)) ? Math.round(Number(mapX)) : null;
+    }
+    if (mapY !== undefined) {
+      updateFields.push('map_y = @map_y');
+      params.map_y = Number.isFinite(Number(mapY)) ? Math.round(Number(mapY)) : null;
     }
 
     if (updateFields.length === 0) {

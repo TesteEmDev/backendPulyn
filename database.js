@@ -168,7 +168,14 @@ function createSqlServerExecutor(requestFactory) {
   return {
     async query(sqlQuery, params = {}) {
       const request = requestFactory();
-      Object.keys(params).forEach(key => request.input(key, params[key]));
+      Object.keys(params).forEach(key => {
+        const value = params[key];
+        if (typeof value === 'string' && value.length > 4000) {
+          request.input(key, sql.NVarChar(sql.MAX), value);
+        } else {
+          request.input(key, value);
+        }
+      });
       return request.query(sqlQuery);
     },
     async queryOne(sqlQuery, params = {}) {

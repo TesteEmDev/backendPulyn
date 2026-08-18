@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS "checkpoints" (
   "checkpoint_purpose" varchar(20) DEFAULT 'game',
   "ip" varchar(15),
   "zone" varchar(100),
+  "map_x" integer,
+  "map_y" integer,
   "led_color" varchar(20) DEFAULT '#00FF00',
   "points" integer DEFAULT 10,
   "status" varchar(20) DEFAULT 'offline',
@@ -179,7 +181,10 @@ CREATE TABLE IF NOT EXISTS "eventos" (
   "created_at" timestamptz DEFAULT CURRENT_TIMESTAMP,
   "empresa_id" varchar(36),
   "active_game_type" varchar(50) DEFAULT 'none',
-  "active_brincadeira_id" varchar(36)
+  "active_brincadeira_id" varchar(36),
+  "floor_plan_data" text,
+  "floor_plan_name" varchar(255),
+  "floor_plan_type" varchar(100)
 );
 
 CREATE TABLE IF NOT EXISTS "leituras" (

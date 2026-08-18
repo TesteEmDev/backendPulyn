@@ -32,6 +32,8 @@ const familiasRoutes = require('./routes/familias');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
+const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
+const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
@@ -152,7 +154,7 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 }
 
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
 // WebSocket Connection com Rooms
@@ -669,7 +671,7 @@ app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', '
 });
 
 // ✨ NOVO: Reset pontos de um evento
-app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const { eventoId } = req.params;
     const evento = await queryOne(
@@ -1210,8 +1212,10 @@ async function startServer() {
     await ensureFamilySchema();
     await ensureGameStateSchema();
     await ensureCheckpointPurposeSchema();
+    await ensureCheckpointMapPositionSchema();
+    await ensureEventFloorPlanSchema();
     await ensureMonsterHuntSchema();
-    console.log('✅ Schema de famílias, estado do jogo, finalidade dos checkpoints e Caça ao Monstro verificados antes de iniciar o servidor.\n');
+    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints e Caça ao Monstro verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);

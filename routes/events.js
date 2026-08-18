@@ -15,6 +15,12 @@ const {
   stopTreasureGame,
 } = require('../utils/treasure');
 
+function sameId(left, right) {
+  return left !== null && left !== undefined
+    && right !== null && right !== undefined
+    && String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
+}
+
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
   next();
@@ -434,6 +440,100 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
     `, { evento_id, empresa_id });
     res.json(checkpoints);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Planta do evento: armazenada no banco para sobreviver a reload/redeploy do frontend.
+router.get('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      isMaster(req)
+        ? 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id'
+        : 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
+      isMaster(req) ? { id: req.params.id } : { id: req.params.id, empresa_id: req.user.empresa_id }
+    );
+
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    res.json({
+      eventId: evento.id,
+      floorPlan: evento.floor_plan_data
+        ? {
+            dataUrl: evento.floor_plan_data,
+            name: evento.floor_plan_name,
+            type: evento.floor_plan_type,
+          }
+        : null,
+    });
+  } catch (err) {
+    console.error('❌ Erro ao carregar planta do evento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const { dataUrl, name, type } = req.body || {};
+    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+      return res.status(400).json({ error: 'A planta deve ser enviada como uma imagem válida' });
+    }
+    if (dataUrl.length > 9 * 1024 * 1024) {
+      return res.status(413).json({ error: 'A planta é muito grande. Reduza o tamanho da imagem e tente novamente.' });
+    }
+
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      { id: req.params.id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+
+    await query(
+      `UPDATE eventos
+       SET floor_plan_data = @dataUrl,
+           floor_plan_name = @name,
+           floor_plan_type = @type
+       WHERE id = @id AND empresa_id = @empresa_id`,
+      {
+        dataUrl,
+        name: String(name || 'planta-do-evento').slice(0, 255),
+        type: String(type || 'image/jpeg').slice(0, 100),
+        id: evento.id,
+        empresa_id: evento.empresa_id,
+      }
+    );
+
+    res.json({ success: true, eventId: evento.id });
+  } catch (err) {
+    console.error('❌ Erro ao salvar planta do evento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      { id: req.params.id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+
+    await query(
+      `UPDATE eventos
+       SET floor_plan_data = NULL,
+           floor_plan_name = NULL,
+           floor_plan_type = NULL
+       WHERE id = @id AND empresa_id = @empresa_id`,
+      { id: evento.id, empresa_id: evento.empresa_id }
+    );
+    res.json({ success: true, eventId: evento.id });
+  } catch (err) {
+    console.error('❌ Erro ao remover planta do evento:', err);
     res.status(500).json({ error: err.message });
   }
 });
