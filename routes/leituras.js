@@ -118,6 +118,18 @@ function broadcastEvent(data) {
   }
 }
 
+function rememberReceptionReading(reading) {
+  if (!global.receptionReadingQueues) global.receptionReadingQueues = new Map();
+
+  const eventKey = String(reading.eventoId || '').trim().toLowerCase();
+  if (!eventKey) return;
+
+  const queue = global.receptionReadingQueues.get(eventKey) || [];
+  queue.push(reading);
+  // Mantém somente leituras recentes para permitir recuperação sem acumular dados.
+  global.receptionReadingQueues.set(eventKey, queue.slice(-50));
+}
+
 router.post('/reception', async (req, res) => {
   try {
     const { checkpointId, uid } = req.body;
@@ -148,16 +160,21 @@ router.post('/reception', async (req, res) => {
     );
 
     const registered = Boolean(pulseira);
+    const receptionReading = {
+      readingId: uuidv4(),
+      braceletCode: normalizedUid,
+      timestamp: now.toISOString(),
+      receivedAt: now.getTime(),
+      checkpointId: checkpoint.id,
+      eventoId: checkpoint.evento_id,
+      source: 'reception',
+    };
 
+    // Guarda a leitura por alguns segundos para kiosks que perderem o broadcast.
+    rememberReceptionReading(receptionReading);
     broadcast({
       type: 'NFC_READING_DETECTED',
-      payload: {
-        braceletCode: normalizedUid,
-        timestamp: now.toISOString(),
-        checkpointId,
-        eventoId: checkpoint.evento_id,
-        source: 'reception',
-      },
+      payload: receptionReading,
     });
 
     return res.json({

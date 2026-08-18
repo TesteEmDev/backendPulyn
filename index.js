@@ -2,12 +2,14 @@
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
+const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const path = require('path');
 const { query, allQuery, queryOne, DB_DRIVER } = require('./database');
 
 // Importar rotas
 const authRoutes = require('./routes/auth');
+const kioskRoutes = require('./routes/kiosk');
 const clientRoutes = require('./routes/clients');
 const eventRoutes = require('./routes/events');
 const brincadeirasRoutes = require('./routes/brincadeiras');
@@ -37,6 +39,7 @@ const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
+const WS_JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 const {
   TREASURE_GAME_TYPE,
   getGameForEvent,
@@ -157,15 +160,65 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
+// O token kiosk só pode acessar a API dedicada de autoatendimento.
+// Rotas públicas de hardware continuam compatíveis, mas não são usadas pelo navegador kiosk.
+app.use('/api', (req, res, next) => {
+  if (/^\/(auth|kiosk)(\/|$)/i.test(req.path) || !req.headers.authorization) {
+    return next();
+  }
+
+  return verifyToken(req, res, () => {
+    if (req.user?.role === 'kiosk') {
+      return res.status(403).json({ error: 'O perfil de autoatendimento só pode usar a API do kiosk' });
+    }
+    next();
+  });
+});
+
 // WebSocket Connection com Rooms
-wss.on('connection', (ws, req) => {
+wss.on('connection', async (ws, req) => {
   // Extrair evento_id da URL query string
   const url = new URL(req.url, `ws://${req.headers.host}`);
   const eventoId = url.searchParams.get('evento_id') || 'global';
-  
+  const wsToken = url.searchParams.get('token');
+
+  // Kiosk usa token no handshake e só pode assinar o evento da própria empresa.
+  let wsUser = null;
+  if (wsToken) {
+    try {
+      wsUser = jwt.verify(wsToken, WS_JWT_SECRET);
+    } catch {
+      ws.close(1008, 'Token WebSocket inválido');
+      return;
+    }
+  }
+
   // Atribuir evento_id ao WebSocket
   ws.eventoId = eventoId;
+  ws.user = wsUser;
+  ws.kioskAuthorized = wsUser?.role !== 'kiosk';
   ws.isAlive = true;
+
+  if (wsUser?.role === 'kiosk') {
+    try {
+      const kioskEvent = await queryOne(
+        `SELECT id FROM eventos
+         WHERE id = @eventoId
+           AND empresa_id = @empresaId
+           AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
+        { eventoId, empresaId: wsUser.empresa_id }
+      );
+      if (!kioskEvent) {
+        ws.close(1008, 'Evento não autorizado para este kiosk');
+        return;
+      }
+      ws.kioskAuthorized = true;
+    } catch (error) {
+      console.error('❌ Erro ao autorizar WebSocket do kiosk:', error.message);
+      ws.close(1011, 'Não foi possível autorizar o kiosk');
+      return;
+    }
+  }
   
   console.log(`✅ Cliente WebSocket conectado ao evento: ${eventoId}. Total: ${wss.clients.size}`);
   
@@ -182,9 +235,15 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'HEARTBEAT' || data.type === 'PONG') {
         return;
       }
+      if (!ws.kioskAuthorized) return;
       
       console.log(`📨 Mensagem recebida via WebSocket (evento: ${eventoId}):`, data.type);
       
+      // O kiosk apenas recebe leituras; nunca pode alterar o modo ou enviar comandos.
+      if (ws.user?.role === 'kiosk' && (data.type === 'SET_MODE' || data.type === 'COMMAND')) {
+        return;
+      }
+
       // Comandos enviados pelas telas também atualizam o modo que o Arduino consulta via HTTP.
       if (data.type === 'SET_MODE') {
         const validModes = ['idle', 'checkin', 'bracelets', 'participants', 'game'];
@@ -1132,6 +1191,9 @@ app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), 
 // ==================== ROTAS ====================
 // Autenticação
 app.use('/api/auth', authRoutes);
+
+// Autoatendimento do totem
+app.use('/api/kiosk', kioskRoutes);
 
 // Clientes
 app.use('/api/clientes', clientRoutes);

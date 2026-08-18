@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -12,7 +12,7 @@ router.use(verifyToken, (req, res, next) => {
 // ==================== LISTAR USUÁRIOS DA EMPRESA ====================
 
 // GET /api/logins/empresa/:empresa_id
-router.get('/empresa/:empresa_id', verifyToken, async (req, res) => {
+router.get('/empresa/:empresa_id', requireRole('admin', 'master'), async (req, res) => {
   try {
     const { empresa_id } = req.params;
     const user_empresa_id = req.user.empresa_id;
@@ -39,7 +39,7 @@ router.get('/empresa/:empresa_id', verifyToken, async (req, res) => {
 // ==================== CRIAR NOVO USUÁRIO ====================
 
 // POST /api/logins
-router.post('/', verifyToken, async (req, res) => {
+router.post('/', requireRole('admin', 'master'), async (req, res) => {
   try {
     const { email, password, role } = req.body;
     const empresa_id = req.user.empresa_id;
@@ -70,7 +70,7 @@ router.post('/', verifyToken, async (req, res) => {
     }
 
     // Validar role
-    const validRoles = ['admin', 'reception', 'game_master', 'display', 'family'];
+    const validRoles = ['admin', 'reception', 'game_master', 'display', 'family', 'kiosk'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ error: 'Role inválido' });
     }
@@ -112,7 +112,7 @@ router.post('/', verifyToken, async (req, res) => {
 // ==================== DELETAR USUÁRIO ====================
 
 // DELETE /api/logins/:id
-router.delete('/:id', verifyToken, async (req, res) => {
+router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
   try {
     const { id } = req.params;
     const user_empresa_id = req.user.empresa_id;

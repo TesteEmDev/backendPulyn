@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const { query, queryOne } = require('../database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
+const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk']);
 
 // Login: validar email + senha contra tabela logins
 router.post('/login', async (req, res) => {
@@ -42,6 +43,11 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
     }
 
+    if (!VALID_ROLES.has(login.role)) {
+      console.error(`❌ Role inválido configurado para o usuário ${email}: ${login.role}`);
+      return res.status(403).json({ error: 'Perfil de usuário inválido. Procure o administrador.' });
+    }
+
     // ✅ Login bem-sucedido
     console.log(`✅ Login bem-sucedido: ${email} (role: ${login.role})`);
 
@@ -71,7 +77,8 @@ router.post('/login', async (req, res) => {
       'game_master': '/game-master',
       'display': '/display',
       'family': '/family',
-      'master': '/master'
+      'master': '/master',
+      'kiosk': '/reception/kiosk'
     };
 
     res.json({
