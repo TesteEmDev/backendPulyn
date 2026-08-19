@@ -1,7 +1,9 @@
 const express = require('express');
+const { v4: uuidv4 } = require('uuid');
 const { allQuery, queryOne } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { getActiveEvent } = require('../utils/eventControl');
 
 const router = express.Router();
 const CLOSED_EVENT_STATUSES = new Set(['completed', 'cancelled', 'canceled', 'finished']);
@@ -10,7 +12,80 @@ function isOpenEvent(event) {
   return event && !CLOSED_EVENT_STATUSES.has(String(event.status || '').trim().toLowerCase());
 }
 
+function rememberScoreKioskReading(reading) {
+  if (!global.scoreKioskReadingQueues) global.scoreKioskReadingQueues = new Map();
+  const eventKey = String(reading.eventoId || '').trim().toLowerCase();
+  if (!eventKey) return;
+  const queue = global.scoreKioskReadingQueues.get(eventKey) || [];
+  queue.push(reading);
+  global.scoreKioskReadingQueues.set(eventKey, queue.slice(-50));
+}
+
 router.use(verifyToken, requireRole('kiosk', 'score_kiosk'));
+
+// Leitura enviada pelo Arduino exclusivo do totem de pontuação.
+// A recepção continua sendo a única fonte que seleciona o evento operacional.
+router.post('/readings', async (req, res) => {
+  try {
+    const code = normalizeUid(req.body?.uid);
+    const eventId = String(req.body?.eventId || '').trim();
+    if (!code || !eventId) {
+      return res.status(400).json({ error: 'eventId e uid são obrigatórios' });
+    }
+
+    const controlledEvent = await getActiveEvent(req.user.empresa_id);
+    if (!controlledEvent || String(controlledEvent.id).toLowerCase() !== eventId.toLowerCase()) {
+      return res.status(409).json({ error: 'A recepção ainda não selecionou este evento' });
+    }
+
+    const event = await queryOne(
+      `SELECT id, empresa_id, status
+       FROM eventos
+       WHERE id = @eventId AND empresa_id = @empresaId`,
+      { eventId, empresaId: req.user.empresa_id }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
+
+    const reading = {
+      readingId: uuidv4(),
+      braceletCode: code,
+      timestamp: new Date().toISOString(),
+      receivedAt: Date.now(),
+      eventoId: event.id,
+      source: 'score-kiosk',
+    };
+    rememberScoreKioskReading(reading);
+    if (global.broadcastToEvent) {
+      global.broadcastToEvent(event.id, { type: 'NFC_READING_DETECTED', payload: reading });
+    }
+
+    res.json({ ok: true, readingId: reading.readingId, eventId: event.id });
+  } catch (error) {
+    console.error('❌ Score kiosk: erro ao receber leitura do Arduino:', error.message);
+    res.status(500).json({ error: 'Não foi possível receber a leitura da pulseira' });
+  }
+});
+
+router.get('/events/:eventId/score-readings', async (req, res) => {
+  try {
+    const event = await queryOne(
+      `SELECT id, status FROM eventos
+       WHERE id = @eventId AND empresa_id = @empresaId`,
+      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
+
+    const since = Number(req.query.since || 0);
+    const eventKey = String(event.id).trim().toLowerCase();
+    const queue = global.scoreKioskReadingQueues?.get(eventKey) || [];
+    res.json({ readings: queue.filter(reading => Number(reading.receivedAt || 0) > since) });
+  } catch (error) {
+    console.error('❌ Score kiosk: erro ao recuperar leitura do Arduino:', error.message);
+    res.status(500).json({ error: 'Não foi possível recuperar a leitura' });
+  }
+});
 
 router.get('/events', async (req, res) => {
   try {
