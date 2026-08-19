@@ -4,6 +4,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { randomBytes } = require('crypto');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const {
   getActiveSession,
@@ -783,6 +784,52 @@ router.post('/', async (req, res) => {
   } catch (err) {
     console.error('❌ [LEITURA] Erro ao processar leitura:', err);
     res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+// Histórico de conquistas do evento usado pelos telões. A consulta é sempre
+// limitada ao tenant do usuário e ao evento selecionado pela recepção.
+router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
+  try {
+    const eventoId = String(req.params.eventoId || '').trim();
+    const empresaId = req.user.empresa_id;
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
+    const master = isMaster(req) ? 1 : 0;
+
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      { eventoId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!master && String(evento.empresa_id).toLowerCase() !== String(empresaId).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    const history = await allQuery(`
+      SELECT TOP (@limit)
+        p.id,
+        p.evento_id,
+        p.crianca_id AS child_id,
+        c.name AS child_name,
+        c.nickname AS child_nickname,
+        p.checkpoint_id,
+        cp.name AS checkpoint_name,
+        p.points,
+        p.created_at,
+        t.color AS team_color
+      FROM pontuacoes p
+      LEFT JOIN criancas c ON c.id = p.crianca_id
+      LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
+      LEFT JOIN times t ON t.id = c.time_id
+      WHERE LOWER(p.evento_id) = LOWER(@eventoId)
+        AND (p.empresa_id = @empresaId OR @master = 1)
+      ORDER BY p.created_at DESC
+    `, { limit, eventoId, empresaId, master });
+
+    res.json(history);
+  } catch (error) {
+    console.error('❌ Erro ao carregar histórico do evento para o telão:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 
