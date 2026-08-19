@@ -215,6 +215,25 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
+  if (wsUser && !controlScope && wsUser.role !== 'master') {
+    try {
+      const authorizedEvent = await queryOne(
+        `SELECT id FROM eventos
+         WHERE LOWER(id) = LOWER(@eventoId)
+           AND LOWER(empresa_id) = LOWER(@empresaId)`,
+        { eventoId, empresaId: wsUser.empresa_id }
+      );
+      if (!authorizedEvent) {
+        ws.close(1008, 'Evento não autorizado para esta empresa');
+        return;
+      }
+    } catch (error) {
+      console.error('❌ Erro ao autorizar WebSocket do evento:', error.message);
+      ws.close(1011, 'Não foi possível autorizar o evento');
+      return;
+    }
+  }
+
   ws.eventoId = controlScope ? 'company-control' : eventoId;
   ws.companyId = wsUser?.empresa_id;
   ws.controlScope = controlScope;
@@ -366,6 +385,37 @@ app.get('/api/debug/game-status', verifyToken, requireRole('admin', 'reception',
   });
 });
 
+app.get('/api/debug/game-state/:eventoId', verifyToken, requireRole('admin', 'reception', 'game_master', 'display', 'master'), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      { eventoId: req.params.eventoId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && String(evento.empresa_id).trim().toLowerCase() !== String(req.user.empresa_id).trim().toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+
+    const state = await getGameState(evento.id);
+    const gameType = state?.game_type || 'none';
+    const active = state?.mode === 'game' && String(evento.status || '').toLowerCase() === 'active';
+    res.json({
+      eventoId: evento.id,
+      mode: state?.mode || 'idle',
+      gameType,
+      gameId: state?.game_id || null,
+      gameName: state?.game_name || null,
+      startedAt: state?.started_at || null,
+      stoppedAt: state?.stopped_at || null,
+      active,
+      selected: Boolean(gameType && gameType !== 'none'),
+    });
+  } catch (error) {
+    console.error('❌ Erro ao carregar estado persistido do jogo:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar o estado do jogo' });
+  }
+});
+
 app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const { gameId, eventoId } = req.body || {};
@@ -374,7 +424,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -405,14 +455,33 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
+    const currentState = await getGameState(evento.id);
+    const eventIsRunning = currentState?.mode === 'game'
+      || String(evento.status || '').trim().toLowerCase() === 'active';
+    if (eventIsRunning) {
+      return res.status(409).json({ error: 'Finalize o jogo atual antes de selecionar outro jogo' });
+    }
+
     const gameType = game.type === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
       : game.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+    await saveGameState({
+      eventoId: evento.id,
+      empresaId: evento.empresa_id,
+      mode: 'idle',
+      gameType,
+      gameId: game.id,
+      gameName: game.name || null,
+      startedAt: null,
+      stoppedAt: currentState?.stopped_at || null,
+    });
+
     const payload = {
       gameId: game.id,
       gameName: game.name || null,
       gameType,
       eventoId: evento.id,
+      selectionOnly: true,
       selectedAt: new Date().toISOString(),
     };
     if (global.broadcastToEvent) {
@@ -558,59 +627,35 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     console.log(`🎮 [INICIAR-JOGO] Jogo iniciado com sucesso!`);
     
-    // Broadcast para todos os clientes (Arduino, Display, etc)
-    console.log(`📡 [INICIAR-JOGO] Enviando broadcasts...`);
-    global.broadcast({
-      type: 'GAME_STARTED',
-      payload: {
-        gameId,
-        gameName,
-        gameType,
-        eventoId,
-        startedAt: gameStatus.startedAt,
-        treasure: treasureStart ? {
-          startingTeamId: treasureStart.startingTeamId,
-          startingTeamName: treasureStart.startingTeamName,
-          turnTeamId: treasureStart.turnTeamId,
-          turnTeamName: treasureStart.turnTeamName,
-          turnAvailableAt: treasureStart.turnAvailableAt,
-          turnWaitSeconds: treasureStart.turnWaitSeconds,
-          initialWait: treasureStart.initialWait,
-          targetCheckpointId: treasureStart.targetCheckpointId,
-        } : null,
-        monster: monsterStart ? {
-          monsterHp: monsterStart.monsterHp,
-          monsterMaxHp: monsterStart.monsterMaxHp,
-          monsterSpecialCheckpoint: monsterStart.monsterSpecialCheckpoint,
-        } : null,
-      }
-    });
-    
-    // Também broadcast por evento específico
+    // O evento é a sala de sincronização. Nunca publicar estado de jogo para
+    // clientes de outras empresas/eventos.
+    console.log(`📡 [INICIAR-JOGO] Enviando broadcast apenas para o evento ${eventoId}...`);
+    const gameStartedPayload = {
+      gameId,
+      gameName: selectedGame.name || gameName,
+      gameType,
+      eventoId,
+      startedAt: gameStatus.startedAt,
+      treasure: treasureStart ? {
+        startingTeamId: treasureStart.startingTeamId,
+        startingTeamName: treasureStart.startingTeamName,
+        turnTeamId: treasureStart.turnTeamId,
+        turnTeamName: treasureStart.turnTeamName,
+        turnAvailableAt: treasureStart.turnAvailableAt,
+        turnRemainingSeconds: treasureStart.turnRemainingSeconds,
+        turnWaitSeconds: treasureStart.turnWaitSeconds,
+        initialWait: treasureStart.initialWait,
+        targetCheckpointId: treasureStart.targetCheckpointId,
+      } : null,
+      monster: monsterStart ? {
+        monsterHp: monsterStart.monsterHp,
+        monsterMaxHp: monsterStart.monsterMaxHp,
+        monsterSpecialCheckpoint: monsterStart.monsterSpecialCheckpoint,
+      } : null,
+    };
     global.broadcastToEvent(eventoId, {
       type: 'GAME_STARTED',
-      payload: {
-        gameId,
-        gameName,
-        gameType,
-        eventoId,
-        startedAt: gameStatus.startedAt,
-        treasure: treasureStart ? {
-          startingTeamId: treasureStart.startingTeamId,
-          startingTeamName: treasureStart.startingTeamName,
-          turnTeamId: treasureStart.turnTeamId,
-          turnTeamName: treasureStart.turnTeamName,
-          turnAvailableAt: treasureStart.turnAvailableAt,
-          turnWaitSeconds: treasureStart.turnWaitSeconds,
-          initialWait: treasureStart.initialWait,
-          targetCheckpointId: treasureStart.targetCheckpointId,
-        } : null,
-        monster: monsterStart ? {
-          monsterHp: monsterStart.monsterHp,
-          monsterMaxHp: monsterStart.monsterMaxHp,
-          monsterSpecialCheckpoint: monsterStart.monsterSpecialCheckpoint,
-        } : null,
-      }
+      payload: gameStartedPayload,
     });
     
     // ✨ NOVO: Mudar modo do checkpoint para 'game' via WebSocket
@@ -731,23 +776,14 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     
     console.log(`⛔ [PARAR-JOGO] Jogo parado com sucesso!`);
     
-    // Broadcast para todos os clientes
-    console.log(`📡 [PARAR-JOGO] Enviando broadcasts...`);
-    global.broadcast({
-      type: 'GAME_STOPPED',
-      payload: { 
-        eventoId,
-        stoppedAt: new Date().toISOString() 
-      }
-    });
-    
-    // Também broadcast por evento específico
+    console.log(`📡 [PARAR-JOGO] Enviando broadcast apenas para o evento ${eventoId}...`);
+    const gameStoppedPayload = {
+      eventoId,
+      stoppedAt: new Date().toISOString(),
+    };
     global.broadcastToEvent(eventoId, {
       type: 'GAME_STOPPED',
-      payload: { 
-        eventoId,
-        stoppedAt: new Date().toISOString() 
-      }
+      payload: gameStoppedPayload,
     });
     
     // ✨ NOVO: Mudar modo do checkpoint para 'idle' via WebSocket
@@ -930,12 +966,18 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
   };
   currentGameType = 'none';
   currentMode = 'idle';
+  query(
+    `UPDATE eventos SET status = 'scheduled', active_brincadeira_id = NULL, active_game_type = 'none'
+     WHERE LOWER(id) = LOWER(@eventoId)`,
+    { eventoId }
+  ).catch((error) => {
+    console.error('❌ Erro ao limpar jogo ativo do evento após conclusão do tesouro:', error.message);
+  });
   persistEventMode(eventoId, 'idle', 'none', { stoppedAt: finishedAt }).catch((error) => {
     console.error('❌ Erro ao persistir encerramento do evento:', error.message);
   });
 
   const payload = { eventoId, stoppedAt: finishedAt, automatic: true };
-  global.broadcast({ type: 'GAME_STOPPED', payload });
   global.broadcastToEvent(eventoId, { type: 'GAME_STOPPED', payload });
   global.broadcastToEvent(eventoId, {
     type: 'CHECKPOINT_MODE_CHANGED',
@@ -969,7 +1011,6 @@ global.finishMonsterGameState = (eventoId, finishedAt = new Date().toISOString()
   });
 
   const payload = { eventoId, stoppedAt: finishedAt, automatic: true };
-  global.broadcast({ type: 'GAME_STOPPED', payload });
   global.broadcastToEvent(eventoId, { type: 'GAME_STOPPED', payload });
   global.broadcastToEvent(eventoId, {
     type: 'CHECKPOINT_MODE_CHANGED',
