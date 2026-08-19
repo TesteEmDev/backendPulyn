@@ -10,6 +10,7 @@ const { query, allQuery, queryOne, DB_DRIVER } = require('./database');
 // Importar rotas
 const authRoutes = require('./routes/auth');
 const kioskRoutes = require('./routes/kiosk');
+const scoreKioskRoutes = require('./routes/scoreKiosk');
 const clientRoutes = require('./routes/clients');
 const eventRoutes = require('./routes/events');
 const brincadeirasRoutes = require('./routes/brincadeiras');
@@ -161,16 +162,16 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
-// O token kiosk só pode acessar a API dedicada de autoatendimento.
-// Rotas públicas de hardware continuam compatíveis, mas não são usadas pelo navegador kiosk.
+const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
+
 app.use('/api', (req, res, next) => {
-  if (/^\/(auth|kiosk)(\/|$)/i.test(req.path) || !req.headers.authorization) {
+  if (/^\/(auth|kiosk|score-kiosk)(\/|$)/i.test(req.path) || !req.headers.authorization) {
     return next();
   }
 
   return verifyToken(req, res, () => {
-    if (req.user?.role === 'kiosk') {
-      return res.status(403).json({ error: 'O perfil de autoatendimento só pode usar a API do kiosk' });
+    if (KIOSK_ROLES.has(req.user?.role)) {
+      return res.status(403).json({ error: 'O perfil de autoatendimento só pode usar a API dedicada do kiosk' });
     }
     next();
   });
@@ -194,13 +195,12 @@ wss.on('connection', async (ws, req) => {
     }
   }
 
-  // Atribuir evento_id ao WebSocket
   ws.eventoId = eventoId;
   ws.user = wsUser;
-  ws.kioskAuthorized = wsUser?.role !== 'kiosk';
+  ws.kioskAuthorized = !KIOSK_ROLES.has(wsUser?.role);
   ws.isAlive = true;
 
-  if (wsUser?.role === 'kiosk') {
+  if (KIOSK_ROLES.has(wsUser?.role)) {
     try {
       const kioskEvent = await queryOne(
         `SELECT id FROM eventos
@@ -240,8 +240,8 @@ wss.on('connection', async (ws, req) => {
       
       console.log(`📨 Mensagem recebida via WebSocket (evento: ${eventoId}):`, data.type);
       
-      // O kiosk apenas recebe leituras; nunca pode alterar o modo ou enviar comandos.
-      if (ws.user?.role === 'kiosk' && (data.type === 'SET_MODE' || data.type === 'COMMAND')) {
+      // Os terminais de autoatendimento apenas recebem leituras; nunca alteram modo/comandos.
+      if (KIOSK_ROLES.has(ws.user?.role) && (data.type === 'SET_MODE' || data.type === 'COMMAND')) {
         return;
       }
 
@@ -1195,6 +1195,9 @@ app.use('/api/auth', authRoutes);
 
 // Autoatendimento do totem
 app.use('/api/kiosk', kioskRoutes);
+
+// Consulta de pontuação do totem infantil
+app.use('/api/score-kiosk', scoreKioskRoutes);
 
 // Clientes
 app.use('/api/clientes', clientRoutes);

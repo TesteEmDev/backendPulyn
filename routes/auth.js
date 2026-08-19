@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const { query, queryOne } = require('../database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
-const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk']);
+const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk', 'score_kiosk']);
 
 // Login: validar email + senha contra tabela logins
 router.post('/login', async (req, res) => {
@@ -78,7 +78,8 @@ router.post('/login', async (req, res) => {
       'display': '/display',
       'family': '/family',
       'master': '/master',
-      'kiosk': '/reception/kiosk'
+      'kiosk': '/reception/kiosk',
+      'score_kiosk': '/score-kiosk'
     };
 
     res.json({
