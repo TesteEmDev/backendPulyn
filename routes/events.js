@@ -22,6 +22,15 @@ function sameId(left, right) {
     && String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
 }
 
+function broadcastGameEvent(eventoId, type, payload = {}) {
+  if (global.broadcastToEvent) {
+    global.broadcastToEvent(eventoId, {
+      type,
+      payload: { ...payload, eventoId },
+    });
+  }
+}
+
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
   next();
@@ -355,6 +364,7 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       }
     );
     
+    const startedAt = new Date();
     await saveGameState({
       eventoId: evento_id,
       empresaId: evento.empresa_id,
@@ -362,7 +372,19 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       gameType,
       gameId: brincadeira.id,
       gameName: brincadeira.name || null,
-      startedAt: new Date(),
+      startedAt,
+    });
+
+    broadcastGameEvent(evento_id, 'GAME_STARTED', {
+      gameId: brincadeira.id,
+      gameName: brincadeira.name || null,
+      gameType,
+      startedAt: startedAt.toISOString(),
+    });
+    broadcastGameEvent(evento_id, 'CHECKPOINT_MODE_CHANGED', {
+      mode: 'game',
+      gameType,
+      timestamp: startedAt.toISOString(),
     });
 
     res.json({ 
@@ -402,12 +424,22 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
       }
     );
     
+    const stoppedAt = new Date();
     await saveGameState({
       eventoId: evento_id,
       empresaId: evento.empresa_id,
       mode: 'idle',
       gameType: 'none',
-      stoppedAt: new Date(),
+      stoppedAt,
+    });
+
+    broadcastGameEvent(evento_id, 'GAME_STOPPED', {
+      stoppedAt: stoppedAt.toISOString(),
+    });
+    broadcastGameEvent(evento_id, 'CHECKPOINT_MODE_CHANGED', {
+      mode: 'idle',
+      gameType: 'none',
+      timestamp: stoppedAt.toISOString(),
     });
 
     res.json({ success: true, message: 'Jogo parado!' });
