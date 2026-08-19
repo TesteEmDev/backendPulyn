@@ -366,6 +366,65 @@ app.get('/api/debug/game-status', verifyToken, requireRole('admin', 'reception',
   });
 });
 
+app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+  try {
+    const { gameId, eventoId } = req.body || {};
+    if (!gameId || !eventoId) {
+      return res.status(400).json({ error: 'gameId e eventoId são obrigatórios' });
+    }
+
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      { eventoId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+
+    const game = await queryOne(
+      'SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@gameId)',
+      { gameId }
+    );
+    if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
+    if (String(game.empresa_id).toLowerCase() !== String(evento.empresa_id).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: jogo e evento pertencem a empresas diferentes' });
+    }
+
+    const directEventMatch = game.evento_id
+      && String(game.evento_id).trim().toLowerCase() === String(eventoId).trim().toLowerCase();
+    const linkedEvent = directEventMatch
+      ? true
+      : await queryOne(
+        `SELECT evento_id FROM evento_brincadeiras
+         WHERE LOWER(brincadeira_id) = LOWER(@gameId)
+           AND LOWER(evento_id) = LOWER(@eventoId)`,
+        { gameId, eventoId }
+      );
+    if (!directEventMatch && !linkedEvent) {
+      return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
+    }
+
+    const gameType = game.type === TREASURE_GAME_TYPE
+      ? TREASURE_GAME_TYPE
+      : game.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+    const payload = {
+      gameId: game.id,
+      gameName: game.name || null,
+      gameType,
+      eventoId: evento.id,
+      selectedAt: new Date().toISOString(),
+    };
+    if (global.broadcastToEvent) {
+      global.broadcastToEvent(evento.id, { type: 'GAME_SELECTED', payload });
+    }
+    res.json({ ok: true, ...payload });
+  } catch (error) {
+    console.error('❌ Erro ao selecionar jogo para o telão:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const { gameId, gameName, eventoId } = req.body;
