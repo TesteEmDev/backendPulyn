@@ -11,6 +11,7 @@ const { query, allQuery, queryOne, DB_DRIVER } = require('./database');
 const authRoutes = require('./routes/auth');
 const kioskRoutes = require('./routes/kiosk');
 const scoreKioskRoutes = require('./routes/scoreKiosk');
+const eventControlRoutes = require('./routes/eventControl');
 const clientRoutes = require('./routes/clients');
 const eventRoutes = require('./routes/events');
 const brincadeirasRoutes = require('./routes/brincadeiras');
@@ -34,11 +35,13 @@ const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
+const { ensureEventControlSchema } = require('./migrations/eventControl');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
 const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureAvatarSchema } = require('./migrations/avatar');
+const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
 const WS_JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
@@ -133,6 +136,17 @@ global.broadcastToEvent = (eventoId, message) => {
   });
 };
 
+// Controle operacional do evento, isolado por empresa.
+global.broadcastToCompany = (empresaId, message) => {
+  const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1
+      && String(client.companyId || '').trim().toLowerCase() === String(empresaId || '').trim().toLowerCase()) {
+      client.send(msgStr);
+    }
+  });
+};
+
 // ✨ NOVO: Função de broadcast para todos (manter para compatibilidade)
 global.broadcastAll = (message) => {
   global.broadcast(message);
@@ -165,7 +179,7 @@ app.use(cors());
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
 
 app.use('/api', (req, res, next) => {
-  if (/^\/(auth|kiosk|score-kiosk)(\/|$)/i.test(req.path) || !req.headers.authorization) {
+  if (/^\/(auth|kiosk|score-kiosk|event-control)(\/|$)/i.test(req.path) || !req.headers.authorization) {
     return next();
   }
 
@@ -182,6 +196,7 @@ wss.on('connection', async (ws, req) => {
   // Extrair evento_id da URL query string
   const url = new URL(req.url, `ws://${req.headers.host}`);
   const eventoId = url.searchParams.get('evento_id') || 'global';
+  const controlScope = url.searchParams.get('scope') === 'company';
   const wsToken = url.searchParams.get('token');
 
   // Kiosk usa token no handshake e só pode assinar o evento da própria empresa.
@@ -195,12 +210,37 @@ wss.on('connection', async (ws, req) => {
     }
   }
 
-  ws.eventoId = eventoId;
+  if (controlScope && !wsUser) {
+    ws.close(1008, 'Token obrigatório para controle do evento');
+    return;
+  }
+
+  ws.eventoId = controlScope ? 'company-control' : eventoId;
+  ws.companyId = wsUser?.empresa_id;
+  ws.controlScope = controlScope;
   ws.user = wsUser;
   ws.kioskAuthorized = !KIOSK_ROLES.has(wsUser?.role);
   ws.isAlive = true;
 
-  if (KIOSK_ROLES.has(wsUser?.role)) {
+  if (controlScope) {
+    try {
+      const activeEvent = await getActiveEvent(wsUser.empresa_id);
+      ws.send(JSON.stringify({
+        type: 'EVENT_SELECTED',
+        payload: {
+          eventoId: activeEvent?.id || null,
+          eventName: activeEvent?.name || null,
+          eventStatus: activeEvent?.status || null,
+        },
+      }));
+    } catch (error) {
+      console.error('❌ Erro ao carregar evento selecionado no WebSocket:', error.message);
+      ws.close(1011, 'Não foi possível carregar o evento selecionado');
+      return;
+    }
+  }
+
+  if (KIOSK_ROLES.has(wsUser?.role) && !controlScope) {
     try {
       const kioskEvent = await queryOne(
         `SELECT id FROM eventos
@@ -236,6 +276,7 @@ wss.on('connection', async (ws, req) => {
       if (data.type === 'HEARTBEAT' || data.type === 'PONG') {
         return;
       }
+      if (ws.controlScope) return;
       if (!ws.kioskAuthorized) return;
       
       console.log(`📨 Mensagem recebida via WebSocket (evento: ${eventoId}):`, data.type);
@@ -1199,6 +1240,9 @@ app.use('/api/kiosk', kioskRoutes);
 // Consulta de pontuação do totem infantil
 app.use('/api/score-kiosk', scoreKioskRoutes);
 
+// Evento operacional selecionado pela recepção
+app.use('/api/event-control', eventControlRoutes);
+
 // Clientes
 app.use('/api/clientes', clientRoutes);
 
@@ -1277,6 +1321,7 @@ async function startServer() {
     // Caso contrário, /api/familias/pending pode retornar 500 durante o deploy.
     await ensureFamilySchema();
     await ensureGameStateSchema();
+    await ensureEventControlSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
