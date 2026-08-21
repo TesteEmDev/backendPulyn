@@ -4,6 +4,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const jwt = require('jsonwebtoken');
 const cors = require('cors');
+const fs = require('fs');
 const path = require('path');
 const { query, allQuery, queryOne, DB_DRIVER } = require('./database');
 
@@ -1420,6 +1421,20 @@ app.use('/api/familias', familiasRoutes);
 // Servir arquivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Em uma instalação LAN, o próprio backend pode servir o build do frontend.
+// Se o dist não existir, o servidor continua funcionando somente como API.
+const frontendDistPath = path.resolve(__dirname, '../../front-pulyn/dist');
+const frontendIndexPath = path.join(frontendDistPath, 'index.html');
+if (fs.existsSync(frontendIndexPath)) {
+  app.use(express.static(frontendDistPath));
+  app.get('*', (req, res, next) => {
+    if (req.path.startsWith('/api')) return next();
+    return res.sendFile(frontendIndexPath, (error) => {
+      if (error) next(error);
+    });
+  });
+}
+
 // 404 Handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Rota não encontrada' });
@@ -1432,7 +1447,8 @@ app.use((err, req, res, next) => {
 });
 
 // Iniciar servidor
-const PORT = process.env.PORT || 3001;
+const PORT = Number(process.env.PORT || 3001);
+const HOST = process.env.HOST || '0.0.0.0';
 
 async function startServer() {
   try {
@@ -1454,12 +1470,15 @@ async function startServer() {
     process.exit(1);
   }
 
-  server.listen(PORT, async () => {
+  server.listen(PORT, HOST, async () => {
   console.log(`
   ╔═══════════════════════════════════════╗
   ║   🚀 API Pulyn iniciada              ║
-  ║   📍 Porta: ${PORT}                      ║
+  ║   📍 Host: ${HOST}                    ║
+  ║   📍 Porta: ${PORT}                   ║
   ║   🌐 http://localhost:${PORT}         ║
+  ║   🖥️  LAN: http://IP_DO_SERVIDOR:${PORT} ║
+  ║   📦 Frontend local: ${fs.existsSync(frontendIndexPath) ? 'ativo' : 'não encontrado'} ║
   ║   📚 Rotas configuradas:             ║
   ║      ✓ /api/auth                     ║
   ║      ✓ /api/clientes                 ║
