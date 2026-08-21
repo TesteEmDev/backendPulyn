@@ -59,9 +59,12 @@ const {
 
 const app = express();
 const server = http.createServer(app);
+const WS_AUTH_PROTOCOL = 'pulyn-auth';
+
 const wss = new WebSocket.Server({ 
   server,
-  perMessageDeflate: false
+  perMessageDeflate: false,
+  handleProtocols: (protocols) => protocols.has(WS_AUTH_PROTOCOL) ? WS_AUTH_PROTOCOL : undefined,
 });
 
 // Heartbeat para manter WebSocket vivo
@@ -191,13 +194,27 @@ app.use('/api', (req, res, next) => {
   });
 });
 
+function getWebSocketToken(req, url) {
+  const protocols = String(req.headers['sec-websocket-protocol'] || '')
+    .split(',')
+    .map((protocol) => protocol.trim())
+    .filter(Boolean);
+  const protocolToken = protocols.includes(WS_AUTH_PROTOCOL)
+    ? protocols.find((protocol) => protocol !== WS_AUTH_PROTOCOL)
+    : null;
+
+  // Mantém compatibilidade temporária com clientes antigos que ainda usam
+  // ?token=...; novos clientes não colocam mais o JWT na URL.
+  return protocolToken || url.searchParams.get('token');
+}
+
 // WebSocket Connection com Rooms
 wss.on('connection', async (ws, req) => {
   // Extrair evento_id da URL query string
   const url = new URL(req.url, `ws://${req.headers.host}`);
   const eventoId = url.searchParams.get('evento_id') || 'global';
   const controlScope = url.searchParams.get('scope') === 'company';
-  const wsToken = url.searchParams.get('token');
+  const wsToken = getWebSocketToken(req, url);
 
   // Kiosk usa token no handshake e só pode assinar o evento da própria empresa.
   let wsUser = null;
@@ -238,7 +255,9 @@ wss.on('connection', async (ws, req) => {
   ws.companyId = wsUser?.empresa_id;
   ws.controlScope = controlScope;
   ws.user = wsUser;
-  ws.kioskAuthorized = !KIOSK_ROLES.has(wsUser?.role);
+  // Conexões sem usuário podem receber broadcasts públicos, mas nunca
+  // podem enviar comandos ao backend.
+  ws.kioskAuthorized = Boolean(wsUser) && !KIOSK_ROLES.has(wsUser.role);
   ws.isAlive = true;
 
   if (controlScope) {
