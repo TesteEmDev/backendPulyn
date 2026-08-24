@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { query, queryOne, allQuery } = require('../database');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 
 const MONSTER_COOLDOWN_MIN_SECONDS = 1;
 const MONSTER_COOLDOWN_MAX_SECONDS = 120;
@@ -34,7 +34,8 @@ router.get('/', verifyToken, async (req, res) => {
     const empresa_id = req.user.empresa_id;
     const evento_id = req.query.evento_id ? String(req.query.evento_id) : null;
 
-    let whereClause = 'b.empresa_id = @empresa_id';
+    let whereClause = `b.empresa_id = @empresa_id
+      AND LOWER(COALESCE(b.status, 'active')) <> 'archived'`;
     let eventoSelect = 'b.evento_id';
     const params = { empresa_id };
 
@@ -51,6 +52,7 @@ router.get('/', verifyToken, async (req, res) => {
       // O evento é a fonte do escopo. Aceita tanto o vínculo direto quanto o legado
       // em evento_brincadeiras, sempre mantendo o isolamento pela empresa do evento.
       whereClause = `LOWER(b.empresa_id) = LOWER(@evento_empresa_id)
+        AND LOWER(COALESCE(b.status, 'active')) <> 'archived'
         AND (
           LOWER(b.evento_id) = LOWER(@evento_id)
           OR EXISTS (
@@ -167,11 +169,16 @@ router.put('/:id', verifyToken, async (req, res) => {
     
     // ✅ Verificar que o jogo pertence à empresa
     const brincadeira = await queryOne(
-      'SELECT id, empresa_id, evento_id FROM brincadeiras WHERE id = @id',
+      `SELECT id, empresa_id, evento_id, status
+       FROM brincadeiras
+       WHERE id = @id`,
       { id: req.params.id }
     );
     
     if (!brincadeira) {
+      return res.status(404).json({ error: 'Jogo não encontrado' });
+    }
+    if (String(brincadeira.status || '').trim().toLowerCase() === 'archived') {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
     
@@ -239,32 +246,104 @@ router.put('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Deletar brincadeira
-router.delete('/:id', verifyToken, async (req, res) => {
+// Arquivar brincadeira sem apagar o histórico
+router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    
-    // ✅ Verificar que o jogo pertence à empresa
-    const brincadeira = await queryOne(
-      'SELECT id, empresa_id FROM brincadeiras WHERE id = @id',
-      { id: req.params.id }
-    );
-    
-    if (!brincadeira) {
-      return res.status(404).json({ error: 'Jogo não encontrado' });
-    }
-    
-    if (!isMaster(req) && brincadeira.empresa_id !== empresa_id) {
-      return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
-    }
-    
-    await query('DELETE FROM brincadeiras WHERE id = @id', { id: req.params.id });
-    
-    console.log(`✅ Jogo deletado: ${req.params.id}`);
-    res.json({ deleted: true });
+    const gameId = req.params.id;
+    const empresaId = req.user.empresa_id;
+
+    const result = await withTransaction(async (tx) => {
+      const brincadeira = await tx.queryOne(
+        `SELECT id, name, type, empresa_id, status
+         FROM brincadeiras
+         WHERE LOWER(id) = LOWER(@id)`,
+        { id: gameId }
+      );
+
+      if (!brincadeira) {
+        const error = new Error('Jogo não encontrado');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      if (!isMaster(req)
+        && String(brincadeira.empresa_id || '').trim().toLowerCase()
+          !== String(empresaId || '').trim().toLowerCase()) {
+        const error = new Error('Acesso negado: jogo não pertence a esta empresa');
+        error.statusCode = 403;
+        throw error;
+      }
+
+      if (String(brincadeira.status || '').trim().toLowerCase() === 'archived') {
+        const error = new Error('Este jogo já foi arquivado');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const activeEvent = await tx.queryOne(
+        `SELECT TOP 1 id
+         FROM eventos
+         WHERE LOWER(active_brincadeira_id) = LOWER(@id)
+           AND LOWER(COALESCE(status, '')) = 'active'`,
+        { id: gameId }
+      );
+      if (activeEvent) {
+        const error = new Error('Finalize o jogo antes de arquivá-lo');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const activeState = await tx.queryOne(
+        `SELECT TOP 1 evento_id
+         FROM event_game_state
+         WHERE LOWER(game_id) = LOWER(@id)
+           AND LOWER(COALESCE(mode, 'idle')) = 'game'`,
+        { id: gameId }
+      );
+      if (activeState) {
+        const error = new Error('Finalize o jogo antes de arquivá-lo');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      const activeSessionTable = brincadeira.type === 'treasure_hunt'
+        ? 'caca_tesouro_partidas'
+        : brincadeira.type === 'monster_hunt' ? 'monster_hunt_partidas' : null;
+      if (activeSessionTable) {
+        const activeSession = await tx.queryOne(
+          `SELECT TOP 1 id
+           FROM ${activeSessionTable}
+           WHERE LOWER(brincadeira_id) = LOWER(@id)
+             AND LOWER(COALESCE(status, '')) = 'active'`,
+          { id: gameId }
+        );
+        if (activeSession) {
+          const error = new Error('Finalize a partida antes de arquivar este jogo');
+          error.statusCode = 409;
+          throw error;
+        }
+      }
+
+      const update = await tx.query(
+        `UPDATE brincadeiras
+         SET status = 'archived'
+         WHERE LOWER(id) = LOWER(@id)`,
+        { id: gameId }
+      );
+      if (!(update.rowsAffected?.[0] || 0)) {
+        const error = new Error('Não foi possível arquivar o jogo');
+        error.statusCode = 409;
+        throw error;
+      }
+
+      return { id: brincadeira.id, name: brincadeira.name };
+    });
+
+    console.log(`✅ Jogo arquivado: ${result.id}`);
+    res.json({ deleted: true, archived: true, id: result.id });
   } catch (err) {
-    console.error('❌ Erro ao deletar brincadeira:', err);
-    res.status(500).json({ error: err.message });
+    console.error('❌ Erro ao arquivar brincadeira:', err);
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

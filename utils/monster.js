@@ -50,6 +50,7 @@ async function getGameForEvent(eventoId, brincadeiraId) {
     FROM brincadeiras b
     INNER JOIN eventos e ON LOWER(e.id) = LOWER(@eventoId)
     WHERE LOWER(b.id) = LOWER(@brincadeiraId)
+      AND LOWER(COALESCE(b.status, 'active')) <> 'archived'
       AND LOWER(b.empresa_id) = LOWER(e.empresa_id)
       AND (LOWER(b.evento_id) = LOWER(@eventoId) OR EXISTS (
         SELECT 1 FROM evento_brincadeiras eb

@@ -323,7 +323,9 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
 
     // Buscar a brincadeira para pegar o tipo
     const brincadeira = await queryOne(
-      'SELECT id, name, type, game_type, empresa_id FROM brincadeiras WHERE id = @id',
+      `SELECT id, name, type, game_type, empresa_id FROM brincadeiras
+       WHERE id = @id
+         AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
     );
     

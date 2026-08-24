@@ -453,7 +453,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const game = await queryOne(
-      'SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@gameId)',
+      'SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
       { gameId }
     );
     if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
@@ -544,7 +544,10 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     }
 
     const selectedGame = await queryOne(
-      `SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@gameId)`,
+      `SELECT id, name, type, evento_id, empresa_id
+       FROM brincadeiras
+       WHERE LOWER(id) = LOWER(@gameId)
+         AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { gameId }
     );
     if (!selectedGame) {

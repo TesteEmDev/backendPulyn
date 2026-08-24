@@ -387,6 +387,7 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
       `SELECT id, checkpoints
        FROM brincadeiras
        WHERE LOWER(empresa_id) = LOWER(@empresa_id)
+         AND LOWER(COALESCE(status, 'active')) <> 'archived'
          AND (
            LOWER(evento_id) = LOWER(@evento_id)
            OR EXISTS (
