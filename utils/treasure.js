@@ -649,6 +649,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
         || null
       : currentTeamRace;
   const switchingTeam = Boolean(ownership.won && nextTurnTeam);
+  const visibleCompletedCheckpointIds = switchingTeam ? [] : updatedCompleted;
   const nextTurnAvailableAt = raceFinished || !nextTurnTeam
     ? null
     : switchingTeam
@@ -665,6 +666,27 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       ? await getNextTargetCheckpointId(eventoId, nextTurnTeam.teamId, checkpointId)
       : null;
 
+  // Ao trocar de equipe, o mapa começa uma nova busca: os domínios da
+  // equipe anterior deixam de ser exibidos e podem ser conquistados novamente.
+  // O histórico em caca_tesouro_scans continua preservado.
+  let checkpointOwnership;
+  if (switchingTeam) {
+    await query(
+      `UPDATE checkpoints SET
+         territory_owner_time_id = NULL,
+         territory_locked_until = NULL,
+         territory_cooldown_until = NULL
+       WHERE LOWER(evento_id) = LOWER(@eventoId)
+         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
+      { eventoId }
+    );
+
+    checkpointOwnership = (await getEventCheckpoints(eventoId)).map(checkpoint => ({
+      checkpointId: String(checkpoint.id),
+      teamId: null,
+    }));
+  }
+
   let advanceResult;
   if (raceFinished) {
     advanceResult = await query(
@@ -678,7 +700,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       {
         partidaId: session.id,
         roundNumber: session.round_number,
-        completedCheckpointIds: JSON.stringify(updatedCompleted),
+        completedCheckpointIds: JSON.stringify(visibleCompletedCheckpointIds),
         finishedAt: now,
       }
     );
@@ -697,7 +719,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
         turnTeamId: nextTurnTeam.teamId,
         turnAvailableAt: nextTurnAvailableAt,
         targetCheckpointId: nextTargetCheckpointId,
-        completedCheckpointIds: JSON.stringify(updatedCompleted),
+        completedCheckpointIds: JSON.stringify(visibleCompletedCheckpointIds),
         roundStartedAt: now,
       }
     );
@@ -737,15 +759,16 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     teamCompletedAllCheckpoints: ownership.won,
     winningTeamId: winningTeam?.teamId || null,
     winningTeamName: winningTeam?.teamName || null,
-    ownedCheckpoints: ownership.owned,
+    ownedCheckpoints: switchingTeam ? 0 : ownership.owned,
     totalCheckpoints: ownership.total,
     turnTeamId: raceFinished ? null : nextTurnTeam?.teamId || null,
     turnTeamName: raceFinished ? null : nextTurnTeam?.teamName || null,
     turnAvailableAt: nextTurnAvailableAt ? nextTurnAvailableAt.toISOString() : null,
     turnWaitSeconds: switchingTeam ? TREASURE_TURN_DELAY_MS / 1000 : 0,
     teamRaceTimes: raceTimes,
+    checkpointOwnership,
     nextTargetCheckpointId,
-    completedCheckpointIds: updatedCompleted,
+    completedCheckpointIds: visibleCompletedCheckpointIds,
     message: raceFinished
       ? `🏆 Caça ao Tesouro concluído! A equipe ${winningTeam?.teamName || 'vencedora'} foi mais rápida, com ${winningTeam?.elapsedMinutes ?? 0} minutos.`
       : ownership.won
