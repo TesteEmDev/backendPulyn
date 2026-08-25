@@ -603,6 +603,26 @@ CREATE TABLE IF NOT EXISTS "monster_hunt_partidas" (
   "created_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS "monster_hunt_team_states" (
+  "id" varchar(36) PRIMARY KEY,
+  "partida_id" varchar(36) NOT NULL,
+  "empresa_id" varchar(36) NOT NULL,
+  "evento_id" varchar(36) NOT NULL,
+  "time_id" varchar(36) NOT NULL,
+  "hp" integer NOT NULL DEFAULT 500,
+  "max_hp" integer NOT NULL DEFAULT 500,
+  "status" varchar(20) NOT NULL DEFAULT 'active',
+  "version" integer NOT NULL DEFAULT 0,
+  "defeated_at" timestamptz,
+  "victory_at" timestamptz,
+  "created_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_monster_hunt_team_state"
+  ON "monster_hunt_team_states" ("partida_id", "time_id");
+CREATE INDEX IF NOT EXISTS "idx_monster_hunt_team_states_evento"
+  ON "monster_hunt_team_states" ("empresa_id", "evento_id", "partida_id");
+
 CREATE TABLE IF NOT EXISTS "monster_hunt_scans" (
   "id" varchar(36) PRIMARY KEY,
   "partida_id" varchar(36) NOT NULL,

@@ -674,6 +674,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         monsterHp: monsterStart.monsterHp,
         monsterMaxHp: monsterStart.monsterMaxHp,
         monsterSpecialCheckpoint: monsterStart.monsterSpecialCheckpoint,
+        monsters: monsterStart.monsters || monsterStart.progress || [],
+        progress: monsterStart.progress || monsterStart.monsters || [],
       } : null,
     };
     global.broadcastToEvent(eventoId, {
@@ -931,7 +933,45 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
       { eventoId }
     );
     console.log(`   ✓ Histórico de leituras deletado`);
-    
+
+    // 3b. Resetar somente a partida mais recente não encerrada. Partidas
+    // anteriores são histórico e não podem ser reabertas pelo reset.
+    const latestMonsterGame = await queryOne(`
+      SELECT TOP 1 id
+      FROM monster_hunt_partidas
+      WHERE LOWER(evento_id) = LOWER(@eventoId)
+        AND status <> 'finished'
+      ORDER BY started_at DESC`, { eventoId });
+    if (latestMonsterGame?.id) {
+      await query(
+        `DELETE FROM monster_hunt_scans WHERE partida_id = @partidaId`,
+        { partidaId: latestMonsterGame.id }
+      );
+      await query(
+        `UPDATE monster_hunt_team_states SET
+           hp = max_hp,
+           status = 'active',
+           defeated_at = NULL,
+           victory_at = NULL,
+           version = version + 1
+         WHERE partida_id = @partidaId`,
+        { partidaId: latestMonsterGame.id }
+      );
+      await query(
+        `UPDATE monster_hunt_partidas SET
+           hp = max_hp,
+           status = 'active',
+           winner_time_id = NULL,
+           finished_at = NULL,
+           version = version + 1
+         WHERE id = @partidaId`,
+        { partidaId: latestMonsterGame.id }
+      );
+      console.log(`   ✓ Monstros por equipe resetados na partida atual`);
+    } else {
+      console.log(`   ✓ Nenhuma partida de monstro atual para resetar`);
+    }
+
     // 4. Limpar histórico de pontuações (opcional)
     await query(
       `DELETE FROM pontuacoes WHERE evento_id = @eventoId`,
@@ -1009,19 +1049,23 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
 };
 
 global.finishMonsterGameState = (eventoId, finishedAt = new Date().toISOString()) => {
-  if (gameStatus.eventoId
-    && String(gameStatus.eventoId).trim().toLowerCase() !== String(eventoId).trim().toLowerCase()) return;
+  const isGlobalEvent = !gameStatus.eventoId
+    || String(gameStatus.eventoId).trim().toLowerCase() === String(eventoId).trim().toLowerCase();
 
-  gameStatus = {
-    isRunning: false,
-    gameId: null,
-    gameName: null,
-    gameType: 'none',
-    eventoId: null,
-    startedAt: null,
-  };
-  currentGameType = 'none';
-  currentMode = 'idle';
+  // O estado em memória é legado e global; nunca limpe o estado de outro
+  // evento quando dois buffets/eventos estiverem operando no mesmo processo.
+  if (isGlobalEvent) {
+    gameStatus = {
+      isRunning: false,
+      gameId: null,
+      gameName: null,
+      gameType: 'none',
+      eventoId: null,
+      startedAt: null,
+    };
+    currentGameType = 'none';
+    currentMode = 'idle';
+  }
   query(
     `UPDATE eventos SET status = 'scheduled', active_brincadeira_id = NULL, active_game_type = 'none'
      WHERE LOWER(id) = LOWER(@eventoId)`,

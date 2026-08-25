@@ -70,6 +70,7 @@ async function sendProcessedReading(res, reading) {
   const monsterStatus = isMonster && reading.evento_id
     ? await getMonsterEventStatus(reading.evento_id)
     : null;
+  const teamMonster = monsterStatus?.monsters?.find(monster => String(monster.teamId).toLowerCase() === String(reading.time_id || '').toLowerCase());
 
   return res.json({
     ok: true,
@@ -92,6 +93,12 @@ async function sendProcessedReading(res, reading) {
     monsterHp: isMonster ? Number(reading.monster_hp_after || 0) : undefined,
     monsterMaxHp: isMonster ? Number(reading.monster_max_hp || 500) : undefined,
     monsterDefeated: isMonster && Boolean(reading.monster_defeated),
+    teamMonsterHp: isMonster ? Number(reading.monster_hp_after || teamMonster?.monsterHp || 0) : undefined,
+    teamMonsterMaxHp: isMonster ? Number(teamMonster?.monsterMaxHp || reading.monster_max_hp || 500) : undefined,
+    teamMonsterDefeated: isMonster && Boolean(reading.monster_defeated),
+    teamVictory: isMonster && Boolean(reading.monster_defeated),
+    gameCompleted: isMonster && Boolean(monsterStatus?.gameCompleted),
+    monsters: isMonster ? (monsterStatus?.monsters || []) : undefined,
     alreadyScanned: isMonster,
     progress: isMonster ? (monsterStatus?.progress || []) : undefined,
     teamsProgress: isMonster ? (monsterStatus?.teamsProgress || monsterStatus?.progress || []) : undefined,
@@ -413,18 +420,42 @@ router.post('/', async (req, res) => {
           });
           break;
         } catch (error) {
-          if (error.code === 'MONSTER_VERSION_CONFLICT' && attempt < 2) continue;
+          if (error.code === 'MONSTER_VERSION_CONFLICT') {
+            // Outra tentativa pode ter confirmado a mesma leitura enquanto
+            // esta transação aguardava o lock/índice único.
+            const processedAfterConflict = await findProcessedReading(leituraId, checkpoint);
+            if (processedAfterConflict) return await sendProcessedReading(res, processedAfterConflict);
+            if (attempt < 2) continue;
+          }
           throw error;
         }
       }
 
+      // A partida pode ter sido concluída por outra leitura enquanto esta
+      // requisição aguardava. Não deixar a leitura cair no fluxo de território.
+      if (!monsterResult) {
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: false,
+          braceletCode: normalizedUid,
+          readingId: leituraId,
+          monster: true,
+          monsterAccepted: false,
+          gameCompleted: true,
+          message: 'A partida do monstro foi concluída por outra leitura',
+        });
+      }
+
       if (monsterResult) {
         if (monsterResult.accepted && !monsterResult.alreadyScanned) {
-          const eventType = monsterResult.monsterDefeated
+          const eventType = monsterResult.gameCompleted
             ? 'MONSTER_DEFEATED'
-            : monsterResult.attackType === 'special_attack'
-              ? 'MONSTER_SPECIAL_ATTACK'
-              : 'MONSTER_PROGRESS';
+            : monsterResult.monsterDefeated
+              ? 'MONSTER_TEAM_DEFEATED'
+              : monsterResult.attackType === 'special_attack'
+                ? 'MONSTER_SPECIAL_ATTACK'
+                : 'MONSTER_PROGRESS';
           broadcastEvent({
             type: eventType,
             payload: {
@@ -438,7 +469,7 @@ router.post('/', async (req, res) => {
           });
         }
 
-        if (monsterResult.monsterDefeated && typeof global.finishMonsterGameState === 'function') {
+        if (monsterResult.gameCompleted && typeof global.finishMonsterGameState === 'function') {
           global.finishMonsterGameState(checkpoint.evento_id, now.toISOString());
         }
 
@@ -455,6 +486,12 @@ router.post('/', async (req, res) => {
           monsterHp: Number(monsterResult.monsterHp || 0),
           monsterMaxHp: Number(monsterResult.monsterMaxHp || monsterSession.max_hp || 500),
           monsterDefeated: Boolean(monsterResult.monsterDefeated),
+          teamMonsterHp: Number(monsterResult.teamMonsterHp ?? monsterResult.monsterHp ?? 0),
+          teamMonsterMaxHp: Number(monsterResult.teamMonsterMaxHp ?? monsterResult.monsterMaxHp ?? monsterSession.max_hp ?? 500),
+          teamMonsterDefeated: Boolean(monsterResult.teamMonsterDefeated ?? monsterResult.monsterDefeated),
+          teamVictory: Boolean(monsterResult.teamVictory ?? monsterResult.monsterDefeated),
+          gameCompleted: Boolean(monsterResult.gameCompleted),
+          monsters: monsterResult.monsters || monsterResult.progress || [],
           alreadyScanned: Boolean(monsterResult.alreadyScanned),
           progress: monsterResult.progress || [],
           teamsProgress: monsterResult.teamsProgress || monsterResult.progress || [],

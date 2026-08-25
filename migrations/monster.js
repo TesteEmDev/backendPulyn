@@ -25,6 +25,24 @@ async function ensureMonsterHuntSchema() {
       )
     `);
     await query(`
+      CREATE TABLE IF NOT EXISTS monster_hunt_team_states (
+        id varchar(36) PRIMARY KEY,
+        partida_id varchar(36) NOT NULL,
+        empresa_id varchar(36) NOT NULL,
+        evento_id varchar(36) NOT NULL,
+        time_id varchar(36) NOT NULL,
+        hp integer NOT NULL DEFAULT 500,
+        max_hp integer NOT NULL DEFAULT 500,
+        status varchar(20) NOT NULL DEFAULT 'active',
+        version integer NOT NULL DEFAULT 0,
+        defeated_at timestamptz,
+        victory_at timestamptz,
+        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_monster_hunt_team_state ON monster_hunt_team_states (partida_id, time_id)');
+    await query('CREATE INDEX IF NOT EXISTS idx_monster_hunt_team_states_evento ON monster_hunt_team_states (empresa_id, evento_id, partida_id)');
+    await query(`
       CREATE TABLE IF NOT EXISTS monster_hunt_scans (
         id varchar(36) PRIMARY KEY,
         partida_id varchar(36) NOT NULL,
@@ -77,6 +95,33 @@ async function ensureMonsterHuntSchema() {
     END
   `);
   await query(`
+    IF OBJECT_ID('dbo.monster_hunt_team_states', 'U') IS NULL
+    BEGIN
+      CREATE TABLE monster_hunt_team_states (
+        id NVARCHAR(36) NOT NULL PRIMARY KEY,
+        partida_id NVARCHAR(36) NOT NULL,
+        empresa_id NVARCHAR(36) NOT NULL,
+        evento_id NVARCHAR(36) NOT NULL,
+        time_id NVARCHAR(36) NOT NULL,
+        hp INT NOT NULL DEFAULT 500,
+        max_hp INT NOT NULL DEFAULT 500,
+        status NVARCHAR(20) NOT NULL DEFAULT 'active',
+        version INT NOT NULL DEFAULT 0,
+        defeated_at DATETIME2 NULL,
+        victory_at DATETIME2 NULL,
+        created_at DATETIME2 NOT NULL DEFAULT GETDATE()
+      )
+    END
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_monster_hunt_team_state' AND object_id = OBJECT_ID('dbo.monster_hunt_team_states'))
+      CREATE UNIQUE INDEX uq_monster_hunt_team_state ON monster_hunt_team_states (partida_id, time_id)
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_monster_hunt_team_states_evento' AND object_id = OBJECT_ID('dbo.monster_hunt_team_states'))
+      CREATE INDEX idx_monster_hunt_team_states_evento ON monster_hunt_team_states (empresa_id, evento_id, partida_id)
+  `);
+  await query(`
     IF OBJECT_ID('dbo.monster_hunt_scans', 'U') IS NULL
     BEGIN
       CREATE TABLE monster_hunt_scans (
@@ -100,6 +145,10 @@ async function ensureMonsterHuntSchema() {
     END
   `);
   await query(`
+    IF EXISTS (SELECT 1 FROM sys.key_constraints WHERE name = 'uq_monster_hunt_scan_child' AND parent_object_id = OBJECT_ID('dbo.monster_hunt_scans'))
+      ALTER TABLE monster_hunt_scans DROP CONSTRAINT uq_monster_hunt_scan_child
+  `);
+  await query(`
     IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_monster_hunt_scan_child' AND object_id = OBJECT_ID('dbo.monster_hunt_scans'))
       DROP INDEX uq_monster_hunt_scan_child ON monster_hunt_scans
   `);
@@ -108,8 +157,17 @@ async function ensureMonsterHuntSchema() {
       CREATE INDEX idx_monster_hunt_scans_checkpoint ON monster_hunt_scans (partida_id, checkpoint_id, scanned_at)
   `);
   await query(`
+    IF EXISTS (
+      SELECT 1 FROM sys.indexes
+      WHERE name = 'uq_monster_hunt_scan_reading'
+        AND object_id = OBJECT_ID('dbo.monster_hunt_scans')
+        AND filter_definition IS NULL
+    )
+      DROP INDEX uq_monster_hunt_scan_reading ON monster_hunt_scans
+  `);
+  await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_monster_hunt_scan_reading' AND object_id = OBJECT_ID('dbo.monster_hunt_scans'))
-      CREATE UNIQUE INDEX uq_monster_hunt_scan_reading ON monster_hunt_scans (leitura_id)
+      CREATE UNIQUE INDEX uq_monster_hunt_scan_reading ON monster_hunt_scans (leitura_id) WHERE leitura_id IS NOT NULL
   `);
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_monster_hunt_partidas_evento' AND object_id = OBJECT_ID('dbo.monster_hunt_partidas'))
