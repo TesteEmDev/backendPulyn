@@ -521,7 +521,7 @@ router.post('/', async (req, res) => {
         });
       }
 
-      const treasureResult = await withTransaction(async () => {
+      const treasureResult = await withTransaction(async (tx) => {
         const result = await processTreasureScan({
           eventoId: checkpoint.evento_id,
           checkpointId,
@@ -532,7 +532,7 @@ router.post('/', async (req, res) => {
         });
 
         if (result?.accepted && !result.duplicate) {
-          await query(
+          await tx.query(
             `INSERT INTO leituras
               (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
                points_awarded, signal_strength, empresa_id)

@@ -138,6 +138,21 @@ function getFastestCompletedTeam(raceTimes) {
     .sort((a, b) => a.elapsedMs - b.elapsedMs)[0] || null;
 }
 
+function getNextUnfinishedTeam(raceTimes, currentTeamId) {
+  const unfinishedTeams = raceTimes.filter(teamRace => !teamRace.completed);
+  if (!unfinishedTeams.length) return null;
+
+  const currentIndex = raceTimes.findIndex(teamRace => sameId(teamRace.teamId, currentTeamId));
+  if (currentIndex < 0) return unfinishedTeams[0];
+
+  for (let offset = 1; offset <= raceTimes.length; offset += 1) {
+    const candidate = raceTimes[(currentIndex + offset) % raceTimes.length];
+    if (!candidate.completed) return candidate;
+  }
+
+  return unfinishedTeams[0];
+}
+
 async function getParticipatingTeams(eventoId) {
   return allQuery(
     `SELECT t.id, t.name, t.color
@@ -236,8 +251,8 @@ async function startTreasureGame(eventoId, brincadeiraId) {
   }
 
   const participatingTeams = await getParticipatingTeams(eventoId);
-  if (participatingTeams.length !== 2) {
-    throw new Error('O Caça ao Tesouro precisa de exatamente duas equipes cadastradas no evento');
+  if (participatingTeams.length < 2) {
+    throw new Error('O Caça ao Tesouro precisa de pelo menos duas equipes cadastradas no evento');
   }
 
   // Sorteio persistente: somente esta equipe começa a primeira etapa.
@@ -282,7 +297,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
         eventoId,
         timeId: team.id,
         // A equipe sorteada começa a correr depois dos 10 segundos de preparação.
-        // O cronômetro da outra equipe começa quando sua primeira vez for liberada.
+        // O cronômetro de cada equipe começa quando sua primeira vez for liberada.
         startedAt: sameId(team.id, startingTeam.id) ? initialTurnAvailableAt : null,
       }
     );
@@ -476,7 +491,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     return {
       handled: true,
       accepted: false,
-      error: `Agora é a vez da equipe ${turnTeam?.name || 'adversária'}`,
+      error: `Agora é a vez da equipe ${turnTeam?.name || 'da vez'}`,
       turnTeamId,
     };
   }
@@ -632,21 +647,19 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   }
 
   const raceTimes = await getTeamRaceTimes(eventoId, session);
-  const raceFinished = raceTimes.length === 2 && raceTimes.every(teamRace => teamRace.completed);
+  const raceFinished = raceTimes.length >= 2 && raceTimes.every(teamRace => teamRace.completed);
   const winningTeam = raceFinished ? getFastestCompletedTeam(raceTimes) : null;
   const currentTeamRace = raceTimes.find(
     teamRace => sameId(teamRace.teamId, crianca.time_id)
   ) || null;
-  const unfinishedTeams = raceTimes.filter(teamRace => !teamRace.completed);
 
   // A equipe atual continua jogando até dominar todos os checkpoints.
-  // Só depois disso a vez passa para a outra equipe.
+  // Quando termina, a vez passa circularmente para a próxima equipe ainda
+  // não concluída, sem voltar para equipes que já terminaram.
   const nextTurnTeam = raceFinished
     ? null
     : ownership.won
-      ? unfinishedTeams.find(teamRace => !sameId(teamRace.teamId, crianca.time_id))
-        || unfinishedTeams[0]
-        || null
+      ? getNextUnfinishedTeam(raceTimes, turnTeamId)
       : currentTeamRace;
   const switchingTeam = Boolean(ownership.won && nextTurnTeam);
   const visibleCompletedCheckpointIds = switchingTeam ? [] : updatedCompleted;
@@ -772,7 +785,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     message: raceFinished
       ? `🏆 Caça ao Tesouro concluído! A equipe ${winningTeam?.teamName || 'vencedora'} foi mais rápida, com ${winningTeam?.elapsedMinutes ?? 0} minutos.`
       : ownership.won
-        ? `✅ A equipe ${team?.name || ''} acendeu todos os checkpoints. Aguarde 10 segundos para a outra equipe começar.`
+        ? `✅ A equipe ${team?.name || ''} acendeu todos os checkpoints. Aguarde 10 segundos para a próxima equipe começar.`
         : `Etapa concluída pela equipe ${team?.name || ''}. Próximo checkpoint da mesma equipe será liberado.`,
   };
 }
