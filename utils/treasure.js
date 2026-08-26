@@ -181,14 +181,36 @@ async function stopTreasureGame(eventoId) {
   );
 }
 
-async function getEventCheckpointIds(eventoId) {
+async function getTreasureCheckpointIds(eventoId, brincadeiraId) {
   const checkpoints = await getEventCheckpoints(eventoId);
-  return checkpoints.map(checkpoint => String(checkpoint.id));
+  if (!brincadeiraId) return checkpoints.map(checkpoint => String(checkpoint.id));
+
+  const game = await queryOne(
+    'SELECT checkpoints FROM brincadeiras WHERE LOWER(id) = LOWER(@brincadeiraId)',
+    { brincadeiraId }
+  );
+  const configuredItems = parseJson(game?.checkpoints, []);
+  const configuredIds = configuredItems
+    .map(item => String(item?.id || item || '').trim())
+    .filter(Boolean);
+
+  if (!configuredIds.length) return checkpoints.map(checkpoint => String(checkpoint.id));
+
+  const configuredSet = new Set(configuredIds.map(id => id.toLowerCase()));
+  return checkpoints
+    .filter(checkpoint => configuredSet.has(String(checkpoint.id).trim().toLowerCase()))
+    .map(checkpoint => String(checkpoint.id));
 }
 
-async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId = null) {
+async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId = null, allowedCheckpointIds = null) {
   const checkpoints = await getEventCheckpoints(eventoId);
-  const candidates = checkpoints
+  const allowedSet = Array.isArray(allowedCheckpointIds) && allowedCheckpointIds.length
+    ? new Set(allowedCheckpointIds.map(id => String(id).trim().toLowerCase()))
+    : null;
+  const scopedCheckpoints = allowedSet
+    ? checkpoints.filter(checkpoint => allowedSet.has(String(checkpoint.id).trim().toLowerCase()))
+    : checkpoints;
+  const candidates = scopedCheckpoints
     // Nunca repetir imediatamente o checkpoint que acabou de ser concluído.
     .filter(checkpoint => !sameId(checkpoint.id, excludedCheckpointId))
     // O próximo alvo precisa ser um checkpoint que ainda não tenha a cor
@@ -207,7 +229,7 @@ async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId 
   // de domínio já estão parcialmente preenchidos ou quando há poucos
   // checkpoints. Neste caso, permite repetir qualquer checkpoint diferente
   // do último; se houver apenas um, repete o próprio checkpoint.
-  const fallbackCandidates = checkpoints
+  const fallbackCandidates = scopedCheckpoints
     .filter(checkpoint => !sameId(checkpoint.id, excludedCheckpointId))
     .map(checkpoint => String(checkpoint.id));
 
@@ -218,23 +240,20 @@ async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId 
   return excludedCheckpointId ? String(excludedCheckpointId) : null;
 }
 
-async function getTeamOwnershipProgress(eventoId, teamId) {
-  const result = await queryOne(
-    `SELECT COUNT(*) AS total,
-       SUM(CASE WHEN LOWER(territory_owner_time_id) = LOWER(@teamId) THEN 1 ELSE 0 END) AS owned
-     FROM checkpoints
-     WHERE LOWER(evento_id) = LOWER(@eventoId)
-       AND LOWER(status) = 'online'
-       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
-    { eventoId, teamId }
-  );
+async function getTeamOwnershipProgress(eventoId, teamId, allowedCheckpointIds = null) {
+  const checkpoints = await getEventCheckpoints(eventoId);
+  const allowedSet = Array.isArray(allowedCheckpointIds) && allowedCheckpointIds.length
+    ? new Set(allowedCheckpointIds.map(id => String(id).trim().toLowerCase()))
+    : null;
+  const scopedCheckpoints = allowedSet
+    ? checkpoints.filter(checkpoint => allowedSet.has(String(checkpoint.id).trim().toLowerCase()))
+    : checkpoints;
+  const owned = scopedCheckpoints.filter(checkpoint => sameId(checkpoint.territory_owner_time_id, teamId)).length;
 
-  const total = Number(result?.total || 0);
-  const owned = Number(result?.owned || 0);
   return {
-    total,
+    total: scopedCheckpoints.length,
     owned,
-    won: total > 0 && owned === total,
+    won: scopedCheckpoints.length > 0 && owned === scopedCheckpoints.length,
   };
 }
 
@@ -244,10 +263,10 @@ async function startTreasureGame(eventoId, brincadeiraId) {
     throw new Error('Jogo Caça ao Tesouro não encontrado para este evento');
   }
 
-  // O primeiro alvo pode ser qualquer checkpoint do evento.
-  const ids = await getEventCheckpointIds(eventoId);
+  // O primeiro alvo deve pertencer à lista configurada na brincadeira e estar online.
+  const ids = await getTreasureCheckpointIds(eventoId, brincadeiraId);
   if (!ids.length) {
-    throw new Error('O Caça ao Tesouro precisa de pelo menos um checkpoint online');
+    throw new Error('O Caça ao Tesouro precisa de pelo menos um checkpoint configurado e online');
   }
 
   const participatingTeams = await getParticipatingTeams(eventoId);
@@ -374,7 +393,12 @@ async function getTreasureEventStatus(eventoId) {
     };
   }
 
-  const checkpoints = await getEventCheckpoints(eventoId);
+  const configuredCheckpointIds = await getTreasureCheckpointIds(eventoId, session.brincadeira_id);
+  const configuredCheckpointSet = new Set(configuredCheckpointIds.map(id => String(id).trim().toLowerCase()));
+  const checkpoints = (await getEventCheckpoints(eventoId)).filter(checkpoint => (
+    configuredCheckpointSet.size === 0
+      || configuredCheckpointSet.has(String(checkpoint.id).trim().toLowerCase())
+  ));
   const ownershipCounts = checkpoints.reduce((counts, checkpoint) => {
     if (checkpoint.territory_owner_time_id) {
       const ownerId = String(checkpoint.territory_owner_time_id);
@@ -460,6 +484,16 @@ async function getTeamsProgress(eventoId, session) {
 async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeiraId, uid, now }) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
+
+  const treasureCheckpointIds = await getTreasureCheckpointIds(eventoId, brincadeiraId);
+  if (!treasureCheckpointIds.length) {
+    return {
+      handled: true,
+      accepted: false,
+      error: 'Nenhum checkpoint configurado para o Caça ao Tesouro está online',
+      message: 'Nenhum checkpoint configurado para o Caça ao Tesouro está online',
+    };
+  }
 
   const checkpointStatus = await queryOne(
     `SELECT status, checkpoint_purpose FROM checkpoints
@@ -641,7 +675,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     { timeId: crianca.time_id, now, checkpointId, eventoId }
   );
 
-  const ownership = await getTeamOwnershipProgress(eventoId, crianca.time_id);
+  const ownership = await getTeamOwnershipProgress(eventoId, crianca.time_id, treasureCheckpointIds);
   if (ownership.won) {
     await completeTeamRace(session.id, crianca.time_id, now);
   }
@@ -676,7 +710,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   const nextTargetCheckpointId = raceFinished
     ? null
     : nextTurnTeam
-      ? await getNextTargetCheckpointId(eventoId, nextTurnTeam.teamId, checkpointId)
+      ? await getNextTargetCheckpointId(eventoId, nextTurnTeam.teamId, checkpointId, treasureCheckpointIds)
       : null;
 
   // Ao trocar de equipe, o mapa começa uma nova busca: os domínios da
@@ -694,10 +728,12 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       { eventoId }
     );
 
-    checkpointOwnership = (await getEventCheckpoints(eventoId)).map(checkpoint => ({
-      checkpointId: String(checkpoint.id),
-      teamId: null,
-    }));
+    checkpointOwnership = (await getEventCheckpoints(eventoId))
+      .filter(checkpoint => treasureCheckpointIds.some(id => sameId(id, checkpoint.id)))
+      .map(checkpoint => ({
+        checkpointId: String(checkpoint.id),
+        teamId: null,
+      }));
   }
 
   let advanceResult;
