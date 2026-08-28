@@ -173,6 +173,15 @@ router.get('/:id/territory', async (req, res) => {
     const treasureStatus = await getCheckpointTreasureStatus(req.params.id);
     const monsterStatus = await getCheckpointMonsterStatus(req.params.id);
 
+    // O ESP32 decide a cor do LED pelo campo `gameType`. Resolvemos ele de forma
+    // explícita para que o espalhamento de um status não sobrescreva o do outro.
+    const activeGameType = [treasureStatus.gameType, monsterStatus.gameType]
+      .find(type => type && type !== 'none') || 'none';
+
+    // `monsters` traz o progresso de todas as equipes e é grande demais para o
+    // buffer JSON do firmware. Ele continua disponível em /api/monster/...
+    const { monsters, ...monsterSummary } = monsterStatus;
+
     res.json({
       checkpointId: checkpoint.id,
       isLocked,
@@ -183,7 +192,8 @@ router.get('/:id/territory', async (req, res) => {
       remainingSeconds: isLocked ? Math.max(0, Math.ceil((new Date(checkpoint.territory_locked_until) - now) / 1000)) : 0,
       cooldownRemaining: isCooldown ? Math.max(0, Math.ceil((new Date(checkpoint.territory_cooldown_until) - now) / 1000)) : 0,
       ...treasureStatus,
-      ...monsterStatus
+      ...monsterSummary,
+      gameType: activeGameType
     });
   } catch (err) {
     console.error('❌ Erro ao buscar status do território:', err);

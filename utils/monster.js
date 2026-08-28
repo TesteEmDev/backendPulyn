@@ -255,7 +255,10 @@ async function getCheckpointMonsterStatus(checkpointId) {
   }
   const status = await getMonsterEventStatus(checkpoint.evento_id);
   return {
-    gameType: MONSTER_GAME_TYPE,
+    // Só anuncia o tipo de jogo quando o Caça ao Monstro está realmente ativo.
+    // Caso contrário este campo sobrescreve o gameType de outras brincadeiras
+    // (por exemplo o Caça ao Tesouro) na resposta consumida pelo ESP32.
+    gameType: status.active ? MONSTER_GAME_TYPE : 'none',
     monsterActive: Boolean(status.active),
     monsterHp: status.monsterHp,
     monsterMaxHp: status.monsterMaxHp,
