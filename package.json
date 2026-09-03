@@ -1,0 +1,32 @@
+{
+  "name": "pulyn-server",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "migrate": "node run-migration.js",
+    "migrate:all": "node run-all-migrations.js",
+    "migrate:004": "node run-single-migration.js 004",
+    "test-connection": "node test-connection.js",
+    "schema:export": "node export-sqlserver-schema.js",
+    "schema:postgres": "node generate-postgres-schema.js",
+    "schema:apply": "node apply-postgres-schema.js",
+    "data:migrate": "node migrate-sqlserver-data.js",
+    "data:validate": "node test-data-migration.js",
+    "test-postgres": "node test-postgres-connection.js",
+    "test-api": "node test-api.js",
+    "dev": "nodemon index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "16.6.1",
+    "env": "^0.0.2",
+    "express": "^4.22.2",
+    "jsonwebtoken": "9.0.3",
+    "mssql": "^12.5.5",
+    "pg": "8.16.3",
+    "tedious": "^16.6.0",
+    "uuid": "^14.0.0",
+    "ws": "^8.21.0"
+  }
+}
