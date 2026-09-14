@@ -4,18 +4,19 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "dev": "nodemon index.js",
+    "setup-env": "node setup-env.js",
     "migrate": "node run-migration.js",
     "migrate:all": "node run-all-migrations.js",
     "migrate:004": "node run-single-migration.js 004",
     "test-connection": "node test-connection.js",
+    "test-postgres": "node test-postgres-connection.js",
+    "test-api": "node test-api.js",
     "schema:export": "node export-sqlserver-schema.js",
     "schema:postgres": "node generate-postgres-schema.js",
     "schema:apply": "node apply-postgres-schema.js",
     "data:migrate": "node migrate-sqlserver-data.js",
-    "data:validate": "node test-data-migration.js",
-    "test-postgres": "node test-postgres-connection.js",
-    "test-api": "node test-api.js",
-    "dev": "nodemon index.js"
+    "data:validate": "node test-data-migration.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
