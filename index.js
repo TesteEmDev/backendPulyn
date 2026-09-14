@@ -35,6 +35,7 @@ const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
 const qrcodeRoutes = require('./routes/qrcode');
+const familyLinkingRoutes = require('./routes/family-linking');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -1461,6 +1462,9 @@ app.use('/api/monster', monsterRoutes);
 
 // QR Code
 app.use('/api/qrcode', qrcodeRoutes);
+
+// Vinculação Familiar (pais <-> crianças via QR Code)
+app.use('/api/family', familyLinkingRoutes);
 
 // Recursos do dashboard master
 app.use('/api/planos', planosRoutes);
