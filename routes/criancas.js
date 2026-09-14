@@ -5,6 +5,7 @@ const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { getAvatarForCreate, isAdventurerAvatarId } = require('../utils/avatar');
+const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -389,6 +390,184 @@ router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
     
     res.json({ ok: true, message: 'Pulseira desvinculada com sucesso' });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ NOVO: Gerar/Regenerar QR Code para uma criança
+router.post('/:crianca_id/generate-qrcode', verifyToken, async (req, res) => {
+  try {
+    const { crianca_id } = req.params;
+    
+    // Validar acesso
+    const crianca = await queryOne(
+      `SELECT * FROM criancas
+       WHERE id = @id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+    );
+    
+    if (!crianca) {
+      return res.status(404).json({ error: 'Criança não encontrada' });
+    }
+
+    // Gerar novo QR Code
+    const qrCodeData = await createQRCodeForChild(crianca_id);
+
+    // Salvar na tabela criancas
+    await query(
+      `UPDATE criancas SET qrcode = @qrcode 
+       WHERE id = @crianca_id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      { 
+        qrcode: qrCodeData.qrCode, 
+        crianca_id, 
+        empresaId: req.user.empresa_id,
+        isMaster: isMaster(req) ? 1 : 0
+      }
+    );
+
+    console.log(`✅ QR Code gerado para criança ${crianca.name} (${crianca_id}): ${qrCodeData.qrCode}`);
+
+    res.json({
+      ok: true,
+      message: 'QR Code gerado com sucesso',
+      qrCode: qrCodeData.qrCode,
+      trackingUrl: qrCodeData.trackingUrl,
+    });
+  } catch (err) {
+    console.error('❌ Erro ao gerar QR Code:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ NOVO: Obter imagem do QR Code de uma criança
+router.get('/:crianca_id/qrcode-image', verifyToken, async (req, res) => {
+  try {
+    const { crianca_id } = req.params;
+    
+    // Validar acesso
+    const crianca = await queryOne(
+      `SELECT * FROM criancas
+       WHERE id = @id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+    );
+    
+    if (!crianca) {
+      return res.status(404).json({ error: 'Criança não encontrada' });
+    }
+
+    // Se não tem QR Code, gerar um
+    let qrCode = crianca.qrcode;
+    if (!qrCode) {
+      const qrCodeData = await createQRCodeForChild(crianca_id);
+      qrCode = qrCodeData.qrCode;
+      
+      // Salvar na tabela
+      await query(
+        `UPDATE criancas SET qrcode = @qrcode 
+         WHERE id = @crianca_id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+        { 
+          qrcode: qrCode, 
+          crianca_id, 
+          empresaId: req.user.empresa_id,
+          isMaster: isMaster(req) ? 1 : 0
+        }
+      );
+      
+      console.log(`✅ QR Code auto-gerado para criança ${crianca.name} (${crianca_id}): ${qrCode}`);
+    }
+
+    // Gerar imagem do QR Code existente
+    const { generateQRCodeImage } = require('../utils/qrcode');
+    const trackingUrl = generateParentTrackingUrl(qrCode, crianca_id);
+    const qrCodeImage = await generateQRCodeImage(trackingUrl);
+
+    // Retornar imagem PNG
+    res.type('image/png');
+    res.send(qrCodeImage);
+  } catch (err) {
+    console.error('❌ Erro ao obter imagem QR Code:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ✅ NOVO: Gerar QR Code para todas as crianças NULL em um evento (batch)
+router.post('/eventos/:evento_id/generate-qrcodes-batch', verifyToken, async (req, res) => {
+  try {
+    const allowedRoles = ['admin', 'reception', 'game_master'];
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+      return res.status(403).json({ error: 'Acesso negado para esta operação em lote' });
+    }
+
+    const { evento_id } = req.params;
+
+    // Validar que o evento pertence à empresa
+    const evento = await queryOne('SELECT * FROM eventos WHERE id = @evento_id AND (empresa_id = @empresaId OR @isMaster = 1)', 
+      { evento_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 });
+    
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+
+    // Buscar todas as crianças sem QR Code
+    const criancasSemQR = await allQuery(
+      `SELECT id, name FROM criancas 
+       WHERE evento_id = @evento_id 
+       AND (qrcode IS NULL OR qrcode = '')
+       AND empresa_id = @empresa_id`,
+      { evento_id, empresa_id: evento.empresa_id }
+    );
+
+    if (criancasSemQR.length === 0) {
+      return res.json({ 
+        ok: true, 
+        message: 'Todas as crianças já possuem QR Code',
+        generated: 0,
+        total: 0
+      });
+    }
+
+    // Gerar QR Code para cada criança
+    const results = [];
+    for (const crianca of criancasSemQR) {
+      try {
+        const qrCodeData = await createQRCodeForChild(crianca.id);
+        
+        await query(
+          `UPDATE criancas SET qrcode = @qrcode 
+           WHERE id = @crianca_id`,
+          { qrcode: qrCodeData.qrCode, crianca_id: crianca.id }
+        );
+
+        results.push({
+          crianca_id: crianca.id,
+          crianca_name: crianca.name,
+          qrCode: qrCodeData.qrCode,
+          success: true,
+        });
+
+        console.log(`✅ QR Code gerado para ${crianca.name}: ${qrCodeData.qrCode}`);
+      } catch (err) {
+        console.error(`❌ Erro ao gerar QR Code para ${crianca.name}:`, err.message);
+        results.push({
+          crianca_id: crianca.id,
+          crianca_name: crianca.name,
+          success: false,
+          error: err.message,
+        });
+      }
+    }
+
+    const successCount = results.filter(r => r.success).length;
+
+    res.json({
+      ok: true,
+      message: `${successCount} QR Code(s) gerado(s) com sucesso`,
+      generated: successCount,
+      total: criancasSemQR.length,
+      results,
+    });
+  } catch (err) {
+    console.error('❌ Erro ao gerar QR Codes em lote:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

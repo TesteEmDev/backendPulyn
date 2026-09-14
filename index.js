@@ -34,6 +34,7 @@ const monitoringRoutes = require('./routes/monitoring');
 const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
+const qrcodeRoutes = require('./routes/qrcode');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -1457,6 +1458,9 @@ app.use('/api/treasure', treasureRoutes);
 
 // Caça ao Monstro
 app.use('/api/monster', monsterRoutes);
+
+// QR Code
+app.use('/api/qrcode', qrcodeRoutes);
 
 // Recursos do dashboard master
 app.use('/api/planos', planosRoutes);
