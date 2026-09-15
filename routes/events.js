@@ -485,7 +485,7 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
 });
 
 // Planta do evento: armazenada no banco para sobreviver a reload/redeploy do frontend.
-router.get('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+router.get('/:id/floor-plan', verifyToken, async (req, res) => {
   try {
     const evento = await queryOne(
       isMaster(req)
