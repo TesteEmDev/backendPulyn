@@ -79,19 +79,24 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
 router.get('/evento/:evento_id', verifyToken, async (req, res) => {
   try {
     const { evento_id } = req.params;
+    console.log(`📍 Buscando checkpoints para evento: ${evento_id}`);
+    
     const evento = await queryOne(
       'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
       { evento_id }
     );
 
     if (!evento) {
+      console.log(`⚠️ Evento não encontrado: ${evento_id}`);
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
     if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      console.log(`🚫 Acesso negado: empresa ${req.user.empresa_id} vs ${evento.empresa_id}`);
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
+    console.log(`🔍 Consultando checkpoints para evento ${evento_id}, empresa ${evento.empresa_id}`);
     const checkpoints = await allQuery(
       `SELECT * FROM checkpoints
        WHERE evento_id = @evento_id
@@ -101,10 +106,11 @@ router.get('/evento/:evento_id', verifyToken, async (req, res) => {
       { evento_id, empresa_id: evento.empresa_id }
     );
 
+    console.log(`✅ ${checkpoints?.length || 0} checkpoints encontrados`);
     res.json(checkpoints || []);
   } catch (err) {
-    console.error('❌ Erro ao listar checkpoints:', err);
-    res.status(500).json({ error: err.message });
+    console.error('❌ Erro ao listar checkpoints:', err.message, err.code);
+    res.status(500).json({ error: err.message || 'Erro ao consultar checkpoints' });
   }
 });
 
