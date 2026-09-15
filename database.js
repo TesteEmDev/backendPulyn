@@ -39,7 +39,9 @@ function postgresConfig() {
     } : {}),
     ssl: sslEnabled ? { rejectUnauthorized: false } : false,
     connectionTimeoutMillis: Number(process.env.DB_TIMEOUT || 30000),
-    max: Number(process.env.PG_POOL_MAX || 10)
+    max: Number(process.env.PG_POOL_MAX || 30),
+    idleTimeoutMillis: 10000,
+    statementTimeoutMillis: 30000
   };
 }
 
