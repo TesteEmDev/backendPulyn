@@ -671,3 +671,87 @@ router.delete('/:id', verifyToken, async (req, res) => {
 });
 
 module.exports = router;
+
+// ==================== ZONAS DO MAPA ====================
+
+// Carregar zonas do evento
+router.get('/:id/zones', verifyToken, async (req, res) => {
+  try {
+    const evento_id = req.params.id;
+    const empresa_id = req.user.empresa_id;
+    
+    // Verificar que o evento pertence à empresa (ou user é master)
+    const evento = await queryOne(
+      'SELECT empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+    
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+    
+    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    
+    // Carregar zonas do evento
+    const zonesData = await queryOne(
+      'SELECT zones_data FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+    
+    if (!zonesData || !zonesData.zones_data) {
+      return res.json([]);
+    }
+    
+    try {
+      const zones = JSON.parse(zonesData.zones_data);
+      res.json(zones);
+    } catch (e) {
+      console.error('Erro ao parsear zonas:', e);
+      res.json([]);
+    }
+  } catch (err) {
+    console.error('❌ Erro ao carregar zonas:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Salvar zonas do evento
+router.post('/:id/zones', verifyToken, async (req, res) => {
+  try {
+    const evento_id = req.params.id;
+    const { zones } = req.body;
+    const empresa_id = req.user.empresa_id;
+    
+    // Verificar que o evento pertence à empresa (ou user é master)
+    const evento = await queryOne(
+      'SELECT empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+    
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+    
+    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    
+    if (!Array.isArray(zones)) {
+      return res.status(400).json({ error: 'Zonas deve ser um array' });
+    }
+    
+    // Salvar zonas em JSON
+    const zonesJson = JSON.stringify(zones);
+    await query(
+      'UPDATE eventos SET zones_data = @zones_data WHERE id = @id',
+      { zones_data: zonesJson, id: evento_id }
+    );
+    
+    res.json({ success: true, message: 'Zonas salvas com sucesso', zones });
+  } catch (err) {
+    console.error('❌ Erro ao salvar zonas:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
