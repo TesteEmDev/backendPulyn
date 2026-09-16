@@ -44,6 +44,7 @@ const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMa
 const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureAvatarSchema } = require('./migrations/avatar');
+// ⏭️ Migration de family-linking-tables desabilitada (criada via run-migration.js)
 const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
@@ -1517,6 +1518,8 @@ async function startServer() {
     await ensureEventFloorPlanSchema();
     await ensureMonsterHuntSchema();
     await ensureAvatarSchema();
+    // ⏭️ Desabilita a migration de family-linking-tables pois já foi criada manualmente
+    // await ensureFamilyLinkingTables();
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints e Caça ao Monstro verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
@@ -1549,6 +1552,7 @@ async function startServer() {
   ║      ✓ /api/settings                 ║
   ║      ✓ /api/ranking                  ║
   ║      ✓ /api/logs                     ║
+  ║      ✓ /api/family                   ║
   ╚═══════════════════════════════════════╝
   `);
   
