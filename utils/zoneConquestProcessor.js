@@ -1,4 +1,4 @@
-const { query, queryOne, transaction } = require('../database');
+const { query, queryOne } = require('../database');
 const { v4: uuidv4 } = require('uuid');
 const { recordZoneConquestScan, getZoneConquestScans } = require('./zoneConquest');
 

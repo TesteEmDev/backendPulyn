@@ -1,4 +1,4 @@
-const { query, queryOne, transaction } = require('../database');
+const { query, queryOne, withTransaction } = require('../database');
 const { v4: uuidv4 } = require('uuid');
 
 const ZONE_CONQUEST_GAME_TYPE = 'zone';
@@ -6,7 +6,7 @@ const ZONE_CONQUEST_GAME_TYPE = 'zone';
 async function startZoneConquestGame(eventoId, brincadeiraId) {
   console.log('🎬 [ZONE_CONQUEST] Iniciando jogo para evento:', eventoId, 'brincadeira:', brincadeiraId);
   
-  const resultado = await transaction(async (tx) => {
+  const resultado = await withTransaction(async (tx) => {
     console.log('📍 [ZONE_CONQUEST] Inside transaction');
     
     // Buscar evento e jogo
