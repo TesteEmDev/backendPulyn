@@ -61,6 +61,11 @@ const {
   startMonsterGame,
   stopMonsterGame,
 } = require('./utils/monster');
+const {
+  ZONE_CONQUEST_GAME_TYPE,
+  startZoneConquestGame,
+  stopZoneConquestGame,
+} = require('./utils/zoneConquest');
 
 const app = express();
 const server = http.createServer(app);
