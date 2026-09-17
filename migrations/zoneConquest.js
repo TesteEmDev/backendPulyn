@@ -4,41 +4,6 @@ async function ensureZoneConquestSchema() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
   if (isPostgres) {
-    // Limpar índices problemáticos da tabela existente
-    try {
-      await query(`DROP INDEX IF EXISTS idx_zonas_equipes_scans_checkpoint CASCADE`);
-      await query(`DROP INDEX IF EXISTS idx_zonas_equipes_scans_evento CASCADE`);
-      await query(`DROP INDEX IF EXISTS uq_zonas_equipes_scan_reading CASCADE`);
-    } catch (err) {
-      console.warn('⚠️ Erro ao limpar índices antigos (pode ser normal):', err.message);
-    }
-
-    // Verificar e corrigir tabela zonas_equipes_scans existente
-    try {
-      const checkColumn = await query(`
-        SELECT EXISTS (
-          SELECT FROM information_schema.columns 
-          WHERE table_name = 'zonas_equipes_scans' 
-          AND column_name = 'partida_id'
-        )`);
-      
-      if (!checkColumn || !checkColumn[0]?.exists) {
-        console.log('🔧 Adicionando coluna partida_id à tabela zonas_equipes_scans...');
-        try {
-          await query(`
-            ALTER TABLE zonas_equipes_scans
-            ADD COLUMN partida_id varchar(36)
-          `);
-        } catch (altErr) {
-          if (!altErr.message.includes('already exists')) {
-            console.warn('⚠️ Erro ao adicionar partida_id:', altErr.message);
-          }
-        }
-      }
-    } catch (checkErr) {
-      console.warn('⚠️ Tabela zonas_equipes_scans pode não existir ainda, será criada...');
-    }
-
     // Tabela principal de partidas de zona
     await query(`
       CREATE TABLE IF NOT EXISTS zonas_equipes_partidas (
@@ -70,11 +35,7 @@ async function ensureZoneConquestSchema() {
       )
     `);
 
-    // Índice único para garantir uma entrada por partida/equipe
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zonas_equipes_team_state ON zonas_equipes_teams_states (partida_id, time_id)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_team_states_evento ON zonas_equipes_teams_states (empresa_id, evento_id, partida_id)');
-
-    // Tabela de leituras/scans da zona
+    // Criar tabela de scans
     await query(`
       CREATE TABLE IF NOT EXISTS zonas_equipes_scans (
         id varchar(36) PRIMARY KEY,
@@ -92,10 +53,43 @@ async function ensureZoneConquestSchema() {
       )
     `);
 
-    await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_scans_checkpoint ON zonas_equipes_scans (partida_id, checkpoint_id, scanned_at)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_partidas_evento ON zonas_equipes_partidas (empresa_id, evento_id, status)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zonas_equipes_scan_reading ON zonas_equipes_scans (leitura_id) WHERE leitura_id IS NOT NULL');
-    await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_scans_evento ON zonas_equipes_scans (empresa_id, evento_id, partida_id)');
+    // Agora criar os índices com try-catch para cada um
+    try {
+      await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zonas_equipes_team_state ON zonas_equipes_teams_states (partida_id, time_id)');
+    } catch (err) {
+      console.warn('⚠️ Erro ao criar índice team_state:', err.message);
+    }
+
+    try {
+      await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_team_states_evento ON zonas_equipes_teams_states (empresa_id, evento_id, partida_id)');
+    } catch (err) {
+      console.warn('⚠️ Erro ao criar índice team_states_evento:', err.message);
+    }
+
+    try {
+      await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_scans_checkpoint ON zonas_equipes_scans (partida_id, checkpoint_id, scanned_at)');
+    } catch (err) {
+      console.warn('⚠️ Erro ao criar índice scans_checkpoint:', err.message);
+    }
+
+    try {
+      await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_partidas_evento ON zonas_equipes_partidas (empresa_id, evento_id, status)');
+    } catch (err) {
+      console.warn('⚠️ Erro ao criar índice partidas_evento:', err.message);
+    }
+
+    try {
+      await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zonas_equipes_scan_reading ON zonas_equipes_scans (leitura_id) WHERE leitura_id IS NOT NULL');
+    } catch (err) {
+      console.warn('⚠️ Erro ao criar índice scan_reading:', err.message);
+    }
+
+    try {
+      await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_scans_evento ON zonas_equipes_scans (empresa_id, evento_id, partida_id)');
+    } catch (err) {
+      console.warn('⚠️ Erro ao criar índice scans_evento:', err.message);
+    }
+
     return;
   }
 
