@@ -1,4 +1,4 @@
-const { query, queryOne, withTransaction } = require('../database');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { v4: uuidv4 } = require('uuid');
 
 const ZONE_CONQUEST_GAME_TYPE = 'zone';
