@@ -345,19 +345,28 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE, ZONE_CONQUEST_GAME_TYPE].includes(rawGameType)
       ? rawGameType
       : rawGameType || 'standard';
+    
+    console.log('🎮 [routes/events.js] Game Type:', gameType);
+    console.log('🎮 [routes/events.js] ZONE_CONQUEST_GAME_TYPE:', ZONE_CONQUEST_GAME_TYPE);
+    console.log('🎮 [routes/events.js] Comparação:', gameType === ZONE_CONQUEST_GAME_TYPE);
+    
     if (gameType === MONSTER_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando Monster Game');
       await startMonsterGame(evento_id, brincadeira.id);
       await stopTreasureGame(evento_id);
       await stopZoneConquestGame(evento_id);
     } else if (gameType === TREASURE_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando Treasure Game');
       await startTreasureGame(evento_id, brincadeira.id);
       await stopMonsterGame(evento_id);
       await stopZoneConquestGame(evento_id);
     } else if (gameType === ZONE_CONQUEST_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando ZONE CONQUEST Game');
       await startZoneConquestGame(evento_id, brincadeira.id);
       await stopMonsterGame(evento_id);
       await stopTreasureGame(evento_id);
     } else {
+      console.log('📍 [routes/events.js] Parando todos os jogos (tipo:', gameType, ')');
       await stopMonsterGame(evento_id);
       await stopTreasureGame(evento_id);
       await stopZoneConquestGame(evento_id);
