@@ -4,6 +4,15 @@ async function ensureZoneConquestSchema() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
   if (isPostgres) {
+    // Limpar índices problemáticos da tabela existente
+    try {
+      await query(`DROP INDEX IF EXISTS idx_zonas_equipes_scans_checkpoint CASCADE`);
+      await query(`DROP INDEX IF EXISTS idx_zonas_equipes_scans_evento CASCADE`);
+      await query(`DROP INDEX IF EXISTS uq_zonas_equipes_scan_reading CASCADE`);
+    } catch (err) {
+      console.warn('⚠️ Erro ao limpar índices antigos (pode ser normal):', err.message);
+    }
+
     // Verificar e corrigir tabela zonas_equipes_scans existente
     try {
       const checkColumn = await query(`
