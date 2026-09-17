@@ -45,6 +45,7 @@ const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureAvatarSchema } = require('./migrations/avatar');
 const { ensureEventZonesSchema } = require('./migrations/eventZones');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
+const { addCheckpointTerritoryFields } = require('./migrations/addCheckpointTerritoryFields');
 const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
@@ -1517,6 +1518,7 @@ async function startServer() {
     await ensureAvatarSchema();
     await ensureEventZonesSchema();
     await ensureZoneConquestSchema();
+    await addCheckpointTerritoryFields();
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa e Zona Conquest verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
