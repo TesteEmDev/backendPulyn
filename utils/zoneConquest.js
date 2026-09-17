@@ -7,26 +7,20 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
   console.log('🎬 [ZONE_CONQUEST] Iniciando jogo para evento:', eventoId, 'brincadeira:', brincadeiraId);
   
   const resultado = await withTransaction(async (tx) => {
-    console.log('📍 [ZONE_CONQUEST] Inside transaction');
-    
     // Buscar evento e jogo
     const evento = await tx.queryOne('SELECT * FROM eventos WHERE id = @id', { id: eventoId });
-    console.log('📋 [ZONE_CONQUEST] Evento encontrado:', !!evento);
     if (!evento) throw new Error('Evento não encontrado');
 
     const game = await tx.queryOne(
       'SELECT * FROM brincadeiras WHERE id = @id',
       { id: brincadeiraId }
     );
-    console.log('📋 [ZONE_CONQUEST] Game encontrado:', !!game);
     if (!game) throw new Error('Jogo não encontrado');
 
     const now = new Date();
     const partidaId = uuidv4();
-    console.log('🆔 [ZONE_CONQUEST] Nova partida ID:', partidaId);
 
     // 1. Finalizar qualquer partida ativa anterior
-    console.log('🔄 [ZONE_CONQUEST] Finalizando partidas antigas...');
     await tx.query(`
       UPDATE zonas_equipes_teams_states
       SET status = 'finished', version = version + 1
@@ -38,7 +32,6 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
 
     // 2. Criar nova partida
-    console.log('📝 [ZONE_CONQUEST] Criando nova partida...');
     await tx.query(`
       INSERT INTO zonas_equipes_partidas
         (id, empresa_id, evento_id, brincadeira_id, status, version, started_at)
@@ -49,10 +42,8 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
       brincadeiraId,
       startedAt: now,
     });
-    console.log('✅ [ZONE_CONQUEST] Partida criada com sucesso');
 
     // 3. Buscar todas as equipes participantes
-    console.log('👥 [ZONE_CONQUEST] Buscando equipes...');
     const participatingTeams = await tx.allQuery(`
       SELECT DISTINCT t.id, t.name
       FROM times t
@@ -60,7 +51,6 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
       ORDER BY t.name`, { eventoId });
 
     // 4. Criar state para cada equipe
-    console.log('👥 [ZONE_CONQUEST] Criando team states para', participatingTeams.length, 'equipes...');
     for (const team of participatingTeams) {
       await tx.query(`
         INSERT INTO zonas_equipes_teams_states
@@ -73,9 +63,8 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
         timeId: team.id,
       });
     }
-    console.log('✅ [ZONE_CONQUEST] Team states criados');
 
-    console.log('🎉 [ZONE_CONQUEST] Jogo iniciado com sucesso! Partida:', partidaId);
+    console.log('🎬 [ZONE_CONQUEST] Jogo iniciado com sucesso! Partida:', partidaId);
     
     return {
       id: partidaId,
@@ -92,51 +81,39 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
     };
   });
 
-  console.log('🎬 [ZONE_CONQUEST] Resultado retornado:', resultado.id);
   return resultado;
 }
 
 async function stopZoneConquestGame(eventoId) {
-  console.log('🛑 Parando Zone Conquest Game para evento:', eventoId);
-  
   try {
     // 1. Calcular vencedor e salvar resultados
     await calculateAndSaveZoneConquestResults(eventoId);
   } catch (err) {
-    console.warn('⚠️ Erro ao calcular resultados de Zone Conquest:', err.message, err);
+    console.error('⚠️ Erro ao calcular resultados de Zone Conquest:', err.message, err);
   }
 
   // 2. Finalizar team states
-  console.log('📝 Finalizando team states...');
   await query(`
     UPDATE zonas_equipes_teams_states
     SET status = 'finished', version = version + 1
     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
 
   // 3. Finalizar partida
-  console.log('📝 Finalizando partida...');
   await query(`
     UPDATE zonas_equipes_partidas
     SET status = 'finished', finished_at = GETDATE(), version = version + 1
     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
-  
-  console.log('✅ Zone Conquest Game parado com sucesso');
 }
 
 async function calculateAndSaveZoneConquestResults(eventoId) {
-  console.log('🔍 Iniciando cálculo de resultados Zone Conquest para evento:', eventoId);
-  
   // 1. Buscar partida ativa
   const partida = await queryOne(`
     SELECT id, empresa_id FROM zonas_equipes_partidas
     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
 
   if (!partida) {
-    console.log('ℹ️ Nenhuma partida ativa encontrada');
     return;
   }
-
-  console.log('✅ Partida encontrada:', partida.id);
 
   // 2. Contar leituras por checkpoint e equipe - versão SIMPLES
   const readings = await allQuery(`
@@ -146,10 +123,7 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
     GROUP BY checkpoint_id, time_id
     ORDER BY checkpoint_id, total_readings DESC`, { partidaId: partida.id });
 
-  console.log('📊 Leituras encontradas:', readings.length);
-
   if (readings.length === 0) {
-    console.log('ℹ️ Nenhuma leitura registrada nesta partida');
     return;
   }
 
@@ -171,8 +145,6 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
     teamCheckpoints[ownership.time_id]++;
   }
 
-  console.log('🏆 Contagem de checkpoints por equipe:', teamCheckpoints);
-
   // 5. Determinar vencedor
   let winningTeamId = null;
   let maxCheckpoints = -1;
@@ -184,12 +156,10 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
   }
 
   if (!winningTeamId) {
-    console.log('ℹ️ Nenhum vencedor determinado');
     return;
   }
 
   const now = new Date();
-  console.log(`✅ Vencedor: ${winningTeamId} com ${maxCheckpoints} checkpoints`);
 
   // 6. Atualizar team states com vitória/derrota
   const allTeams = await allQuery(`
@@ -198,7 +168,6 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
 
   for (const team of allTeams) {
     const isWinner = team.time_id === winningTeamId;
-    console.log(`📝 Atualizando equipe ${team.time_id} - Vencedor: ${isWinner}`);
     
     await query(`
       UPDATE zonas_equipes_teams_states
@@ -213,7 +182,6 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
   // 7. Atualizar checkpoints com owner
   for (const checkpoint_id in checkpointDominance) {
     const ownership = checkpointDominance[checkpoint_id];
-    console.log(`🗺️ Atualizando checkpoint ${checkpoint_id} - Owner: ${ownership.time_id}`);
     
     await query(`
       UPDATE checkpoints
@@ -222,10 +190,8 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
       checkpointId: checkpoint_id,
       timeId: ownership.time_id,
       now,
-    }).catch(err => console.warn('⚠️ Erro ao atualizar checkpoint:', err.message));
+    }).catch(err => console.error('❌ Erro ao atualizar checkpoint:', err.message));
   }
-
-  console.log(`✅ Resultados salvos para Zone Conquest - Vencedor: ${winningTeamId}`);
 }
 
 async function recordZoneConquestScan(eventoId, checkpointId, criancaId, timeId, leituraId, uid) {

@@ -28,7 +28,6 @@ router.use(verifyToken, requireRole('kiosk', 'score_kiosk'));
 router.post('/readings', async (req, res) => {
   try {
     const code = normalizeUid(req.body?.uid);
-    console.log(`\n📖 [SCOREKIOSK-READINGS] POST recebido: uid=${code}`);
     const eventId = String(req.body?.eventId || '').trim();
     if (!code || !eventId) {
       return res.status(400).json({ error: 'eventId e uid são obrigatórios' });

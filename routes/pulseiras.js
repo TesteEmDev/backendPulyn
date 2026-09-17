@@ -30,10 +30,6 @@ router.get('/', verifyToken, async (req, res) => {
       `, { empresa_id });
     }
     
-    console.log(`📋 Carregadas ${pulseiras.length} pulseiras para empresa ${empresa_id}`);
-    if (pulseiras.length > 0) {
-      console.log(`   Códigos: ${pulseiras.map(p => p.code).join(', ')}`);
-    }
     res.json(pulseiras);
   } catch (err) {
     console.error('❌ Erro ao carregar pulseiras:', err.message);
@@ -52,22 +48,17 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Código da pulseira é obrigatório' });
     }
     
-    // 🔴 Debug: Mostrar o que está sendo cadastrado
-    console.log(`📝 Cadastrando pulseira: "${codeUpper}" (original: "${code}") para empresa ${empresa_id}`);
-    
     const existing = await queryOne(
       `SELECT code FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
       { code: codeUpper }
     );
     if (existing) {
-      console.log(`❌ Pulseira já existe: ${existing.code}`);
       return res.status(400).json({ error: 'Pulseira já cadastrada!' });
     }
     
     await query('INSERT INTO pulseiras (code, status, empresa_id, created_at) VALUES (@code, @status, @empresa_id, GETDATE())', 
       { code: codeUpper, status: 'disponivel', empresa_id });
     
-    console.log(`✅ Pulseira ${codeUpper} cadastrada com sucesso para empresa ${empresa_id}`);
     res.json({ code: codeUpper, status: 'disponivel', empresa_id, crianca_id: null, crianca_name: null });
   } catch (err) {
     console.error('❌ Erro ao cadastrar pulseira:', err.message);

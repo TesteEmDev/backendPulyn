@@ -138,7 +138,6 @@ function rememberReceptionReading(reading) {
 router.post('/reception', async (req, res) => {
   try {
     const { checkpointId, uid } = req.body;
-    console.log(`\n📖 [LEITURA-RECEPÇÃO] POST recebido: checkpoint=${checkpointId}, uid=${uid}`);
     const normalizedUid = normalizeUid(uid);
     const now = new Date();
 
@@ -199,7 +198,6 @@ router.post('/reception', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { checkpointId, uid, brincadeiraId, signal, readingId: requestedReadingId } = req.body;
-    console.log(`\n📖 [LEITURA-JOGO] POST recebido: checkpoint=${checkpointId}, uid=${uid}, brincadeiraId=${brincadeiraId || 'NÃO ENVIADO'}`);
     
     const normalizedUid = normalizeUid(uid);
     const readingId = getReadingId(req, requestedReadingId);
@@ -212,17 +210,14 @@ router.post('/', async (req, res) => {
     // O checkpoint define a empresa e o evento da leitura.
     const checkpoint = await queryOne('SELECT id, empresa_id, evento_id, status, checkpoint_purpose FROM checkpoints WHERE id = @id', { id: checkpointId });
     if (!checkpoint) {
-      console.log(`❌ [LEITURA] Checkpoint não encontrado: ${checkpointId}`);
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
     if (String(checkpoint.checkpoint_purpose || 'game').trim().toLowerCase() === 'reception') {
-      console.log(`❌ [LEITURA] Checkpoint de recepção rejeitado na rota de jogo: ${checkpointId}`);
       return res.status(409).json({ ok: false, error: 'Use a rota de recepção para este checkpoint' });
     }
 
     const processedReading = await findProcessedReading(readingId, checkpoint);
     if (processedReading) {
-      console.log(`↩️ [LEITURA] Leitura ${readingId} já processada; sem nova pontuação ou broadcast`);
       return await sendProcessedReading(res, processedReading);
     }
 
@@ -240,7 +235,6 @@ router.post('/', async (req, res) => {
 
     // A leitura é enviada também quando a pulseira ainda não existe no banco,
     // pois as telas de recepção precisam poder cadastrá-la pelo NFC.
-    console.log(`\n📱 [LEITURA] Pulseira lida: ${normalizedUid} (original: ${uid})`);
     broadcast(broadcastData);
 
     const treasureSession = await getActiveSession(checkpoint.evento_id);
@@ -258,7 +252,6 @@ router.post('/', async (req, res) => {
       } catch (err) {
       // Se coluna last_seen não existe ainda, só atualiza o status
       if (err.message.includes('last_seen')) {
-        console.log('⚠️ Coluna last_seen ainda não existe, atualizando apenas status...');
         await query(
           `UPDATE checkpoints SET status = 'online' WHERE id = @checkpointId`,
           { checkpointId }
@@ -279,12 +272,10 @@ router.post('/', async (req, res) => {
     );
 
     if (pulseira && String(pulseira.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
-      console.log(`❌ [LEITURA] Pulseira de outra empresa no checkpoint ${checkpointId}`);
       return res.status(403).json({ ok: false, error: 'Pulseira não pertence a esta empresa' });
     }
 
     if (!pulseira) {
-      console.log('   ⚠️ [LEITURA] Pulseira não cadastrada ainda');
       return res.json({
         ok: true,
         registered: false,
@@ -296,7 +287,6 @@ router.post('/', async (req, res) => {
 
     const braceletStatus = String(pulseira.status || '').trim().toLowerCase();
     if (braceletStatus !== 'em_uso' || !pulseira.crianca_id) {
-      console.log(`   ⚠️ [LEITURA] Pulseira não está vinculada a uma criança ativa (status: ${pulseira.status})`);
       return res.json({
         ok: true,
         registered: false,
@@ -315,7 +305,6 @@ router.post('/', async (req, res) => {
     );
 
     if (!crianca) {
-      console.log('   ⚠️ [LEITURA] Vínculo da pulseira inconsistente com a criança');
       return res.json({
         ok: true,
         registered: false,
@@ -329,7 +318,6 @@ router.post('/', async (req, res) => {
     // ✅ VALIDAÇÃO CROSS-TENANT/EVENTO: a criança deve pertencer ao mesmo
     // tenant e ao mesmo evento do checkpoint que recebeu a leitura.
     if (String(crianca.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
-      console.log(`❌ [LEITURA] Violação de segurança: criança da empresa ${crianca.empresa_id} tentou usar checkpoint da empresa ${checkpoint.empresa_id}`);
       return res.status(403).json({ 
         ok: false,
         error: 'Segurança: empresa_id não corresponde' 
@@ -337,7 +325,6 @@ router.post('/', async (req, res) => {
     }
 
     if (String(crianca.evento_id).trim().toLowerCase() !== String(checkpoint.evento_id).trim().toLowerCase()) {
-      console.log(`⚠️ [LEITURA] Pulseira cadastrada em outro evento: criança=${crianca.evento_id}, checkpoint=${checkpoint.evento_id}`);
       return res.json({
         ok: true,
         registered: true,
@@ -348,36 +335,9 @@ router.post('/', async (req, res) => {
     }
     
     // ✅ Pulseira já cadastrada - processar como leitura de jogo
-    console.log(`   ✅ [LEITURA] Pulseira cadastrada: ${crianca.name} (evento_id: ${crianca.evento_id}, empresa_id: ${crianca.empresa_id})`);
     
     // ✨ NOVO: Validar se o evento está ACTIVE antes de processar pontos
     const evento = await queryOne('SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@id)', { id: crianca.evento_id });
-    
-    console.log(`   📋 [LEITURA] Verificando status do evento...`);
-    console.log(`      ID do Evento: ${crianca.evento_id}`);
-    console.log(`      Status: ${evento?.status || 'NÃO ENCONTRADO'}`);
-    
-    if (!evento) {
-      console.log(`   ❌ [LEITURA] Evento não encontrado! Pulseira não será processada.`);
-      return res.json({ 
-        ok: true, 
-        registered: true, 
-        braceletCode: normalizedUid,
-        authorized: false,
-        message: 'Evento não encontrado. Inicie o evento primeiro.'
-      });
-    }
-    
-    if (evento.status !== 'active') {
-      console.log(`   ⚠️ [LEITURA] Evento NÃO está ativo (status: ${evento.status}). BLOQUEANDO pontos e feedback de cor.`);
-      return res.json({
-        ok: true,
-        registered: true,
-        braceletCode: normalizedUid,
-        authorized: false,
-        message: 'Leitura fora de jogo. Nenhum ponto foi contabilizado.'
-      });
-    }
     
     // Caça ao Monstro tem prioridade sobre o fluxo de território e confirma
     // scan, HP, vencedor e leitura na mesma transação.
@@ -667,7 +627,6 @@ router.post('/', async (req, res) => {
     const checkpointData = await queryOne('SELECT * FROM checkpoints WHERE id = @id', { id: checkpointId });
     
     if (!checkpointData) {
-      console.log(`   ⚠️ [LEITURA] Checkpoint não encontrado`);
       return res.json({ ok: true, registered: true, braceletCode: normalizedUid, message: 'Pulseira cadastrada' });
     }
     
@@ -677,7 +636,6 @@ router.post('/', async (req, res) => {
     
     if (isLocked) {
       const remainingSeconds = Math.ceil((new Date(checkpointData.territory_locked_until) - now) / 1000);
-      console.log(`   🔒 [LEITURA] Território BLOQUEADO por ${remainingSeconds}s`);
       return res.json({ 
         ok: true, registered: true, braceletCode: normalizedUid,
         territoryLocked: true, remainingSeconds,
@@ -703,7 +661,6 @@ router.post('/', async (req, res) => {
     // Depois que o lock termina, o mesmo time respeita o cooldown de 60s.
     if (ownerIsSameTeam && isCooldown) {
       const remainingSeconds = Math.ceil((new Date(checkpointData.territory_cooldown_until) - now) / 1000);
-      console.log(`   ⏳ [LEITURA] Time já conquistou este território; cooldown de ${remainingSeconds}s`);
       return res.json({
         ok: true, registered: true, authorized: false,
         braceletCode: normalizedUid,
@@ -720,8 +677,6 @@ router.post('/', async (req, res) => {
     
     const lockedUntil = new Date(now.getTime() + lockDuration);
     const cooldownUntil = new Date(now.getTime() + cooldownDuration);
-    
-    console.log(`🎨 [LEITURA] Buscando cor do time para criança: ${crianca.name} (time_id: ${crianca.time_id})`);
     
     // A conquista, a pontuação e os dois históricos precisam ser confirmados
     // juntos. Se qualquer escrita falhar, toda a operação é desfeita.

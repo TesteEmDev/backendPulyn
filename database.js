@@ -136,8 +136,6 @@ async function connectDB() {
 
       const config = postgresConfig();
       console.log('📡 Conectando ao PostgreSQL/Supabase...');
-      console.log(`🎯 Host: ${config.host || 'definido pela string de conexão'}`);
-      console.log(`💾 Banco: ${config.database || 'definido pela string de conexão'}`);
       pool = new Pool(config);
       await pool.query('SELECT 1');
       console.log('✅ Conectado ao PostgreSQL/Supabase com sucesso!');
@@ -145,10 +143,6 @@ async function connectDB() {
     }
 
     console.log('📡 Conectando ao SQL Server...');
-    console.log(`🎯 Servidor: ${sqlServerConfig.server}`);
-    console.log(`💾 Banco: ${sqlServerConfig.database}`);
-    console.log(`👤 Usuário: ${sqlServerConfig.user}`);
-    console.log(`⏱️  Timeout: ${sqlServerConfig.connectionTimeout}ms`);
     pool = await sql.connect(sqlServerConfig);
     console.log('✅ Conectado ao SQL Server com sucesso!');
     return pool;

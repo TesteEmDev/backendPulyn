@@ -38,7 +38,6 @@ function removeCheckpointFromJson(value, checkpointId) {
 router.post('/:checkpoint_id/heartbeat', async (req, res) => {
   try {
     const { checkpoint_id } = req.params;
-    console.log(`\n📖 [CHECKPOINTS-HEARTBEAT] POST recebido: checkpointId=${checkpoint_id}`);
     const now = new Date();
     
     const checkpoint = await queryOne(
@@ -59,7 +58,6 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
     } catch (err) {
       // Se coluna last_seen não existe, só atualiza o status
       if (err.message.includes('last_seen')) {
-        console.log('⚠️ Coluna last_seen ainda não existe, atualizando apenas status...');
         await query(
           `UPDATE checkpoints SET status = 'online' WHERE id = @id`,
           { id: checkpoint_id }
@@ -69,7 +67,6 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
       }
     }
     
-    console.log(`💓 Heartbeat recebido do checkpoint ${checkpoint_id}`);
     res.json({ ok: true, message: 'Checkpoint online', timestamp: now });
   } catch (err) {
     console.error('❌ Erro ao processar heartbeat:', err);

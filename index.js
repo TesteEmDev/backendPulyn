@@ -139,7 +139,6 @@ global.broadcast = (message) => {
 // ✨ NOVO: Função de broadcast para um evento específico
 global.broadcastToEvent = (eventoId, message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
-  console.log(`📡 Broadcasting para evento ${eventoId}: ${typeof message === 'object' ? message.type : message}`);
   
   wss.clients.forEach((client) => {
     if (client.readyState === 1
@@ -188,6 +187,11 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 // Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
+
+// 🔍 DEBUG GLOBAL: Log todas as requisições POST
+app.use((req, res, next) => {
+  next();
+});
 
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
 
@@ -308,7 +312,6 @@ wss.on('connection', async (ws, req) => {
       return;
     }
   }
-  
   console.log(`✅ Cliente WebSocket conectado ao evento: ${eventoId}. Total: ${wss.clients.size}`);
   
   // Ping/Pong para manter vivo
@@ -327,8 +330,6 @@ wss.on('connection', async (ws, req) => {
       if (ws.controlScope) return;
       if (!ws.kioskAuthorized) return;
       
-      console.log(`📨 Mensagem recebida via WebSocket (evento: ${eventoId}):`, data.type);
-      
       // Os terminais de autoatendimento apenas recebem leituras; nunca alteram modo/comandos.
       if (KIOSK_ROLES.has(ws.user?.role) && (data.type === 'SET_MODE' || data.type === 'COMMAND')) {
         return;
@@ -343,13 +344,11 @@ wss.on('connection', async (ws, req) => {
           persistEventMode(eventoId, currentMode, currentGameType).catch((error) => {
             console.error('❌ Erro ao persistir modo do evento:', error.message);
           });
-          console.log(`🎯 Modo atualizado via WebSocket: ${currentMode} (evento: ${eventoId})`);
         }
       }
 
       // Se é comando para Arduino, broadcast para o evento
       if (data.type === 'SET_MODE' || data.type === 'COMMAND') {
-        console.log(`📡 Enviando comando para Arduino (evento: ${eventoId}): ${data.type}`);
         global.broadcastToEvent(eventoId, data);
       }
     } catch (err) {
