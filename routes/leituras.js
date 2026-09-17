@@ -887,6 +887,7 @@ router.post('/', async (req, res) => {
 router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
   try {
     const eventoId = String(req.params.eventoId || '').trim();
+    const brincadeiraId = String(req.query.brincadeiraId || '').trim();
     const empresaId = req.user.empresa_id;
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
     const master = isMaster(req) ? 1 : 0;
@@ -898,6 +899,15 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!master && String(evento.empresa_id).toLowerCase() !== String(empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    // Filtro por brincadeira_id se fornecido
+    let whereClause = 'WHERE LOWER(p.evento_id) = LOWER(@eventoId) AND (p.empresa_id = @empresaId OR @master = 1)';
+    const params = { limit, eventoId, empresaId, master };
+    
+    if (brincadeiraId) {
+      whereClause += ' AND LOWER(p.brincadeira_id) = LOWER(@brincadeiraId)';
+      params.brincadeiraId = brincadeiraId;
     }
 
     const history = await allQuery(`
@@ -916,10 +926,9 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
       LEFT JOIN criancas c ON c.id = p.crianca_id
       LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
       LEFT JOIN times t ON t.id = c.time_id
-      WHERE LOWER(p.evento_id) = LOWER(@eventoId)
-        AND (p.empresa_id = @empresaId OR @master = 1)
+      ${whereClause}
       ORDER BY p.created_at DESC
-    `, { limit, eventoId, empresaId, master });
+    `, params);
 
     res.json(history);
   } catch (error) {
