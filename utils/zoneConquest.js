@@ -4,21 +4,29 @@ const { v4: uuidv4 } = require('uuid');
 const ZONE_CONQUEST_GAME_TYPE = 'zone';
 
 async function startZoneConquestGame(eventoId, brincadeiraId) {
+  console.log('🎬 [ZONE_CONQUEST] Iniciando jogo para evento:', eventoId, 'brincadeira:', brincadeiraId);
+  
   const resultado = await transaction(async (tx) => {
+    console.log('📍 [ZONE_CONQUEST] Inside transaction');
+    
     // Buscar evento e jogo
     const evento = await tx.queryOne('SELECT * FROM eventos WHERE id = @id', { id: eventoId });
+    console.log('📋 [ZONE_CONQUEST] Evento encontrado:', !!evento);
     if (!evento) throw new Error('Evento não encontrado');
 
     const game = await tx.queryOne(
       'SELECT * FROM brincadeiras WHERE id = @id',
       { id: brincadeiraId }
     );
+    console.log('📋 [ZONE_CONQUEST] Game encontrado:', !!game);
     if (!game) throw new Error('Jogo não encontrado');
 
     const now = new Date();
     const partidaId = uuidv4();
+    console.log('🆔 [ZONE_CONQUEST] Nova partida ID:', partidaId);
 
     // 1. Finalizar qualquer partida ativa anterior
+    console.log('🔄 [ZONE_CONQUEST] Finalizando partidas antigas...');
     await tx.query(`
       UPDATE zonas_equipes_teams_states
       SET status = 'finished', version = version + 1
@@ -30,6 +38,7 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
 
     // 2. Criar nova partida
+    console.log('📝 [ZONE_CONQUEST] Criando nova partida...');
     await tx.query(`
       INSERT INTO zonas_equipes_partidas
         (id, empresa_id, evento_id, brincadeira_id, status, version, started_at)
@@ -40,8 +49,10 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
       brincadeiraId,
       startedAt: now,
     });
+    console.log('✅ [ZONE_CONQUEST] Partida criada com sucesso');
 
     // 3. Buscar todas as equipes participantes
+    console.log('👥 [ZONE_CONQUEST] Buscando equipes...');
     const participatingTeams = await tx.query(`
       SELECT DISTINCT t.id, t.name
       FROM times t
@@ -49,6 +60,7 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
       ORDER BY t.name`, { eventoId });
 
     // 4. Criar state para cada equipe
+    console.log('👥 [ZONE_CONQUEST] Criando team states para', participatingTeams.length, 'equipes...');
     for (const team of participatingTeams) {
       await tx.query(`
         INSERT INTO zonas_equipes_teams_states
@@ -61,7 +73,10 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
         timeId: team.id,
       });
     }
+    console.log('✅ [ZONE_CONQUEST] Team states criados');
 
+    console.log('🎉 [ZONE_CONQUEST] Jogo iniciado com sucesso! Partida:', partidaId);
+    
     return {
       id: partidaId,
       eventoId,
@@ -77,6 +92,7 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
     };
   });
 
+  console.log('🎬 [ZONE_CONQUEST] Resultado retornado:', resultado.id);
   return resultado;
 }
 
