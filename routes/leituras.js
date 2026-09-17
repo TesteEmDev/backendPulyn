@@ -198,6 +198,8 @@ router.post('/reception', async (req, res) => {
 router.post('/', async (req, res) => {
   try {
     const { checkpointId, uid, brincadeiraId, signal, readingId: requestedReadingId } = req.body;
+    console.log(`\n📖 [LEITURA-JOGO] POST recebido: checkpoint=${checkpointId}, uid=${uid}, brincadeiraId=${brincadeiraId || 'NÃO ENVIADO'}`);
+    
     const normalizedUid = normalizeUid(uid);
     const readingId = getReadingId(req, requestedReadingId);
     const now = new Date();
