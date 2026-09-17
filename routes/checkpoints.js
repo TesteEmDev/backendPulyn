@@ -38,6 +38,7 @@ function removeCheckpointFromJson(value, checkpointId) {
 router.post('/:checkpoint_id/heartbeat', async (req, res) => {
   try {
     const { checkpoint_id } = req.params;
+    console.log(`\n📖 [CHECKPOINTS-HEARTBEAT] POST recebido: checkpointId=${checkpoint_id}`);
     const now = new Date();
     
     const checkpoint = await queryOne(
@@ -270,6 +271,7 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
 router.post('/:checkpoint_id/authorize-tags', async (req, res) => {
   try {
     const { checkpoint_id } = req.params;
+    console.log(`\n📖 [CHECKPOINTS-AUTH-TAGS] POST recebido: checkpointId=${checkpoint_id}, body=${JSON.stringify(req.body)}`);
     const { tags } = req.body; // Array de UIDs: ["1C:AB:3A:72", "AA:BB:CC:DD"]
 
     if (!Array.isArray(tags) || tags.length === 0) {

@@ -142,6 +142,7 @@ router.put('/:code/status', verifyToken, async (req, res) => {
 router.post('/detectar', async (req, res) => {
   try {
     const { code, checkpointId, timestamp } = req.body;
+    console.log(`\n📖 [PULSEIRAS-DETECTAR] POST recebido: code=${code}, checkpointId=${checkpointId}`);
     
     if (!code) {
       return res.status(400).json({ error: 'Código da pulseira é obrigatório' });
