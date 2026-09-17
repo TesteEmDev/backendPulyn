@@ -1,0 +1,160 @@
+const { query, queryOne, transaction } = require('../database');
+const { v4: uuidv4 } = require('uuid');
+
+const ZONE_CONQUEST_GAME_TYPE = 'zone';
+
+async function startZoneConquestGame(eventoId, brincadeiraId) {
+  const resultado = await transaction(async (tx) => {
+    // Buscar evento e jogo
+    const evento = await tx.queryOne('SELECT * FROM eventos WHERE id = @id', { id: eventoId });
+    if (!evento) throw new Error('Evento não encontrado');
+
+    const game = await tx.queryOne(
+      'SELECT * FROM brincadeiras WHERE id = @id',
+      { id: brincadeiraId }
+    );
+    if (!game) throw new Error('Jogo não encontrado');
+
+    const now = new Date();
+    const partidaId = uuidv4();
+
+    // 1. Finalizar qualquer partida ativa anterior
+    await tx.query(`
+      UPDATE zonas_equipes_teams_states
+      SET status = 'finished', version = version + 1
+      WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
+    
+    await tx.query(`
+      UPDATE zonas_equipes_partidas
+      SET status = 'finished', finished_at = GETDATE(), version = version + 1
+      WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
+
+    // 2. Criar nova partida
+    await tx.query(`
+      INSERT INTO zonas_equipes_partidas
+        (id, empresa_id, evento_id, brincadeira_id, status, version, started_at)
+      VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', 0, @startedAt)`, {
+      id: partidaId,
+      empresaId: evento.empresa_id,
+      eventoId,
+      brincadeiraId,
+      startedAt: now,
+    });
+
+    // 3. Buscar todas as equipes participantes
+    const participatingTeams = await tx.query(`
+      SELECT DISTINCT t.id, t.name
+      FROM times t
+      WHERE t.evento_id = @eventoId
+      ORDER BY t.name`, { eventoId });
+
+    // 4. Criar state para cada equipe
+    for (const team of participatingTeams) {
+      await tx.query(`
+        INSERT INTO zonas_equipes_teams_states
+          (id, partida_id, empresa_id, evento_id, time_id, status, version)
+        VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, 'active', 0)`, {
+        id: uuidv4(),
+        partidaId,
+        empresaId: evento.empresa_id,
+        eventoId,
+        timeId: team.id,
+      });
+    }
+
+    return {
+      id: partidaId,
+      eventoId,
+      brincadeiraId,
+      gameType: ZONE_CONQUEST_GAME_TYPE,
+      startedAt: now.toISOString(),
+      status: 'active',
+      teams: participatingTeams.map(t => ({
+        id: t.id,
+        name: t.name,
+        status: 'active',
+      })),
+    };
+  });
+
+  return resultado;
+}
+
+async function stopZoneConquestGame(eventoId) {
+  // 1. Finalizar team states
+  await query(`
+    UPDATE zonas_equipes_teams_states
+    SET status = 'finished', version = version + 1
+    WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
+
+  // 2. Finalizar partida
+  await query(`
+    UPDATE zonas_equipes_partidas
+    SET status = 'finished', finished_at = GETDATE(), version = version + 1
+    WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
+}
+
+async function recordZoneConquestScan(eventoId, checkpointId, criancaId, timeId, leituraId, uid) {
+  // 1. Buscar partida ativa
+  const partida = await queryOne(`
+    SELECT id FROM zonas_equipes_partidas
+    WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
+
+  if (!partida) {
+    throw new Error('Nenhuma partida de zona conquest ativa para este evento');
+  }
+
+  // 2. Buscar jogo ativo
+  const brincadeira = await queryOne(`
+    SELECT id FROM brincadeiras
+    WHERE evento_id = @eventoId AND status = 'active'`, { eventoId });
+
+  // 3. Registrar scan
+  const scanId = uuidv4();
+  const now = new Date();
+
+  await query(`
+    INSERT INTO zonas_equipes_scans
+      (id, partida_id, empresa_id, evento_id, brincadeira_id, checkpoint_id,
+       crianca_id, time_id, uid, leitura_id, version, scanned_at)
+    VALUES (@id, @partidaId, @empresaId, @eventoId, @brincadeiraId, @checkpointId,
+            @criancaId, @timeId, @uid, @leituraId, 0, @scannedAt)`, {
+    id: scanId,
+    partidaId: partida.id,
+    empresaId: null, // Será preenchido pelo backend
+    eventoId,
+    brincadeiraId: brincadeira ? brincadeira.id : null,
+    checkpointId,
+    criancaId,
+    timeId,
+    uid,
+    leituraId,
+    scannedAt: now,
+  });
+
+  return scanId;
+}
+
+async function getZoneConquestPartidaAtiva(eventoId) {
+  return queryOne(`
+    SELECT id, status, started_at
+    FROM zonas_equipes_partidas
+    WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
+}
+
+async function getZoneConquestScans(partidaId, checkpointId) {
+  return query(`
+    SELECT *
+    FROM zonas_equipes_scans
+    WHERE partida_id = @partidaId AND checkpoint_id = @checkpointId
+    ORDER BY scanned_at ASC`, { partidaId, checkpointId });
+}
+
+module.exports = {
+  startZoneConquestGame,
+  stopZoneConquestGame,
+  recordZoneConquestScan,
+  getZoneConquestPartidaAtiva,
+  getZoneConquestScans,
+  ZONE_CONQUEST_GAME_TYPE,
+};
