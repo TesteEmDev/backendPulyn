@@ -4,6 +4,32 @@ async function ensureZoneConquestSchema() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
   if (isPostgres) {
+    // Verificar e corrigir tabela zonas_equipes_scans existente
+    try {
+      const checkColumn = await query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.columns 
+          WHERE table_name = 'zonas_equipes_scans' 
+          AND column_name = 'partida_id'
+        )`);
+      
+      if (!checkColumn || !checkColumn[0]?.exists) {
+        console.log('🔧 Adicionando coluna partida_id à tabela zonas_equipes_scans...');
+        try {
+          await query(`
+            ALTER TABLE zonas_equipes_scans
+            ADD COLUMN partida_id varchar(36)
+          `);
+        } catch (altErr) {
+          if (!altErr.message.includes('already exists')) {
+            console.warn('⚠️ Erro ao adicionar partida_id:', altErr.message);
+          }
+        }
+      }
+    } catch (checkErr) {
+      console.warn('⚠️ Tabela zonas_equipes_scans pode não existir ainda, será criada...');
+    }
+
     // Tabela principal de partidas de zona
     await query(`
       CREATE TABLE IF NOT EXISTS zonas_equipes_partidas (
@@ -58,8 +84,8 @@ async function ensureZoneConquestSchema() {
     `);
 
     await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_scans_checkpoint ON zonas_equipes_scans (partida_id, checkpoint_id, scanned_at)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zonas_equipes_scan_reading ON zonas_equipes_scans (leitura_id) WHERE leitura_id IS NOT NULL');
     await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_partidas_evento ON zonas_equipes_partidas (empresa_id, evento_id, status)');
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zonas_equipes_scan_reading ON zonas_equipes_scans (leitura_id) WHERE leitura_id IS NOT NULL');
     await query('CREATE INDEX IF NOT EXISTS idx_zonas_equipes_scans_evento ON zonas_equipes_scans (empresa_id, evento_id, partida_id)');
     return;
   }
