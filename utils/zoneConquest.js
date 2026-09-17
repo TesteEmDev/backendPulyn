@@ -81,112 +81,141 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
 }
 
 async function stopZoneConquestGame(eventoId) {
+  console.log('🛑 Parando Zone Conquest Game para evento:', eventoId);
+  
   try {
     // 1. Calcular vencedor e salvar resultados
     await calculateAndSaveZoneConquestResults(eventoId);
   } catch (err) {
-    console.warn('⚠️ Erro ao calcular resultados de Zone Conquest:', err.message);
+    console.warn('⚠️ Erro ao calcular resultados de Zone Conquest:', err.message, err);
   }
 
   // 2. Finalizar team states
+  console.log('📝 Finalizando team states...');
   await query(`
     UPDATE zonas_equipes_teams_states
     SET status = 'finished', version = version + 1
     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
 
   // 3. Finalizar partida
+  console.log('📝 Finalizando partida...');
   await query(`
     UPDATE zonas_equipes_partidas
     SET status = 'finished', finished_at = GETDATE(), version = version + 1
     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
+  
+  console.log('✅ Zone Conquest Game parado com sucesso');
 }
 
 async function calculateAndSaveZoneConquestResults(eventoId) {
+  console.log('🔍 Iniciando cálculo de resultados Zone Conquest para evento:', eventoId);
+  
   // 1. Buscar partida ativa
   const partida = await queryOne(`
-    SELECT id FROM zonas_equipes_partidas
+    SELECT id, empresa_id FROM zonas_equipes_partidas
     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
 
-  if (!partida) return;
+  if (!partida) {
+    console.log('ℹ️ Nenhuma partida ativa encontrada');
+    return;
+  }
 
-  // 2. Contar checkpoints dominados por cada equipe
-  const checkpointsByTeam = await query(`
-    SELECT 
-      t.id AS time_id,
-      t.name AS time_name,
-      COUNT(DISTINCT c.id) AS checkpoints_dominados
-    FROM times t
-    LEFT JOIN (
-      SELECT DISTINCT checkpoint_id, time_id
-      FROM zonas_equipes_scans
-      WHERE partida_id = @partidaId
-      GROUP BY checkpoint_id, time_id
-      HAVING COUNT(*) = (
-        SELECT COUNT(*)
-        FROM zonas_equipes_scans s2
-        WHERE s2.partida_id = @partidaId
-        AND s2.checkpoint_id = zonas_equipes_scans.checkpoint_id
-        GROUP BY s2.checkpoint_id
-        ORDER BY COUNT(*) DESC
-        LIMIT 1
-      )
-    ) c ON c.time_id = t.id
-    WHERE t.evento_id = @eventoId
-    GROUP BY t.id, t.name
-    ORDER BY checkpoints_dominados DESC`, { partidaId: partida.id, eventoId });
+  console.log('✅ Partida encontrada:', partida.id);
 
-  if (checkpointsByTeam.length === 0) return;
+  // 2. Contar leituras por checkpoint e equipe - versão SIMPLES
+  const readings = await query(`
+    SELECT checkpoint_id, time_id, COUNT(*) as total_readings
+    FROM zonas_equipes_scans
+    WHERE partida_id = @partidaId
+    GROUP BY checkpoint_id, time_id
+    ORDER BY checkpoint_id, total_readings DESC`, { partidaId: partida.id });
 
-  // 3. Determinar vencedor (equipe com mais checkpoints)
-  const winningTeam = checkpointsByTeam[0];
+  console.log('📊 Leituras encontradas:', readings.length);
+
+  if (readings.length === 0) {
+    console.log('ℹ️ Nenhuma leitura registrada nesta partida');
+    return;
+  }
+
+  // 3. Determinar dominância por checkpoint (equipe com mais leituras)
+  const checkpointDominance = {};
+  for (const reading of readings) {
+    if (!checkpointDominance[reading.checkpoint_id]) {
+      checkpointDominance[reading.checkpoint_id] = reading;
+    }
+  }
+
+  // 4. Contar checkpoints por equipe
+  const teamCheckpoints = {};
+  for (const checkpoint_id in checkpointDominance) {
+    const ownership = checkpointDominance[checkpoint_id];
+    if (!teamCheckpoints[ownership.time_id]) {
+      teamCheckpoints[ownership.time_id] = 0;
+    }
+    teamCheckpoints[ownership.time_id]++;
+  }
+
+  console.log('🏆 Contagem de checkpoints por equipe:', teamCheckpoints);
+
+  // 5. Determinar vencedor
+  let winningTeamId = null;
+  let maxCheckpoints = -1;
+  for (const teamId in teamCheckpoints) {
+    if (teamCheckpoints[teamId] > maxCheckpoints) {
+      maxCheckpoints = teamCheckpoints[teamId];
+      winningTeamId = teamId;
+    }
+  }
+
+  if (!winningTeamId) {
+    console.log('ℹ️ Nenhum vencedor determinado');
+    return;
+  }
+
   const now = new Date();
+  console.log(`✅ Vencedor: ${winningTeamId} com ${maxCheckpoints} checkpoints`);
 
-  // 4. Atualizar partida com vencedor
-  await query(`
-    UPDATE zonas_equipes_partidas
-    SET version = version + 1
-    WHERE id = @partidaId`, { partidaId: partida.id });
+  // 6. Atualizar team states com vitória/derrota
+  const allTeams = await query(`
+    SELECT DISTINCT time_id FROM zonas_equipes_teams_states
+    WHERE partida_id = @partidaId`, { partidaId: partida.id });
 
-  // 5. Atualizar team states com vitória/derrota
-  for (const teamData of checkpointsByTeam) {
-    const isWinner = teamData.time_id === winningTeam.time_id;
+  for (const team of allTeams) {
+    const isWinner = team.time_id === winningTeamId;
+    console.log(`📝 Atualizando equipe ${team.time_id} - Vencedor: ${isWinner}`);
+    
     await query(`
       UPDATE zonas_equipes_teams_states
-      SET ${isWinner ? 'victory_at = @now' : 'defeated_at = @now'}, version = version + 1
+      SET ${isWinner ? 'victory_at' : 'defeated_at'} = @now, version = version + 1
       WHERE partida_id = @partidaId AND time_id = @timeId`, {
       partidaId: partida.id,
-      timeId: teamData.time_id,
+      timeId: team.time_id,
       now,
     });
   }
 
-  // 6. Atualizar checkpoints com territory_owner_time_id
-  const checkpointsWithOwner = await query(`
-    SELECT DISTINCT c.id, c.checkpoint_id, c.time_id, ROW_NUMBER() OVER (PARTITION BY c.checkpoint_id ORDER BY COUNT(*) DESC, MIN(c.scanned_at) ASC) as rn
-    FROM zonas_equipes_scans c
-    WHERE c.partida_id = @partidaId
-    GROUP BY c.checkpoint_id, c.time_id, c.id, c.scanned_at`, { partidaId: partida.id });
-
-  for (const ckpt of checkpointsWithOwner) {
-    if (ckpt.rn === 1) {
-      await query(`
-        UPDATE checkpoints
-        SET territory_owner_time_id = @timeId, last_conquered_at = @now
-        WHERE id = @checkpointId`, {
-        checkpointId: ckpt.checkpoint_id,
-        timeId: ckpt.time_id,
-        now,
-      }).catch(() => {});
-    }
+  // 7. Atualizar checkpoints com owner
+  for (const checkpoint_id in checkpointDominance) {
+    const ownership = checkpointDominance[checkpoint_id];
+    console.log(`🗺️ Atualizando checkpoint ${checkpoint_id} - Owner: ${ownership.time_id}`);
+    
+    await query(`
+      UPDATE checkpoints
+      SET territory_owner_time_id = @timeId, last_conquered_at = @now
+      WHERE id = @checkpointId`, {
+      checkpointId: checkpoint_id,
+      timeId: ownership.time_id,
+      now,
+    }).catch(err => console.warn('⚠️ Erro ao atualizar checkpoint:', err.message));
   }
 
-  console.log(`✅ Resultados salvos para Zone Conquest - Vencedor: ${winningTeam.time_name} (${winningTeam.checkpoints_dominados} checkpoints)`);
+  console.log(`✅ Resultados salvos para Zone Conquest - Vencedor: ${winningTeamId}`);
 }
 
 async function recordZoneConquestScan(eventoId, checkpointId, criancaId, timeId, leituraId, uid) {
   // 1. Buscar partida ativa
   const partida = await queryOne(`
-    SELECT id FROM zonas_equipes_partidas
+    SELECT id, empresa_id FROM zonas_equipes_partidas
     WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`, { eventoId });
 
   if (!partida) {
@@ -210,7 +239,7 @@ async function recordZoneConquestScan(eventoId, checkpointId, criancaId, timeId,
             @criancaId, @timeId, @uid, @leituraId, 0, @scannedAt)`, {
     id: scanId,
     partidaId: partida.id,
-    empresaId: null, // Será preenchido pelo backend
+    empresaId: partida.empresa_id,
     eventoId,
     brincadeiraId: brincadeira ? brincadeira.id : null,
     checkpointId,
