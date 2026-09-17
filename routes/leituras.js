@@ -138,6 +138,7 @@ function rememberReceptionReading(reading) {
 router.post('/reception', async (req, res) => {
   try {
     const { checkpointId, uid } = req.body;
+    console.log(`\n📖 [LEITURA-RECEPÇÃO] POST recebido: checkpoint=${checkpointId}, uid=${uid}`);
     const normalizedUid = normalizeUid(uid);
     const now = new Date();
 
