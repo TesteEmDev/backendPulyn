@@ -53,7 +53,7 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
 
     // 3. Buscar todas as equipes participantes
     console.log('👥 [ZONE_CONQUEST] Buscando equipes...');
-    const participatingTeams = await tx.query(`
+    const participatingTeams = await tx.allQuery(`
       SELECT DISTINCT t.id, t.name
       FROM times t
       WHERE t.evento_id = @eventoId
