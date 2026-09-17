@@ -582,27 +582,33 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     const gameType = selectedGame.type === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : selectedGame.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : selectedGame.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : ZONE_CONQUEST_GAME_TYPE;
+    console.log(`🎮 [INICIAR-JOGO] Detectado gameType: ${gameType} (TREASURE=${TREASURE_GAME_TYPE}, MONSTER=${MONSTER_GAME_TYPE}, ZONE=${ZONE_CONQUEST_GAME_TYPE})`);
+    
     let treasureStart = null;
     let monsterStart = null;
     let zoneConquestStart = null;
     
     if (gameType === TREASURE_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
       treasureStart = await startTreasureGame(eventoId, selectedGame.id);
       await stopMonsterGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
     } else if (gameType === MONSTER_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch MONSTER`);
       monsterStart = await startMonsterGame(eventoId, selectedGame.id);
       await stopTreasureGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Monstro iniciado com checkpoint especial`);
     } else if (gameType === ZONE_CONQUEST_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch ZONE_CONQUEST`);
       zoneConquestStart = await startZoneConquestGame(eventoId, selectedGame.id);
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
       console.log(`   ✓ Zona Conquest iniciado`);
     } else {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch STOP_ALL (tipo desconhecido: ${gameType})`);
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
       await stopZoneConquestGame(eventoId);
