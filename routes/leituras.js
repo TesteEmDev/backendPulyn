@@ -14,6 +14,9 @@ const {
   getMonsterEventStatus,
   processMonsterScan,
 } = require('../utils/monster');
+const {
+  processZoneConquestScan,
+} = require('../utils/zoneConquestProcessor');
 
 function getReadingId(req, bodyReadingId) {
   const candidate = bodyReadingId || req.get('Idempotency-Key');
@@ -590,6 +593,70 @@ router.post('/', async (req, res) => {
           readingId: leituraId,
           error: treasureResult.error,
           message: treasureResult.message || treasureResult.error || 'Leitura processada',
+        });
+      }
+    }
+
+    // ✅ ZONE CONQUEST: Novo jogo de domínio de zonas por equipe
+    const { getZoneConquestPartidaAtiva } = require('../utils/zoneConquest');
+    const zonePartidaAtiva = await getZoneConquestPartidaAtiva(checkpoint.evento_id);
+    
+    if (zonePartidaAtiva) {
+      const zoneResult = await withTransaction(async (tx) => {
+        const result = await processZoneConquestScan({
+          eventoId: checkpoint.evento_id,
+          checkpointId,
+          crianca,
+          brincadeiraId: zonePartidaAtiva.brincadeira_id,
+          uid: normalizedUid,
+          leituraId,
+          now,
+        });
+
+        if (result?.accepted) {
+          await tx.query(
+            `INSERT INTO leituras
+              (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
+               points_awarded, signal_strength, empresa_id)
+             VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
+                     0, @signal, @empresaId)`,
+            {
+              id: leituraId,
+              checkpointId,
+              criancaId: crianca.id,
+              uid: normalizedUid,
+              brincadeiraId: zonePartidaAtiva.brincadeira_id || null,
+              signal: signal || -45,
+              empresaId: crianca.empresa_id,
+            }
+          );
+        }
+
+        return result;
+      });
+
+      if (zoneResult) {
+        broadcast({
+          type: 'ZONE_CHECKPOINT_SCANNED',
+          payload: {
+            ...zoneResult,
+            checkpointId,
+            criancaId: crianca.id,
+            criancaName: crianca.name,
+            timeId: crianca.time_id,
+            eventoId: checkpoint.evento_id,
+          },
+        });
+
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: Boolean(zoneResult.accepted),
+          zone: true,
+          zoneAccepted: Boolean(zoneResult.accepted),
+          readingId: leituraId,
+          braceletCode: normalizedUid,
+          message: zoneResult.message || 'Leitura processada',
         });
       }
     }
