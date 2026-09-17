@@ -139,7 +139,7 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
   console.log('✅ Partida encontrada:', partida.id);
 
   // 2. Contar leituras por checkpoint e equipe - versão SIMPLES
-  const readings = await query(`
+  const readings = await allQuery(`
     SELECT checkpoint_id, time_id, COUNT(*) as total_readings
     FROM zonas_equipes_scans
     WHERE partida_id = @partidaId
@@ -192,7 +192,7 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
   console.log(`✅ Vencedor: ${winningTeamId} com ${maxCheckpoints} checkpoints`);
 
   // 6. Atualizar team states com vitória/derrota
-  const allTeams = await query(`
+  const allTeams = await allQuery(`
     SELECT DISTINCT time_id FROM zonas_equipes_teams_states
     WHERE partida_id = @partidaId`, { partidaId: partida.id });
 
