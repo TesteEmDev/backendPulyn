@@ -745,6 +745,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
 
     await stopTreasureGame(eventoId);
     await stopMonsterGame(eventoId);
+    await stopZoneConquestGame(eventoId);
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
