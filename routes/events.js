@@ -362,6 +362,47 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       { eventoId: evento_id }
     );
     
+    // 🆕 Resetar dados de Zone Conquest INDIVIDUAL
+    await query(
+      `DELETE FROM zone_conquest_individual_scans
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_individual_checkpoint_protection
+       WHERE partida_id IN (
+         SELECT id FROM zone_conquest_individual_partidas WHERE evento_id = @eventoId
+       )`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_individual_participant_states
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_individual_partidas
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar dados de Zone Conquest TEAM
+    await query(
+      `DELETE FROM zone_conquest_team_scans
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_team_tempos
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_team_partidas
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
     // 🆕 Resetar scores dos participantes
     await query(
       `UPDATE criancas SET scores = 0 
