@@ -362,7 +362,7 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       { eventoId: evento_id }
     );
     
-    // 🆕 Resetar dados de Zone Conquest INDIVIDUAL
+    // 🆕 Resetar dados de Zone Conquest INDIVIDUAL (na ordem correta das foreign keys)
     await query(
       `DELETE FROM zone_conquest_individual_scans
        WHERE evento_id = @eventoId`,
@@ -386,7 +386,7 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       { eventoId: evento_id }
     );
     
-    // 🆕 Resetar dados de Zone Conquest TEAM
+    // 🆕 Resetar dados de Zone Conquest TEAM (na ordem correta das foreign keys)
     await query(
       `DELETE FROM zone_conquest_team_scans
        WHERE evento_id = @eventoId`,
@@ -394,7 +394,9 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     );
     await query(
       `DELETE FROM zone_conquest_team_tempos
-       WHERE evento_id = @eventoId`,
+       WHERE partida_id IN (
+         SELECT id FROM zone_conquest_team_partidas WHERE evento_id = @eventoId
+       )`,
       { eventoId: evento_id }
     );
     await query(
