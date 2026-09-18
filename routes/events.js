@@ -15,6 +15,11 @@ const {
   startTreasureGame,
   stopTreasureGame,
 } = require('../utils/treasure');
+const {
+  startZoneConquestIndividual,
+  stopZoneConquestIndividual,
+  deleteZoneConquestIndividual,
+} = require('../utils/zoneConquestIndividual');
 
 function sameId(left, right) {
   return left !== null && left !== undefined
@@ -340,6 +345,7 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE].includes(rawGameType)
       ? rawGameType
       : rawGameType || 'standard';
+    
     if (gameType === MONSTER_GAME_TYPE) {
       await startMonsterGame(evento_id, brincadeira.id);
       await stopTreasureGame(evento_id);
@@ -349,6 +355,53 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     } else {
       await stopMonsterGame(evento_id);
       await stopTreasureGame(evento_id);
+    }
+    
+    // 🆕 Resetar Zone Conquest (limpar estado anterior)
+    deleteZoneConquestIndividual(evento_id);
+    
+    // 🆕 Limpar dados de leituras anteriores (reset dos dados de jogo)
+    await query(
+      `DELETE FROM leituras 
+       WHERE crianca_id IN (
+         SELECT id FROM criancas WHERE evento_id = @eventoId
+       )
+       AND brincadeira_id NOT IN (
+         SELECT id FROM brincadeiras 
+         WHERE LOWER(COALESCE(status, 'active')) = 'archived'
+       )`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar scores dos participantes
+    await query(
+      `UPDATE criancas SET scores = 0 
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar pontos dos times
+    await query(
+      `UPDATE times SET points = 0 
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar domínio dos checkpoints (zona-equipe)
+    await query(
+      `UPDATE checkpoints 
+       SET territory_owner_time_id = NULL,
+           territory_locked_until = NULL,
+           territory_cooldown_until = NULL,
+           last_conquered_at = NULL
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Iniciar Zone Conquest Individual se for jogo de zona
+    if (gameType === 'zone_conquest_individual' || brincadeira.name?.toLowerCase().includes('individual')) {
+      console.log(`🎮 [EVENTS] Iniciando Zone Conquest INDIVIDUAL para evento: ${evento_id}`);
+      await startZoneConquestIndividual(evento_id, brincadeira.id);
     }
     
     // Atualizar evento para ativar jogo
@@ -414,6 +467,10 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
     // Atualizar evento para pausar jogo
     await stopMonsterGame(evento_id);
     await stopTreasureGame(evento_id);
+    
+    // 🆕 Parar Zone Conquest
+    stopZoneConquestIndividual(evento_id);
+    
     await query(
       `UPDATE eventos 
        SET status = @status, 
