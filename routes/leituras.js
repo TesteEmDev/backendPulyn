@@ -15,9 +15,15 @@ const {
   processMonsterScan,
 } = require('../utils/monster');
 const {
-  recordZoneConquestIndividualScan,
+  getActiveZoneConquestTeamGame,
+  getZoneConquestTeamStatus,
+  processZoneConquestTeamScan,
+} = require('../utils/zoneConquestTeam');
+const {
+  getActiveZoneConquestIndividualGame,
   getZoneConquestIndividualStatus,
-} = require('../utils/zoneConquestIndividual');
+  processZoneConquestIndividualScan,
+} = require('../utils/zoneConquestIndividualDB');
 
 function getReadingId(req, bodyReadingId) {
   const candidate = bodyReadingId || req.get('Idempotency-Key');
@@ -605,20 +611,79 @@ router.post('/', async (req, res) => {
       return res.json({ ok: true, registered: true, braceletCode: normalizedUid, message: 'Pulseira cadastrada' });
     }
     
-    // 🆕 ZONE CONQUEST INDIVIDUAL - Processar antes de TEAM mode
-    const zoneConquestIndividualStatus = getZoneConquestIndividualStatus(checkpoint.evento_id);
-    if (zoneConquestIndividualStatus?.gameRunning) {
-      console.log(`\n🎮 [ZONE-INDIVIDUAL] Processando leitura de checkpoint...`);
+    // 🆕 ZONE CONQUEST - Processar TEAM ou INDIVIDUAL antes de modo territorial
+    const zoneConquestTeamGame = await getActiveZoneConquestTeamGame(checkpoint.evento_id);
+    const zoneConquestIndividualGame = await getActiveZoneConquestIndividualGame(checkpoint.evento_id);
+
+    if (zoneConquestTeamGame) {
+      console.log(`\n🎮 [ZONE-TEAM] Processando leitura de checkpoint...`);
       
-      const scanResult = await recordZoneConquestIndividualScan(
-        checkpoint.evento_id,
-        crianca.id,
+      const scanResult = await processZoneConquestTeamScan({
+        eventoId: checkpoint.evento_id,
         checkpointId,
-        now
-      );
+        crianca,
+        brincadeiraId: zoneConquestTeamGame.brincadeira_id,
+        uid: normalizedUid,
+        leituraId,
+        now,
+      });
 
       if (!scanResult.accepted) {
-        // Leitura rejeitada (proteção ou restrição)
+        console.log(`   ❌ [ZONE-TEAM] Leitura rejeitada: ${scanResult.error}`);
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: false,
+          braceletCode: normalizedUid,
+          gameMode: 'zone_conquest_team',
+          error: scanResult.error,
+          message: scanResult.error,
+        });
+      }
+
+      console.log(`   ✅ [ZONE-TEAM] Leitura aceita!`);
+      
+      broadcastEvent({
+        type: 'ZONE_CONQUEST_TEAM_SCAN',
+        payload: {
+          checkpointId,
+          criancaId: crianca.id,
+          criancaName: crianca.name,
+          timeId: crianca.time_id,
+          teamColor: crianca.teamColor,
+          pointsGained: scanResult.points,
+          eventoId: checkpoint.evento_id,
+          timestamp: now.toISOString(),
+        },
+      });
+
+      return res.json({
+        ok: true,
+        registered: true,
+        authorized: true,
+        braceletCode: normalizedUid,
+        readingId: leituraId,
+        gameMode: 'zone_conquest_team',
+        pointsGained: scanResult.points,
+        criancaName: crianca.name,
+        message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt`,
+      });
+    }
+
+    if (zoneConquestIndividualGame) {
+      console.log(`\n🎮 [ZONE-INDIVIDUAL] Processando leitura de checkpoint...`);
+      
+      const scanResult = await processZoneConquestIndividualScan({
+        eventoId: checkpoint.evento_id,
+        checkpointId,
+        crianca,
+        brincadeiraId: zoneConquestIndividualGame.brincadeira_id,
+        uid: normalizedUid,
+        leituraId,
+        now,
+      });
+
+      if (!scanResult.accepted) {
         console.log(`   ❌ [ZONE-INDIVIDUAL] Leitura rejeitada: ${scanResult.error}`);
         return res.json({
           ok: true,
@@ -626,17 +691,16 @@ router.post('/', async (req, res) => {
           authorized: false,
           braceletCode: normalizedUid,
           gameMode: 'zone_conquest_individual',
-          zoneConquestError: scanResult.error,
-          protected: scanResult.protected,
-          remainingSeconds: scanResult.remainingSeconds,
-          repeatRestriction: scanResult.repeatRestriction,
-          remainingReads: scanResult.remainingReads,
+          error: scanResult.error,
+          versionConflict: scanResult.versionConflict || false,
           message: scanResult.error,
         });
       }
 
-      // ✅ Leitura aceita - enviar broadcast com dados de zona
       console.log(`   ✅ [ZONE-INDIVIDUAL] Leitura aceita!`);
+      
+      // Obter status atualizado
+      const statusAtualizado = await getZoneConquestIndividualStatus(checkpoint.evento_id);
       
       broadcastEvent({
         type: 'ZONE_CONQUEST_INDIVIDUAL_SCAN',
@@ -644,12 +708,11 @@ router.post('/', async (req, res) => {
           checkpointId,
           criancaId: crianca.id,
           criancaName: crianca.name,
-          participantColor: scanResult.zoneColors?.[0]?.participantColor || '#1E9BD7',
-          pointsGained: scanResult.pointsGained,
+          pointsGained: scanResult.points,
           totalPoints: scanResult.totalPoints,
-          ranking: scanResult.ranking,
           checkpointsRead: scanResult.checkpointsRead,
-          zones: scanResult.zoneColors,
+          version: scanResult.version,
+          ranking: statusAtualizado?.participants || [],
           eventoId: checkpoint.evento_id,
           timestamp: now.toISOString(),
         },
@@ -662,13 +725,12 @@ router.post('/', async (req, res) => {
         braceletCode: normalizedUid,
         readingId: leituraId,
         gameMode: 'zone_conquest_individual',
-        pointsGained: scanResult.pointsGained,
+        pointsGained: scanResult.points,
         totalPoints: scanResult.totalPoints,
-        ranking: scanResult.ranking,
         checkpointsRead: scanResult.checkpointsRead,
-        zones: scanResult.zoneColors,
+        version: scanResult.version,
         criancaName: crianca.name,
-        message: `${crianca.name} conquistou o checkpoint! +${scanResult.pointsGained}pt (Total: ${scanResult.totalPoints}pt)`,
+        message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt (Total: ${scanResult.totalPoints}pt)`,
       });
     }
     
@@ -886,7 +948,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// 🆕 Status do Zone Conquest INDIVIDUAL
+// 🆕 Status do Zone Conquest (TEAM ou INDIVIDUAL)
 router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
   try {
     const eventoId = req.params.eventoId;
@@ -905,19 +967,29 @@ router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    const status = getZoneConquestIndividualStatus(eventoId);
+    // Verificar qual tipo de jogo está rodando
+    const teamGame = await getActiveZoneConquestTeamGame(eventoId);
+    const individualGame = await getActiveZoneConquestIndividualGame(eventoId);
+
+    let status = null;
+
+    if (teamGame) {
+      status = await getZoneConquestTeamStatus(eventoId);
+    } else if (individualGame) {
+      status = await getZoneConquestIndividualStatus(eventoId);
+    }
     
     if (!status) {
       return res.json({
         gameRunning: false,
-        mode: 'individual',
-        message: 'Jogo não iniciado ou não é modo INDIVIDUAL',
+        mode: 'none',
+        message: 'Nenhum jogo de Zone Conquest ativo',
       });
     }
 
     res.json(status);
   } catch (err) {
-    console.error('❌ Erro ao buscar status do Zone Conquest INDIVIDUAL:', err);
+    console.error('❌ Erro ao buscar status do Zone Conquest:', err);
     res.status(500).json({ error: err.message });
   }
 });
