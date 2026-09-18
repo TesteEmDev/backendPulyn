@@ -39,9 +39,10 @@ function postgresConfig() {
     } : {}),
     ssl: sslEnabled ? { rejectUnauthorized: false } : false,
     connectionTimeoutMillis: Number(process.env.DB_TIMEOUT || 30000),
-    max: Number(process.env.PG_POOL_MAX || 30),
-    idleTimeoutMillis: 10000,
-    statementTimeoutMillis: 30000
+    max: Number(process.env.PG_POOL_MAX || 10), // Reduzido de 30 para 10 (respeita limite do Supabase)
+    idleTimeoutMillis: 5000, // Reduzido de 10000 para 5000 - libera conexões mais rápido
+    statementTimeoutMillis: 30000,
+    application_name: 'pulyn-app'
   };
 }
 

@@ -183,6 +183,11 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
+// 🆕 Monitoramento de pool de conexões
+const { poolMonitoringMiddleware, setupPoolMonitoringEndpoints } = require('./utils/poolMonitoring');
+app.use(poolMonitoringMiddleware);
+setupPoolMonitoringEndpoints(app);
+
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
 
 app.use('/api', (req, res, next) => {
