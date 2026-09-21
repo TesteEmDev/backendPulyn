@@ -35,6 +35,7 @@ const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
 const qrcodeRoutes = require('./routes/qrcode');
+const familyLinkingRoutes = require('./routes/family-linking');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -849,6 +850,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     
     console.log(`✅ [PARAR-JOGO] Processo finalizado com sucesso!\n`);
     
+    s
     res.json({ 
       ok: true, 
       status: gameStatus,
@@ -1486,6 +1488,9 @@ app.use('/api/monster', monsterRoutes);
 // QR Code
 app.use('/api/qrcode', qrcodeRoutes);
 
+// Vinculação Familiar (pais <-> crianças via QR Code)
+app.use('/api/family', familyLinkingRoutes);
+
 // Recursos do dashboard master
 app.use('/api/planos', planosRoutes);
 app.use('/api/monitoring', monitoringRoutes);
@@ -1541,6 +1546,10 @@ async function startServer() {
     await ensureZoneConquestSchema();
     await addCheckpointTerritoryFields();
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa e Zona Conquest verificados antes de iniciar o servidor.\n');
+    // ⏭️ Desabilita a migration de family-linking-tables pois já foi criada manualmente
+    // await ensureFamilyLinkingTables();
+    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints e Caça ao Monstro verificados antes de iniciar o servidor.\n');
+
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);
@@ -1572,6 +1581,7 @@ async function startServer() {
   ║      ✓ /api/settings                 ║
   ║      ✓ /api/ranking                  ║
   ║      ✓ /api/logs                     ║
+  ║      ✓ /api/family                   ║
   ╚═══════════════════════════════════════╝
   `);
   

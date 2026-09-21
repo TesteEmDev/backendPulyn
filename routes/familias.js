@@ -388,20 +388,51 @@ router.get('/me', verifyToken, async (req, res) => {
 router.get('/children', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+    
+    console.log(`📋 [FAMILIAS] GET /children chamado para login: ${req.user.id}`);
+    
     const children = await allQuery(`
-      SELECT c.id, c.evento_id, c.name, c.nickname, c.age, c.avatar, c.bracelet_code,
-             c.scores, c.status, l.relationship,
+      SELECT c.id, c.evento_id, c.name, c.nickname, c.age, c.avatar as "profileImage", c.bracelet_code,
+             COALESCE(c.scores, 0) as "currentScore",
+             COALESCE(c.scores, 0) as "totalScore",
+             l.relationship, l.status as link_status,
              e.name as evento_name, e.date as evento_date, e.status as evento_status,
-             t.id as time_id, t.name as time_name, t.color as time_color, t.points as time_points
+             t.id as "teamId", t.name as "teamName", t.color as "teamColor", t.points as team_points
       FROM family_child_links l
       JOIN criancas c ON c.id = l.crianca_id
       JOIN eventos e ON e.id = c.evento_id
       LEFT JOIN times t ON t.id = c.time_id
-      WHERE l.login_id = @loginId AND l.status = 'approved'
+      WHERE l.login_id = @loginId AND (l.status = 'approved' OR l.status = 'pending')
       ORDER BY e.date DESC, c.name ASC
     `, { loginId: req.user.id });
-    res.json(children);
+    
+    console.log(`📊 [FAMILIAS] Crianças encontradas: ${children.length}`);
+    children.forEach((c, idx) => {
+      console.log(`   [${idx}] ${c.nickname || c.name} (status: ${c.link_status})`);
+    });
+    
+    // Mapear para o formato esperado pela app
+    const mappedChildren = children.map(child => ({
+      id: child.id,
+      name: child.name,
+      nickname: child.nickname,
+      age: child.age,
+      profileImage: child.profileImage,
+      currentScore: child.currentScore || 0,
+      totalScore: child.totalScore || 0,
+      teamId: child.teamId || '',
+      teamName: child.teamName || 'Sem time',
+      teamColor: child.teamColor || '#cccccc',
+      rank: 0,
+      achievements: []
+    }));
+    
+    res.json({
+      success: true,
+      children: mappedChildren
+    });
   } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao buscar children:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -430,6 +461,67 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
     res.json({ child, scores });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * ✅ GET /api/familias/notifications
+ * Lista notificações da família
+ * Implementação básica: por enquanto retorna lista vazia
+ * TODO: Implementar sistema de notificações completo
+ */
+router.get('/notifications', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') {
+      return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+    }
+
+    // ✅ Por enquanto retorna lista vazia
+    // TODO: Implementar tabela de notificações com eventos de criança
+    res.json({
+      success: true,
+      notifications: []
+    });
+  } catch (error) {
+    console.error('❌ Erro ao buscar notificações:', error);
+    res.status(500).json({ error: 'Erro ao buscar notificações', details: error.message });
+  }
+});
+
+/**
+ * ✅ GET /api/familias/children/:id/achievements
+ * Lista conquistas de uma criança
+ * Implementação básica: por enquanto retorna lista vazia
+ * TODO: Implementar sistema de achievements/badges completo
+ */
+router.get('/children/:id/achievements', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') {
+      return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+    }
+
+    const { id } = req.params;
+
+    // Verificar se pais tem acesso a essa criança
+    const hasAccess = await queryOne(
+      `SELECT 1 FROM family_child_links
+       WHERE family_login_id = @family_id AND crianca_id = @crianca_id AND status = 'active'`,
+      { family_id: req.user.id, crianca_id: id }
+    );
+
+    if (!hasAccess) {
+      return res.status(403).json({ error: 'Você não tem permissão para ver dados desta criança' });
+    }
+
+    // ✅ Por enquanto retorna lista vazia
+    // TODO: Implementar tabela de conquistas/badges com eventos
+    res.json({
+      success: true,
+      achievements: []
+    });
+  } catch (error) {
+    console.error('❌ Erro ao buscar conquistas:', error);
+    res.status(500).json({ error: 'Erro ao buscar conquistas', details: error.message });
   }
 });
 
