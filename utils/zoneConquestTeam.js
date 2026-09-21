@@ -203,7 +203,7 @@ async function processZoneConquestTeamScan({
     const resultado = await withTransaction(async (tx) => {
       const pontos = 10; // Pontos fixos por leitura
 
-      // INSERT scan
+      // INSERT scan na tabela zone_conquest_team_scans
       await tx.query(
         `INSERT INTO zone_conquest_team_scans
          (id, partida_id, empresa_id, evento_id, brincadeira_id, round_number, 
@@ -226,6 +226,27 @@ async function processZoneConquestTeamScan({
           agora: now,
         }
       );
+
+      // 🆕 INSERT também em leituras para que scoreLog funcione
+      await tx.query(
+        `INSERT INTO leituras
+          (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
+           points_awarded, signal_strength, empresa_id, session_id)
+         VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
+                 @points, @signal, @empresaId, @sessionId)`,
+        {
+          id: leituraId,
+          checkpointId,
+          criancaId: crianca.id,
+          uid,
+          brincadeiraId: brincadeiraId || null,
+          points: pontos,
+          signal: -45,
+          empresaId: crianca.empresa_id,
+          sessionId: global.currentSessionId || null,
+        }
+      );
+      console.log(`   📝 [LEITURA] Inserida em leituras com session_id=${global.currentSessionId || 'NULL'}`);
 
       // UPDATE tempo: incrementar checkpoints_read e pontos
       await tx.query(
@@ -254,6 +275,7 @@ async function processZoneConquestTeamScan({
           agora: now,
         }
       );
+      console.log(`   🎨 [ZONE-TEAM] Checkpoint ${checkpointId} marcado para equipe ${crianca.time_id}`);
 
       return { points: pontos, accepted: true };
     });

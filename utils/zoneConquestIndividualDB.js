@@ -232,6 +232,26 @@ async function processZoneConquestIndividualScan({
         }
       );
 
+      // 🆕 INSERT também em leituras para que scoreLog funcione
+      await tx.query(
+        `INSERT INTO leituras
+          (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
+           points_awarded, signal_strength, empresa_id, session_id)
+         VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
+                 @points, @signal, @empresaId, @sessionId)`,
+        {
+          id: leituraId,
+          checkpointId,
+          criancaId: crianca.id,
+          uid,
+          brincadeiraId,
+          points: pontos,
+          signal: -45,
+          empresaId: crianca.empresa_id,
+          sessionId: global.currentSessionId || null,
+        }
+      );
+
       // UPDATE participant state com OPTIMISTIC LOCKING
       // Só atualiza se version combina (previne race condition)
       const updateResult = await tx.query(
@@ -274,6 +294,7 @@ async function processZoneConquestIndividualScan({
           agora: now,
         }
       );
+      console.log(`   🎨 [ZONE-INDIVIDUAL] Checkpoint ${checkpointId} marcado para participante ${crianca.id}`);
 
       // Recalcular ranking para a partida
       await recalculateRanking(tx, partida.id);

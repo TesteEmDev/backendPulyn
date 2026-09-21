@@ -204,10 +204,13 @@ router.post('/reception', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
+    console.log(`\n🔵 [LEITURA-DEBUG] POST /api/leituras recebido!`);
     const { checkpointId, uid, brincadeiraId, signal, readingId: requestedReadingId } = req.body;
     const normalizedUid = normalizeUid(uid);
     const readingId = getReadingId(req, requestedReadingId);
     const now = new Date();
+
+    console.log(`\n📡 [LEITURA] Recebida: checkpoint=${checkpointId}, uid=${normalizedUid}`);
 
     if (!checkpointId || !normalizedUid) {
       return res.status(400).json({ error: 'checkpointId e uid são obrigatórios' });
@@ -403,9 +406,9 @@ router.post('/', async (req, res) => {
               await tx.query(
                 `INSERT INTO leituras
                   (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-                   points_awarded, signal_strength, empresa_id)
+                   points_awarded, signal_strength, empresa_id, session_id)
                  VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                         0, @signal, @empresaId)`,
+                         0, @signal, @empresaId, @sessionId)`,
                 {
                   id: leituraId,
                   checkpointId,
@@ -414,6 +417,7 @@ router.post('/', async (req, res) => {
                   brincadeiraId: monsterSession.brincadeira_id,
                   signal: signal || -45,
                   empresaId: crianca.empresa_id,
+                  sessionId: global.currentSessionId || null,
                 }
               );
             }
@@ -536,9 +540,9 @@ router.post('/', async (req, res) => {
           await tx.query(
             `INSERT INTO leituras
               (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-               points_awarded, signal_strength, empresa_id)
+               points_awarded, signal_strength, empresa_id, session_id)
              VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                     0, @signal, @empresaId)`,
+                     0, @signal, @empresaId, @sessionId)`,
             {
               id: leituraId,
               checkpointId,
@@ -547,6 +551,7 @@ router.post('/', async (req, res) => {
               brincadeiraId: treasureSession.brincadeira_id,
               signal: signal || -45,
               empresaId: crianca.empresa_id,
+              sessionId: global.currentSessionId || null,
             }
           );
         }
@@ -643,6 +648,31 @@ router.post('/', async (req, res) => {
 
       console.log(`   ✅ [ZONE-TEAM] Leitura aceita!`);
       
+      // 🆕 INSERT em leituras para que scoreLog funcione
+      try {
+        await query(
+          `INSERT INTO leituras
+            (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
+             points_awarded, signal_strength, empresa_id, session_id)
+           VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
+                   @points, @signal, @empresaId, @sessionId)`,
+          {
+            id: leituraId,
+            checkpointId,
+            criancaId: crianca.id,
+            uid: normalizedUid,
+            brincadeiraId: zoneConquestTeamGame.brincadeira_id || null,
+            points: scanResult.points,
+            signal: -45,
+            empresaId: crianca.empresa_id,
+            sessionId: global.currentSessionId || null,
+          }
+        );
+        console.log(`   📝 [LEITURA] Inserida em leituras com session_id=${global.currentSessionId || 'NULL'}`);
+      } catch (insertError) {
+        console.error(`   ❌ [LEITURA] ERRO ao inserir em leituras:`, insertError.message);
+      }
+      
       broadcastEvent({
         type: 'ZONE_CONQUEST_TEAM_SCAN',
         payload: {
@@ -698,6 +728,27 @@ router.post('/', async (req, res) => {
       }
 
       console.log(`   ✅ [ZONE-INDIVIDUAL] Leitura aceita!`);
+      
+      // 🆕 INSERT em leituras para que scoreLog funcione
+      await query(
+        `INSERT INTO leituras
+          (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
+           points_awarded, signal_strength, empresa_id, session_id)
+         VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
+                 @points, @signal, @empresaId, @sessionId)`,
+        {
+          id: leituraId,
+          checkpointId,
+          criancaId: crianca.id,
+          uid: normalizedUid,
+          brincadeiraId: zoneConquestIndividualGame.brincadeira_id || null,
+          points: scanResult.points,
+          signal: -45,
+          empresaId: crianca.empresa_id,
+          sessionId: global.currentSessionId || null,
+        }
+      );
+      console.log(`   📝 [LEITURA] Inserida em leituras com session_id=${global.currentSessionId || 'NULL'}`);
       
       // Obter status atualizado
       const statusAtualizado = await getZoneConquestIndividualStatus(checkpoint.evento_id);
@@ -833,9 +884,9 @@ router.post('/', async (req, res) => {
       await tx.query(
         `INSERT INTO leituras
           (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-           points_awarded, signal_strength, empresa_id)
+           points_awarded, signal_strength, empresa_id, session_id)
          VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                 @points, @signal, @empresaId)`,
+                 @points, @signal, @empresaId, @sessionId)`,
         {
           id: leituraId,
           checkpointId,
@@ -845,8 +896,10 @@ router.post('/', async (req, res) => {
           points: pointsAwarded,
           signal: signal || -45,
           empresaId: crianca.empresa_id,
+          sessionId: global.currentSessionId || null,
         }
       );
+      console.log(`   📝 [LEITURA] Inserida com session_id=${global.currentSessionId || 'NULL'}`);
 
       await tx.query(
         `INSERT INTO pontuacoes
@@ -1002,6 +1055,7 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
     const empresaId = req.user.empresa_id;
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
     const master = isMaster(req) ? 1 : 0;
+    const sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
 
     const evento = await queryOne(
       'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
@@ -1012,26 +1066,54 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    const history = await allQuery(`
-      SELECT TOP (@limit)
-        p.id,
-        p.evento_id,
-        p.crianca_id AS child_id,
-        c.name AS child_name,
-        c.nickname AS child_nickname,
-        p.checkpoint_id,
-        cp.name AS checkpoint_name,
-        p.points,
-        p.created_at,
-        t.color AS team_color
-      FROM pontuacoes p
-      LEFT JOIN criancas c ON c.id = p.crianca_id
-      LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
-      LEFT JOIN times t ON t.id = c.time_id
-      WHERE LOWER(p.evento_id) = LOWER(@eventoId)
-        AND (p.empresa_id = @empresaId OR @master = 1)
-      ORDER BY p.created_at DESC
-    `, { limit, eventoId, empresaId, master });
+    // 🆕 Se sessionId foi fornecido, buscar de leituras com filtro de session_id
+    // Caso contrário, buscar de pontuacoes (compatibilidade com dados antigos)
+    let history;
+    if (sessionId) {
+      console.log(`   🔍 [HISTORICO] Filtrando por session_id=${sessionId}`);
+      history = await allQuery(`
+        SELECT TOP (@limit)
+          l.id,
+          c.evento_id,
+          l.crianca_id AS child_id,
+          c.name AS child_name,
+          c.nickname AS child_nickname,
+          l.checkpoint_id,
+          cp.name AS checkpoint_name,
+          l.points_awarded AS points,
+          l.created_at,
+          t.color AS team_color
+        FROM leituras l
+        LEFT JOIN criancas c ON c.id = l.crianca_id
+        LEFT JOIN checkpoints cp ON cp.id = l.checkpoint_id
+        LEFT JOIN times t ON t.id = c.time_id
+        WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+          AND l.session_id = @sessionId
+          AND (l.empresa_id = @empresaId OR @master = 1)
+        ORDER BY l.created_at DESC
+      `, { limit, eventoId, empresaId, master, sessionId });
+    } else {
+      history = await allQuery(`
+        SELECT TOP (@limit)
+          p.id,
+          p.evento_id,
+          p.crianca_id AS child_id,
+          c.name AS child_name,
+          c.nickname AS child_nickname,
+          p.checkpoint_id,
+          cp.name AS checkpoint_name,
+          p.points,
+          p.created_at,
+          t.color AS team_color
+        FROM pontuacoes p
+        LEFT JOIN criancas c ON c.id = p.crianca_id
+        LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
+        LEFT JOIN times t ON t.id = c.time_id
+        WHERE LOWER(p.evento_id) = LOWER(@eventoId)
+          AND (p.empresa_id = @empresaId OR @master = 1)
+        ORDER BY p.created_at DESC
+      `, { limit, eventoId, empresaId, master });
+    }
 
     res.json(history);
   } catch (error) {

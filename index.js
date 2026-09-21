@@ -35,6 +35,7 @@ const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
 const qrcodeRoutes = require('./routes/qrcode');
+const zoneConquestRoutes = require('./routes/zoneConquest');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -45,6 +46,8 @@ const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureAvatarSchema } = require('./migrations/avatar');
 const { ensureEventZonesSchema } = require('./migrations/eventZones');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
+const { ensureGameSessionsSchema } = require('./migrations/gameSessions');
+const { addSessionIdToLeituras } = require('./migrations/leiturasSessionId');
 const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
@@ -69,6 +72,12 @@ const wss = new WebSocket.Server({
   server,
   perMessageDeflate: false,
   handleProtocols: (protocols) => protocols.has(WS_AUTH_PROTOCOL) ? WS_AUTH_PROTOCOL : undefined,
+  // Permitir conexões de diferentes domínios (CORS para WebSocket)
+  verifyClient: (info) => {
+    // Aceitar conexões de qualquer origem (desenvolvimento)
+    // Em produção, validar especificamente
+    return true;
+  }
 });
 
 // Heartbeat para manter WebSocket vivo
@@ -191,7 +200,7 @@ setupPoolMonitoringEndpoints(app);
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
 
 app.use('/api', (req, res, next) => {
-  if (/^\/(auth|kiosk|score-kiosk|event-control)(\/|$)/i.test(req.path) || !req.headers.authorization) {
+  if (/^\/(auth|kiosk|score-kiosk|event-control|leituras)(\/|$)/i.test(req.path) || !req.headers.authorization) {
     return next();
   }
 
@@ -224,19 +233,24 @@ wss.on('connection', async (ws, req) => {
   const eventoId = url.searchParams.get('evento_id') || 'global';
   const controlScope = url.searchParams.get('scope') === 'company';
   const wsToken = getWebSocketToken(req, url);
+  
+  console.log(`🔍 [WebSocket] Nova tentativa: scope=${controlScope ? 'COMPANY' : 'EVENT'}, evento=${eventoId}, token=${wsToken ? '✓' : '✗'}`);
 
   // Kiosk usa token no handshake e só pode assinar o evento da própria empresa.
   let wsUser = null;
   if (wsToken) {
     try {
       wsUser = jwt.verify(wsToken, WS_JWT_SECRET);
-    } catch {
+      console.log(`   ✓ Token verificado para: ${wsUser.email} (${wsUser.role})`);
+    } catch (err) {
+      console.log(`   ❌ Token inválido: ${err.message}`);
       ws.close(1008, 'Token WebSocket inválido');
       return;
     }
   }
 
   if (controlScope && !wsUser) {
+    console.log(`   ❌ Controle de empresa requer token válido`);
     ws.close(1008, 'Token obrigatório para controle do evento');
     return;
   }
@@ -524,7 +538,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
 
 app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
-    const { gameId, gameName, eventoId } = req.body;
+    const { gameId, gameName, eventoId, zoneConquestMode } = req.body;
     
     if (!eventoId) {
       return res.status(400).json({ error: 'eventoId é obrigatório' });
@@ -534,6 +548,11 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     console.log(`   Evento ID: ${eventoId}`);
     console.log(`   Nome do Jogo: ${gameName}`);
     console.log(`   ID do Jogo: ${gameId}`);
+    
+    // 🆕 Gerar novo ID de sessão/partida
+    const { v4: uuidv4 } = require('uuid');
+    const sessionId = uuidv4();
+    console.log(`   📊 Nova sessão criada: ${sessionId}`);
     
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [INICIAR-JOGO] Verificando status atual do evento...`);
@@ -597,6 +616,26 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       await stopMonsterGame(eventoId);
     }
 
+    // 🆕 CRIAR NOVO REGISTRO DE SESSÃO NO BANCO
+    await query(
+      `INSERT INTO game_sessions (id, evento_id, brincadeira_id, game_type, mode, status, started_at, created_at, updated_at)
+       VALUES (@sessionId, @eventoId, @gameId, @gameType, @mode, @status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+      {
+        sessionId,
+        eventoId,
+        gameId,
+        gameType,
+        mode: zoneConquestMode || null,
+        status: 'active'
+      }
+    );
+    console.log(`   ✓ Sessão de jogo registrada no banco: ${sessionId}`);
+
+    // 🆕 Atualizar variável global de sessão atual
+    currentSessionId = sessionId;
+    currentSessionGameType = gameType;
+    console.log(`   🔐 [SESSÃO] Variável global setada: currentSessionId=${currentSessionId}, gameType=${currentSessionGameType}`);
+
     // Cada novo início começa sem domínio visual da partida anterior.
     await query(`
       UPDATE checkpoints SET
@@ -608,6 +647,57 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
     `, { eventoId });
     console.log(`   ✓ Territórios do evento limpos para uma nova partida`);
+    
+    
+    // ✨ NOVO: Para Zone Conquest, inicializar estados de checkpoint e zona
+    if (gameType === 'zone_conquest') {
+      try {
+        const {
+          initializeCheckpointStates,
+          initializeZoneStates,
+        } = require('./utils/zoneConquestStateManager');
+        
+        // Determinar o modo do jogo (TEAM ou INDIVIDUAL)
+        const zoneMode = (zoneConquestMode || 'team').toLowerCase();
+        
+        if (!['team', 'individual'].includes(zoneMode)) {
+          throw new Error(`Modo inválido: ${zoneMode}. Use 'team' ou 'individual'`);
+        }
+        
+        const evento = await queryOne(
+          `SELECT empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+          { eventoId }
+        );
+        
+        if (evento) {
+          // 🔧 Criar partida em zone_conquest_team_partidas
+          if (zoneMode === 'team') {
+            const firstTeam = await queryOne(
+              `SELECT id FROM times WHERE LOWER(evento_id) = LOWER(@eventoId) ORDER BY created_at ASC LIMIT 1`,
+              { eventoId }
+            );
+            
+            const partidaId = require('uuid').v4();
+            await query(
+              `INSERT INTO zone_conquest_team_partidas (id, evento_id, empresa_id, brincadeira_id, status, round_number, current_team_id, started_at, created_at, updated_at)
+               VALUES (@id, @eventoId, @empresaId, @brincadeiraId, 'active', 1, @currentTeamId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+              {
+                id: partidaId,
+                eventoId,
+                empresaId: evento.empresa_id,
+                brincadeiraId: gameId,
+                currentTeamId: firstTeam?.id || null,
+              }
+            );
+            console.log(`   ✓ Partida TEAM criada: ${partidaId}`);
+          }
+          
+          console.log(`   ✓ Zone Conquest iniciado (Modo: ${zoneMode})`);
+        }
+      } catch (err) {
+        console.warn(`   ⚠️ Erro ao inicializar Zone Conquest: ${err.message}`);
+      }
+    }
     
     // ✅ IMPORTANTE: Atualizar o banco de dados
     console.log(`📝 [INICIAR-JOGO] Atualizando evento no banco de dados...`);
@@ -688,7 +778,20 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     };
     global.broadcastToEvent(eventoId, {
       type: 'GAME_STARTED',
-      payload: gameStartedPayload,
+      payload: {
+        ...gameStartedPayload,
+        sessionId: sessionId,
+      },
+    });
+    
+    // ✨ NOVO: Enviar evento para resetar leituras no frontend
+    global.broadcastToEvent(eventoId, {
+      type: 'READINGS_CLEARED',
+      payload: { 
+        eventoId,
+        timestamp: new Date().toISOString(),
+        message: 'Leituras de checkpoints foram resetadas. Novo jogo iniciado!'
+      }
     });
     
     // ✨ NOVO: Mudar modo do checkpoint para 'game' via WebSocket
@@ -697,6 +800,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       type: 'CHECKPOINT_MODE_CHANGED',
       payload: { 
         mode: 'game',
+        gameType: gameType,
+        brincadeiraId: gameId,
         timestamp: new Date().toISOString(),
         eventoId
       }
@@ -705,7 +810,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     console.log(`✅ [INICIAR-JOGO] Processo finalizado com sucesso!\n`);
     
     res.json({ 
-      ok: true, 
+      ok: true,
+      sessionId: sessionId,
       status: gameStatus,
       verification: {
         statusAntes: eventoAntes?.status,
@@ -761,6 +867,53 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
     `, { eventoId });
     console.log(`   ✓ Domínios dos checkpoints encerrados`);
+    
+    // 🆕 ATUALIZAR STATUS DA SESSÃO PARA 'finished'
+    await query(
+      `UPDATE game_sessions 
+       SET status = 'finished', finished_at = GETDATE()
+       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
+      { eventoId }
+    );
+    console.log(`   ✓ Sessões de jogo finalizadas`);
+    
+    // 🆕 Também finalizar as partidas de zone_conquest
+    await query(
+      `UPDATE zone_conquest_team_partidas 
+       SET status = 'finished', finished_at = GETDATE()
+       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
+      { eventoId }
+    );
+    
+    // 🆕 Limpar variável global de sessão
+    currentSessionId = null;
+    currentSessionGameType = null;
+    
+    // ✨ NOVO: Para Zone Conquest, limpar os states da partida
+    if (gameStatus.gameType === 'zone_conquest') {
+      try {
+        const { clearPartidaStates } = require('./utils/zoneConquestStateManager');
+        const { v4: uuidv4 } = require('uuid');
+        
+        // Buscar todas as partidas ativas para este evento
+        const partidas = await allQuery(
+          `SELECT id FROM zone_conquest_team_partidas
+           WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
+          { eventoId }
+        );
+        
+        // Limpar states de todas as partidas
+        for (const partida of partidas) {
+          await clearPartidaStates(partida.id, eventoId);
+        }
+        
+        if (partidas.length > 0) {
+          console.log(`   ✓ ${partidas.length} partida(s) de Zone Conquest limpas`);
+        }
+      } catch (err) {
+        console.warn(`   ⚠️ Erro ao limpar Zone Conquest states: ${err.message}`);
+      }
+    }
     
     // ✅ IMPORTANTE: Atualizar o banco de dados
     console.log(`📝 [PARAR-JOGO] Atualizando evento no banco de dados...`);
@@ -1021,6 +1174,8 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
 // DEBUG: Get current checkpoint mode
 let currentMode = 'idle';
 let currentGameType = 'none';
+let currentSessionId = null;
+let currentSessionGameType = null;
 
 // Permite que o processamento NFC encerre o estado global quando a última etapa termina.
 global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString()) => {
@@ -1466,6 +1621,9 @@ app.use('/api/treasure', treasureRoutes);
 // Caça ao Monstro
 app.use('/api/monster', monsterRoutes);
 
+// Zone Conquest
+app.use('/api/zone-conquest', zoneConquestRoutes);
+
 // QR Code
 app.use('/api/qrcode', qrcodeRoutes);
 
@@ -1522,7 +1680,9 @@ async function startServer() {
     await ensureAvatarSchema();
     await ensureEventZonesSchema();
     await ensureZoneConquestSchema();
-    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa e Zone Conquest verificados antes de iniciar o servidor.\n');
+    await ensureGameSessionsSchema();
+    await addSessionIdToLeituras();
+    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest e Leituras verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);
@@ -1554,6 +1714,7 @@ async function startServer() {
   ║      ✓ /api/settings                 ║
   ║      ✓ /api/ranking                  ║
   ║      ✓ /api/logs                     ║
+  ║      ✓ /api/zone-conquest            ║
   ╚═══════════════════════════════════════╝
   `);
   
