@@ -44,7 +44,9 @@ const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMa
 const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureAvatarSchema } = require('./migrations/avatar');
-// ⏭️ Migration de family-linking-tables desabilitada (criada via run-migration.js)
+const { ensureEventZonesSchema } = require('./migrations/eventZones');
+const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
+const { addCheckpointTerritoryFields } = require('./migrations/addCheckpointTerritoryFields');
 const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
@@ -60,6 +62,11 @@ const {
   startMonsterGame,
   stopMonsterGame,
 } = require('./utils/monster');
+const {
+  ZONE_CONQUEST_GAME_TYPE,
+  startZoneConquestGame,
+  stopZoneConquestGame,
+} = require('./utils/zoneConquest');
 
 const app = express();
 const server = http.createServer(app);
@@ -133,7 +140,6 @@ global.broadcast = (message) => {
 // ✨ NOVO: Função de broadcast para um evento específico
 global.broadcastToEvent = (eventoId, message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
-  console.log(`📡 Broadcasting para evento ${eventoId}: ${typeof message === 'object' ? message.type : message}`);
   
   wss.clients.forEach((client) => {
     if (client.readyState === 1
@@ -182,6 +188,11 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 // Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
+
+// 🔍 DEBUG GLOBAL: Log todas as requisições POST
+app.use((req, res, next) => {
+  next();
+});
 
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
 
@@ -302,7 +313,6 @@ wss.on('connection', async (ws, req) => {
       return;
     }
   }
-  
   console.log(`✅ Cliente WebSocket conectado ao evento: ${eventoId}. Total: ${wss.clients.size}`);
   
   // Ping/Pong para manter vivo
@@ -321,8 +331,6 @@ wss.on('connection', async (ws, req) => {
       if (ws.controlScope) return;
       if (!ws.kioskAuthorized) return;
       
-      console.log(`📨 Mensagem recebida via WebSocket (evento: ${eventoId}):`, data.type);
-      
       // Os terminais de autoatendimento apenas recebem leituras; nunca alteram modo/comandos.
       if (KIOSK_ROLES.has(ws.user?.role) && (data.type === 'SET_MODE' || data.type === 'COMMAND')) {
         return;
@@ -337,13 +345,11 @@ wss.on('connection', async (ws, req) => {
           persistEventMode(eventoId, currentMode, currentGameType).catch((error) => {
             console.error('❌ Erro ao persistir modo do evento:', error.message);
           });
-          console.log(`🎯 Modo atualizado via WebSocket: ${currentMode} (evento: ${eventoId})`);
         }
       }
 
       // Se é comando para Arduino, broadcast para o evento
       if (data.type === 'SET_MODE' || data.type === 'COMMAND') {
-        console.log(`📡 Enviando comando para Arduino (evento: ${eventoId}): ${data.type}`);
         global.broadcastToEvent(eventoId, data);
       }
     } catch (err) {
@@ -576,20 +582,36 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     const gameType = selectedGame.type === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : selectedGame.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : selectedGame.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : ZONE_CONQUEST_GAME_TYPE;
+    console.log(`🎮 [INICIAR-JOGO] Detectado gameType: ${gameType} (TREASURE=${TREASURE_GAME_TYPE}, MONSTER=${MONSTER_GAME_TYPE}, ZONE=${ZONE_CONQUEST_GAME_TYPE})`);
+    
     let treasureStart = null;
     let monsterStart = null;
+    let zoneConquestStart = null;
+    
     if (gameType === TREASURE_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
       treasureStart = await startTreasureGame(eventoId, selectedGame.id);
       await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
     } else if (gameType === MONSTER_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch MONSTER`);
       monsterStart = await startMonsterGame(eventoId, selectedGame.id);
       await stopTreasureGame(eventoId);
+      await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Monstro iniciado com checkpoint especial`);
-    } else {
+    } else if (gameType === ZONE_CONQUEST_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch ZONE_CONQUEST`);
+      zoneConquestStart = await startZoneConquestGame(eventoId, selectedGame.id);
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
+      console.log(`   ✓ Zona Conquest iniciado`);
+    } else {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch STOP_ALL (tipo desconhecido: ${gameType})`);
+      await stopTreasureGame(eventoId);
+      await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
     }
 
     // Cada novo início começa sem domínio visual da partida anterior.
@@ -744,6 +766,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
 
     await stopTreasureGame(eventoId);
     await stopMonsterGame(eventoId);
+    await stopZoneConquestGame(eventoId);
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
@@ -827,6 +850,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     
     console.log(`✅ [PARAR-JOGO] Processo finalizado com sucesso!\n`);
     
+    s
     res.json({ 
       ok: true, 
       status: gameStatus,
@@ -1518,9 +1542,14 @@ async function startServer() {
     await ensureEventFloorPlanSchema();
     await ensureMonsterHuntSchema();
     await ensureAvatarSchema();
+    await ensureEventZonesSchema();
+    await ensureZoneConquestSchema();
+    await addCheckpointTerritoryFields();
+    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa e Zona Conquest verificados antes de iniciar o servidor.\n');
     // ⏭️ Desabilita a migration de family-linking-tables pois já foi criada manualmente
     // await ensureFamilyLinkingTables();
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints e Caça ao Monstro verificados antes de iniciar o servidor.\n');
+
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);

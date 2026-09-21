@@ -15,6 +15,11 @@ const {
   startTreasureGame,
   stopTreasureGame,
 } = require('../utils/treasure');
+const {
+  ZONE_CONQUEST_GAME_TYPE,
+  startZoneConquestGame,
+  stopZoneConquestGame,
+} = require('../utils/zoneConquest');
 
 function sameId(left, right) {
   return left !== null && left !== undefined
@@ -337,18 +342,34 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     }
     
     const rawGameType = brincadeira.type || brincadeira.game_type || 'standard';
-    const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE].includes(rawGameType)
+    const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE, ZONE_CONQUEST_GAME_TYPE].includes(rawGameType)
       ? rawGameType
       : rawGameType || 'standard';
+    
+    console.log('🎮 [routes/events.js] Game Type:', gameType);
+    console.log('🎮 [routes/events.js] ZONE_CONQUEST_GAME_TYPE:', ZONE_CONQUEST_GAME_TYPE);
+    console.log('🎮 [routes/events.js] Comparação:', gameType === ZONE_CONQUEST_GAME_TYPE);
+    
     if (gameType === MONSTER_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando Monster Game');
       await startMonsterGame(evento_id, brincadeira.id);
       await stopTreasureGame(evento_id);
+      await stopZoneConquestGame(evento_id);
     } else if (gameType === TREASURE_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando Treasure Game');
       await startTreasureGame(evento_id, brincadeira.id);
       await stopMonsterGame(evento_id);
-    } else {
+      await stopZoneConquestGame(evento_id);
+    } else if (gameType === ZONE_CONQUEST_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando ZONE CONQUEST Game');
+      await startZoneConquestGame(evento_id, brincadeira.id);
       await stopMonsterGame(evento_id);
       await stopTreasureGame(evento_id);
+    } else {
+      console.log('📍 [routes/events.js] Parando todos os jogos (tipo:', gameType, ')');
+      await stopMonsterGame(evento_id);
+      await stopTreasureGame(evento_id);
+      await stopZoneConquestGame(evento_id);
     }
     
     // Atualizar evento para ativar jogo
@@ -414,6 +435,7 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
     // Atualizar evento para pausar jogo
     await stopMonsterGame(evento_id);
     await stopTreasureGame(evento_id);
+    await stopZoneConquestGame(evento_id);
     await query(
       `UPDATE eventos 
        SET status = @status, 
@@ -485,7 +507,7 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
 });
 
 // Planta do evento: armazenada no banco para sobreviver a reload/redeploy do frontend.
-router.get('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+router.get('/:id/floor-plan', verifyToken, async (req, res) => {
   try {
     const evento = await queryOne(
       isMaster(req)
@@ -671,3 +693,87 @@ router.delete('/:id', verifyToken, async (req, res) => {
 });
 
 module.exports = router;
+
+// ==================== ZONAS DO MAPA ====================
+
+// Carregar zonas do evento
+router.get('/:id/zones', verifyToken, async (req, res) => {
+  try {
+    const evento_id = req.params.id;
+    const empresa_id = req.user.empresa_id;
+    
+    // Verificar que o evento pertence à empresa (ou user é master)
+    const evento = await queryOne(
+      'SELECT empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+    
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+    
+    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    
+    // Carregar zonas do evento
+    const zonesData = await queryOne(
+      'SELECT zones_data FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+    
+    if (!zonesData || !zonesData.zones_data) {
+      return res.json([]);
+    }
+    
+    try {
+      const zones = JSON.parse(zonesData.zones_data);
+      res.json(zones);
+    } catch (e) {
+      console.error('Erro ao parsear zonas:', e);
+      res.json([]);
+    }
+  } catch (err) {
+    console.error('❌ Erro ao carregar zonas:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Salvar zonas do evento
+router.post('/:id/zones', verifyToken, async (req, res) => {
+  try {
+    const evento_id = req.params.id;
+    const { zones } = req.body;
+    const empresa_id = req.user.empresa_id;
+    
+    // Verificar que o evento pertence à empresa (ou user é master)
+    const evento = await queryOne(
+      'SELECT empresa_id FROM eventos WHERE id = @id',
+      { id: evento_id }
+    );
+    
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+    
+    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    
+    if (!Array.isArray(zones)) {
+      return res.status(400).json({ error: 'Zonas deve ser um array' });
+    }
+    
+    // Salvar zonas em JSON
+    const zonesJson = JSON.stringify(zones);
+    await query(
+      'UPDATE eventos SET zones_data = @zones_data WHERE id = @id',
+      { zones_data: zonesJson, id: evento_id }
+    );
+    
+    res.json({ success: true, message: 'Zonas salvas com sucesso', zones });
+  } catch (err) {
+    console.error('❌ Erro ao salvar zonas:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
