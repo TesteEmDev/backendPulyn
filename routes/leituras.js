@@ -623,17 +623,23 @@ router.post('/', async (req, res) => {
     // 🔍 Recuperar sessionId ativo do banco (em vez de usar global que não persiste no Render)
     let activeSessionId = null;
     if (zoneConquestTeamGame || zoneConquestIndividualGame) {
-      const activeSession = await queryOne(
-        `SELECT id FROM game_sessions 
-         WHERE LOWER(evento_id) = LOWER(@eventoId) 
-           AND status = 'active'
-         ORDER BY started_at DESC
-         LIMIT 1`,
-        { eventoId: checkpoint.evento_id }
-      );
-      if (activeSession) {
-        activeSessionId = activeSession.id;
-        console.log(`   🔍 [SESSÃO] sessionId recuperada do banco: ${activeSessionId}`);
+      try {
+        const activeSession = await queryOne(
+          `SELECT id FROM game_sessions 
+           WHERE LOWER(evento_id) = LOWER(@eventoId) 
+             AND status = 'active'
+           ORDER BY started_at DESC
+           LIMIT 1`,
+          { eventoId: checkpoint.evento_id }
+        );
+        if (activeSession) {
+          activeSessionId = activeSession.id;
+          console.log(`   🔍 [SESSÃO] sessionId recuperada do banco: ${activeSessionId}`);
+        } else {
+          console.log(`   ❌ [SESSÃO] Nenhuma sessão ativa encontrada para evento ${checkpoint.evento_id}`);
+        }
+      } catch (err) {
+        console.error(`   ❌ [SESSÃO] Erro ao recuperar sessionId:`, err.message);
       }
     }
 
