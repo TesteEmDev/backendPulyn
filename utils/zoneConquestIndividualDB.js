@@ -180,7 +180,7 @@ async function processZoneConquestIndividualScan({
     // 5. TRANSAÇÃO: INSERT scan + UPDATE participant state com VERSIONNING
     const resultado = await withTransaction(async (tx) => {
       const nextVersion = participantState.version + 1;
-      const novosPontos = participantState.total_points + pontos;
+      const novosPontos = Math.floor(participantState.total_points + pontos); // ✅ Arredondar para inteiro
       const novosCheckpoints = participantState.checkpoints_read + 1;
 
       // INSERT scan
