@@ -173,14 +173,15 @@ async function processZoneConquestIndividualScan({
     const checkpointsReadCount = participantState.checkpoints_read;
     const basePoints = 10;
     const multiplier = 1 + checkpointsReadCount * 0.01;
-    const pontos = Math.round(basePoints * multiplier * 100) / 100;
+    const pontosDecimal = Math.round(basePoints * multiplier * 100) / 100;
+    const pontos = Math.floor(pontosDecimal); // ✅ Arredondar para inteiro para INSERT
 
-    console.log(`   💰 Pontos: ${basePoints} × ${multiplier.toFixed(2)} = ${pontos}`);
+    console.log(`   💰 Pontos: ${basePoints} × ${multiplier.toFixed(2)} = ${pontosDecimal} (arredondado: ${pontos})`);
 
     // 5. TRANSAÇÃO: INSERT scan + UPDATE participant state com VERSIONNING
     const resultado = await withTransaction(async (tx) => {
       const nextVersion = participantState.version + 1;
-      const novosPontos = Math.floor(participantState.total_points + pontos); // ✅ Arredondar para inteiro
+      const novosPontos = participantState.total_points + pontos; // pontos já é inteiro
       const novosCheckpoints = participantState.checkpoints_read + 1;
 
       // INSERT scan
