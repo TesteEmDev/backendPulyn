@@ -8,7 +8,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 
 /**
  * Inicia um novo jogo de Zone Conquest INDIVIDUAL
- * Baseado em startMonsterGame() com TRANSAÇÃO e versionning
+ * Sem exigir participantes pré-cadastrados - eles são criados sob demanda
  */
 async function startZoneConquestIndividual(eventoId, brincadeiraId) {
   if (!eventoId || !brincadeiraId) {
@@ -38,77 +38,30 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
       throw new Error('Evento não encontrado');
     }
 
-    // 3. Buscar participantes (crianças ativas)
-    const participantes = await allQuery(
-      `SELECT c.id, c.name, c.evento_id, t.color
-       FROM criancas c
-       LEFT JOIN times t ON t.id = c.time_id
-       WHERE c.evento_id = @eventoId AND c.status = 'ativo'
-       ORDER BY c.name`,
-      { eventoId }
-    );
+    // 3. Criar partida (sem exigir participantes)
+    const partidaId = uuidv4();
+    const agora = new Date();
 
-    if (participantes.length === 0) {
-      throw new Error('Nenhum participante cadastrado');
-    }
-
-    console.log(`   👥 Participantes encontrados: ${participantes.length}`);
-
-    // 4. Buscar checkpoints
-    const checkpoints = await allQuery(
-      `SELECT id, name FROM checkpoints
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
-         AND (checkpoint_purpose IS NULL OR checkpoint_purpose = 'game')`,
-      { eventoId }
-    );
-
-    console.log(`   📍 Checkpoints encontrados: ${checkpoints.length}`);
-
-    // 5. TRANSAÇÃO: criar partida + participant states
-    const partida = await withTransaction(async (tx) => {
-      const partidaId = uuidv4();
-      const agora = new Date();
-
-      // INSERT partida com version = 0
-      await tx.query(
-        `INSERT INTO zone_conquest_individual_partidas
-         (id, empresa_id, evento_id, brincadeira_id, status, version, started_at)
-         VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', 0, @startedAt)`,
-        {
-          id: partidaId,
-          empresaId: evento.empresa_id,
-          eventoId,
-          brincadeiraId,
-          startedAt: agora,
-        }
-      );
-
-      // INSERT participant state para cada participante com version = 0
-      for (const participante of participantes) {
-        await tx.query(
-          `INSERT INTO zone_conquest_individual_participant_states
-           (id, partida_id, empresa_id, evento_id, crianca_id, status, checkpoints_read, total_points, ranking, version, started_at)
-           VALUES (@id, @partidaId, @empresaId, @eventoId, @criancaId, 'active', 0, 0, NULL, 0, @startedAt)`,
-          {
-            id: uuidv4(),
-            partidaId,
-            empresaId: evento.empresa_id,
-            eventoId,
-            criancaId: participante.id,
-            startedAt: agora,
-          }
-        );
+    await query(
+      `INSERT INTO zone_conquest_individual_partidas
+       (id, empresa_id, evento_id, brincadeira_id, status, round_number, started_at, created_at, updated_at)
+       VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', 1, @startedAt, @startedAt, @startedAt)`,
+      {
+        id: partidaId,
+        empresaId: evento.empresa_id,
+        eventoId,
+        brincadeiraId,
+        startedAt: agora,
       }
+    );
 
-      return { id: partidaId, started_at: agora };
-    });
+    console.log(`   ✅ Partida INDIVIDUAL criada: ${partidaId}`);
+    console.log(`   📝 Participantes serão criados sob demanda na primeira leitura`);
 
-    console.log(`   ✅ Partida criada: ${partida.id}`);
     return {
-      partida_id: partida.id,
-      started_at: partida.started_at,
-      participants: participantes.length,
-      checkpoints: checkpoints.length,
+      partida_id: partidaId,
+      started_at: agora,
+      message: 'Partida criada - participantes sob demanda',
     };
   } catch (err) {
     console.error('❌ [ZONE-INDIVIDUAL-DB] Erro ao iniciar jogo:', err);
@@ -162,7 +115,8 @@ async function processZoneConquestIndividualScan({
     console.log(`   📋 Partida: ${partida.id}, Version: ${partida.version}`);
 
     // 2. Obter participant state com VERSIONNING (para optimistic locking)
-    const participantState = await queryOne(
+    // Se não existir, criar sob demanda
+    let participantState = await queryOne(
       `SELECT * FROM zone_conquest_individual_participant_states
        WHERE partida_id = @partidaId
          AND crianca_id = @criancaId`,
@@ -173,11 +127,30 @@ async function processZoneConquestIndividualScan({
     );
 
     if (!participantState) {
-      console.log(`   ❌ Estado do participante não encontrado`);
-      return {
-        accepted: false,
-        error: 'Participante não registrado neste jogo',
-      };
+      console.log(`   📝 Participant state não encontrado - criando sob demanda...`);
+      // Criar participant state sob demanda
+      const participantId = uuidv4();
+      await query(
+        `INSERT INTO zone_conquest_individual_participant_states
+         (id, partida_id, empresa_id, evento_id, crianca_id, status, checkpoints_read, total_points, ranking, version, started_at, created_at, updated_at)
+         VALUES (@id, @partidaId, @empresaId, @eventoId, @criancaId, 'active', 0, 0, NULL, 0, @agora, @agora, @agora)`,
+        {
+          id: participantId,
+          partidaId: partida.id,
+          empresaId: crianca.empresa_id,
+          eventoId,
+          criancaId: crianca.id,
+          agora: now,
+        }
+      );
+      console.log(`   ✅ Participant state criado: ${participantId}`);
+      
+      // Recarregar o state
+      participantState = await queryOne(
+        `SELECT * FROM zone_conquest_individual_participant_states
+         WHERE id = @id`,
+        { id: participantId }
+      );
     }
 
     // 3. Validar se leitura já foi processada (CONSTRAINT UNIQUE em leitura_id)
