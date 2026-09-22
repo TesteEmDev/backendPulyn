@@ -312,8 +312,21 @@ async function processZoneConquestIndividualScan({
  */
 async function recalculateRanking(txOrDb, partidaId) {
   try {
+    // Dentro de transação, usar tx.allQuery, fora usar allQuery direta
+    let queryFn, allQueryFn;
+    
+    if (txOrDb.allQuery) {
+      // Dentro de transação
+      queryFn = txOrDb.query;
+      allQueryFn = txOrDb.allQuery;
+    } else {
+      // Fora de transação (fallback - não deveria acontecer)
+      queryFn = query;
+      allQueryFn = allQuery;
+    }
+
     // Buscar todos os participantes ordenados por pontos
-    const participantes = await (txOrDb.allQuery || allQuery)(
+    const participantes = await allQueryFn(
       `SELECT id FROM zone_conquest_individual_participant_states
        WHERE partida_id = @partidaId
        ORDER BY total_points DESC`,
@@ -322,7 +335,7 @@ async function recalculateRanking(txOrDb, partidaId) {
 
     // Atualizar ranking
     for (let i = 0; i < participantes.length; i++) {
-      await (txOrDb.query || query)(
+      await queryFn(
         `UPDATE zone_conquest_individual_participant_states SET
            ranking = @ranking
          WHERE id = @id`,
