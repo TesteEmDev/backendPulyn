@@ -620,6 +620,23 @@ router.post('/', async (req, res) => {
     const zoneConquestTeamGame = await getActiveZoneConquestTeamGame(checkpoint.evento_id);
     const zoneConquestIndividualGame = await getActiveZoneConquestIndividualGame(checkpoint.evento_id);
 
+    // 🔍 Recuperar sessionId ativo do banco (em vez de usar global que não persiste no Render)
+    let activeSessionId = null;
+    if (zoneConquestTeamGame || zoneConquestIndividualGame) {
+      const activeSession = await queryOne(
+        `SELECT id FROM game_sessions 
+         WHERE LOWER(evento_id) = LOWER(@eventoId) 
+           AND status = 'active'
+         ORDER BY started_at DESC
+         LIMIT 1`,
+        { eventoId: checkpoint.evento_id }
+      );
+      if (activeSession) {
+        activeSessionId = activeSession.id;
+        console.log(`   🔍 [SESSÃO] sessionId recuperada do banco: ${activeSessionId}`);
+      }
+    }
+
     if (zoneConquestTeamGame) {
       console.log(`\n🎮 [ZONE-TEAM] Processando leitura de checkpoint...`);
       
@@ -630,7 +647,7 @@ router.post('/', async (req, res) => {
         brincadeiraId: zoneConquestTeamGame.brincadeira_id,
         uid: normalizedUid,
         leituraId,
-        sessionId: global.currentSessionId || null,
+        sessionId: activeSessionId || null,
         now,
       });
 
@@ -686,7 +703,7 @@ router.post('/', async (req, res) => {
         brincadeiraId: zoneConquestIndividualGame.brincadeira_id,
         uid: normalizedUid,
         leituraId,
-        sessionId: global.currentSessionId || null,
+        sessionId: activeSessionId || null,
         now,
       });
 
