@@ -136,6 +136,7 @@ async function processZoneConquestTeamScan({
   brincadeiraId,
   uid,
   leituraId,
+  sessionId = null,
   now = new Date(),
 }) {
   if (!eventoId || !checkpointId || !crianca || !leituraId) {
@@ -243,10 +244,10 @@ async function processZoneConquestTeamScan({
           points: pontos,
           signal: -45,
           empresaId: crianca.empresa_id,
-          sessionId: global.currentSessionId || null,
+          sessionId: sessionId || null,
         }
       );
-      console.log(`   📝 [LEITURA] Inserida em leituras com session_id=${global.currentSessionId || 'NULL'}`);
+      console.log(`   📝 [LEITURA] Inserida em leituras com session_id=${sessionId || 'NULL'}`);
 
       // UPDATE tempo: incrementar checkpoints_read e pontos
       await tx.query(

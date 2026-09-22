@@ -129,6 +129,7 @@ async function processZoneConquestIndividualScan({
   brincadeiraId,
   uid,
   leituraId,
+  sessionId = null,
   now = new Date(),
 }) {
   if (!eventoId || !checkpointId || !crianca || !leituraId) {
@@ -248,7 +249,7 @@ async function processZoneConquestIndividualScan({
           points: pontos,
           signal: -45,
           empresaId: crianca.empresa_id,
-          sessionId: global.currentSessionId || null,
+          sessionId: sessionId || null,
         }
       );
 

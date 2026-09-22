@@ -630,6 +630,7 @@ router.post('/', async (req, res) => {
         brincadeiraId: zoneConquestTeamGame.brincadeira_id,
         uid: normalizedUid,
         leituraId,
+        sessionId: global.currentSessionId || null,
         now,
       });
 
@@ -685,6 +686,7 @@ router.post('/', async (req, res) => {
         brincadeiraId: zoneConquestIndividualGame.brincadeira_id,
         uid: normalizedUid,
         leituraId,
+        sessionId: global.currentSessionId || null,
         now,
       });
 
