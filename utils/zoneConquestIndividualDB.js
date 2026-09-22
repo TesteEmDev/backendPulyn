@@ -443,11 +443,12 @@ async function getZoneConquestIndividualStatus(eventoId) {
       status: partida.status,
       version: partida.version,
       participants: participantes.map(p => ({
-        participant_id: p.crianca_id,
+        criancaId: p.crianca_id,
         name: p.name,
-        total_points: p.total_points,
-        checkpoints_read: p.checkpoints_read,
+        totalPoints: p.total_points,
+        checkpointsRead: p.checkpoints_read,
         ranking: p.ranking,
+        color: `hsl(${Math.random() * 360}, 70%, 60%)`, // Generate random color for each participant
         status: p.status,
       })),
       dominated_checkpoints: dominatedCheckpoints.length,
