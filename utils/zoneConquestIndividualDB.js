@@ -44,8 +44,8 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
     await query(
       `INSERT INTO zone_conquest_individual_partidas
-       (id, empresa_id, evento_id, brincadeira_id, status, round_number, started_at, created_at, updated_at)
-       VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', 1, @startedAt, @startedAt, @startedAt)`,
+       (id, empresa_id, evento_id, brincadeira_id, status, started_at, created_at, updated_at)
+       VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', @startedAt, @startedAt, @startedAt)`,
       {
         id: partidaId,
         empresaId: evento.empresa_id,
