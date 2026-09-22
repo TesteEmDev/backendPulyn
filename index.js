@@ -658,7 +658,18 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         } = require('./utils/zoneConquestStateManager');
         
         // Determinar o modo do jogo (TEAM ou INDIVIDUAL)
-        const zoneMode = (zoneConquestMode || 'team').toLowerCase();
+        // Tentar obter do parâmetro ou inferir do nome do jogo
+        let zoneMode = (zoneConquestMode || 'team').toLowerCase();
+        
+        // Se não foi passado explicitamente, tentar extrair do nome do jogo
+        if (!zoneConquestMode && gameName) {
+          const nameUpper = String(gameName).toUpperCase();
+          if (nameUpper.includes('INDIVIDUAL')) {
+            zoneMode = 'individual';
+          } else if (nameUpper.includes('EQUIPE') || nameUpper.includes('TEAM')) {
+            zoneMode = 'team';
+          }
+        }
         
         if (!['team', 'individual'].includes(zoneMode)) {
           throw new Error(`Modo inválido: ${zoneMode}. Use 'team' ou 'individual'`);
