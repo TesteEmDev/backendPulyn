@@ -272,8 +272,8 @@ async function processZoneConquestIndividualScan({
       // );
       console.log(`   🎨 [ZONE-INDIVIDUAL] Checkpoint ${checkpointId} conquistado por participante ${crianca.id}`);
 
-      // Recalcular ranking para a partida
-      await recalculateRanking(tx, partida.id);
+      // TODO: Recalcular ranking para a partida (precisa ser feito corretamente com transação)
+      // await recalculateRanking(tx, partida.id);
 
       return {
         accepted: true,
