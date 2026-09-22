@@ -648,31 +648,6 @@ router.post('/', async (req, res) => {
 
       console.log(`   ✅ [ZONE-TEAM] Leitura aceita!`);
       
-      // 🆕 INSERT em leituras para que scoreLog funcione
-      try {
-        await query(
-          `INSERT INTO leituras
-            (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-             points_awarded, signal_strength, empresa_id, session_id)
-           VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                   @points, @signal, @empresaId, @sessionId)`,
-          {
-            id: leituraId,
-            checkpointId,
-            criancaId: crianca.id,
-            uid: normalizedUid,
-            brincadeiraId: zoneConquestTeamGame.brincadeira_id || null,
-            points: scanResult.points,
-            signal: -45,
-            empresaId: crianca.empresa_id,
-            sessionId: global.currentSessionId || null,
-          }
-        );
-        console.log(`   📝 [LEITURA] Inserida em leituras com session_id=${global.currentSessionId || 'NULL'}`);
-      } catch (insertError) {
-        console.error(`   ❌ [LEITURA] ERRO ao inserir em leituras:`, insertError.message);
-      }
-      
       broadcastEvent({
         type: 'ZONE_CONQUEST_TEAM_SCAN',
         payload: {
