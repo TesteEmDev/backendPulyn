@@ -113,4 +113,111 @@ router.post('/logout', async (req, res) => {
   }
 });
 
+// Registro direto: criar conta familiar sem convite
+// POST /auth/register
+router.post('/register', async (req, res) => {
+  try {
+    const { email, password, name, family_name } = req.body;
+
+    if (!email || !password || !name) {
+      console.log('❌ Email, senha ou nome não fornecidos');
+      return res.status(400).json({ error: 'Email, senha e nome são obrigatórios' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+    const hashedPassword = Buffer.from(String(password)).toString('base64');
+
+    console.log('🔍 Verificando se email já existe:', normalizedEmail);
+    
+    // Verificar se email já existe
+    const existingLogin = await queryOne(
+      'SELECT id, role, status FROM logins WHERE LOWER(email) = @email',
+      { email: normalizedEmail }
+    );
+
+    if (existingLogin) {
+      console.log('❌ Email já registrado:', normalizedEmail);
+      return res.status(409).json({ error: 'Este email já foi registrado' });
+    }
+
+    // Validações
+    if (String(password).length < 6) {
+      return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
+    }
+
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Email inválido' });
+    }
+
+    console.log('📝 Criando nova empresa para família...');
+    
+    // Criar empresa para a família (buffet pessoal)
+    const crypto = require('crypto');
+    const empresaId = crypto.randomUUID();
+    
+    await query(
+      `INSERT INTO empresas (id, nome, plano, status, data_criacao)
+       VALUES (@id, @nome, 'family', 'active', GETDATE())`,
+      { 
+        id: empresaId, 
+        nome: `${name}'s Family` 
+      }
+    );
+
+    console.log('✅ Empresa criada:', empresaId);
+
+    // Criar login para a família
+    const loginId = crypto.randomUUID();
+    console.log('📝 Criando login para família...');
+    
+    await query(
+      `INSERT INTO logins (id, empresa_id, email, password, family_name, role, status, data_criacao)
+       VALUES (@id, @empresaId, @email, @password, @familyName, 'family', 'active', GETDATE())`,
+      {
+        id: loginId,
+        empresaId: empresaId,
+        email: normalizedEmail,
+        password: hashedPassword,
+        familyName: family_name || name
+      }
+    );
+
+    console.log('✅ Login criado:', loginId);
+
+    // Gerar JWT
+    const token = jwt.sign(
+      {
+        id: loginId,
+        email: normalizedEmail,
+        empresa_id: empresaId,
+        empresa_nome: `${name}'s Family`,
+        role: 'family'
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    console.log('✅ Registro bem-sucedido para:', normalizedEmail);
+
+    res.status(201).json({
+      success: true,
+      message: 'Conta criada com sucesso',
+      token: token,
+      user: {
+        id: loginId,
+        email: normalizedEmail,
+        name: name,
+        family_name: family_name || name,
+        role: 'family',
+        empresa_id: empresaId,
+        empresa_nome: `${name}'s Family`
+      }
+    });
+
+  } catch (err) {
+    console.error('❌ Erro ao registrar:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
