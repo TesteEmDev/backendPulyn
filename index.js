@@ -63,6 +63,10 @@ const {
   startMonsterGame,
   stopMonsterGame,
 } = require('./utils/monster');
+const {
+  startZoneConquestIndividual,
+  stopZoneConquestIndividual,
+} = require('./utils/zoneConquestIndividualDB');
 
 const app = express();
 const server = http.createServer(app);
@@ -702,18 +706,16 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             );
             console.log(`   ✓ Partida TEAM criada: ${partidaId}`);
           } else if (zoneMode === 'individual') {
-            const partidaId = require('uuid').v4();
-            await query(
-              `INSERT INTO zone_conquest_individual_partidas (id, evento_id, empresa_id, brincadeira_id, status, round_number, started_at, created_at, updated_at)
-               VALUES (@id, @eventoId, @empresaId, @brincadeiraId, 'active', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
-              {
-                id: partidaId,
-                eventoId,
-                empresaId: evento.empresa_id,
-                brincadeiraId: gameId,
-              }
-            );
-            console.log(`   ✓ Partida INDIVIDUAL criada: ${partidaId}`);
+            // 🆕 Inicializar Zone Conquest INDIVIDUAL com participant states
+            console.log(`   🎯 [INICIAR-JOGO] Inicializando modo INDIVIDUAL...`);
+            try {
+              const indivResult = await startZoneConquestIndividual(eventoId, gameId);
+              console.log(`   ✓ Zone Conquest INDIVIDUAL iniciado:`, indivResult);
+              console.log(`   ✓ Participants states inicializados para modo INDIVIDUAL`);
+            } catch (indivErr) {
+              console.error(`   ❌ [INICIAR-JOGO] Erro ao inicializar INDIVIDUAL:`, indivErr);
+              console.warn(`   ⚠️ Erro ao inicializar participants states: ${indivErr.message}`);
+            }
           }
           
           console.log(`   ✓ Zone Conquest iniciado (Modo: ${zoneMode})`);

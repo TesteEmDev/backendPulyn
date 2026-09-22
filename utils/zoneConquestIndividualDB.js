@@ -370,6 +370,7 @@ async function recalculateRanking(txOrDb, partidaId) {
  */
 async function getActiveZoneConquestIndividualGame(eventoId) {
   try {
+    console.log(`   🔍 [ZONE-INDIVIDUAL] Buscando partida ativa para evento: ${eventoId}`);
     const partida = await queryOne(
       `SELECT * FROM zone_conquest_individual_partidas
        WHERE LOWER(evento_id) = LOWER(@eventoId)
@@ -378,9 +379,14 @@ async function getActiveZoneConquestIndividualGame(eventoId) {
       { eventoId }
     );
 
+    if (partida) {
+      console.log(`   ✅ [ZONE-INDIVIDUAL] Partida encontrada: ${partida.id}`);
+    } else {
+      console.log(`   ❌ [ZONE-INDIVIDUAL] Nenhuma partida INDIVIDUAL ativa encontrada`);
+    }
     return partida || null;
   } catch (err) {
-    console.error('❌ Erro ao buscar partida ativa:', err);
+    console.error('❌ [ZONE-INDIVIDUAL] Erro ao buscar partida ativa:', err);
     return null;
   }
 }
