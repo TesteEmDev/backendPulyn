@@ -701,6 +701,19 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
               }
             );
             console.log(`   ✓ Partida TEAM criada: ${partidaId}`);
+          } else if (zoneMode === 'individual') {
+            const partidaId = require('uuid').v4();
+            await query(
+              `INSERT INTO zone_conquest_individual_partidas (id, evento_id, empresa_id, brincadeira_id, status, round_number, started_at, created_at, updated_at)
+               VALUES (@id, @eventoId, @empresaId, @brincadeiraId, 'active', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+              {
+                id: partidaId,
+                eventoId,
+                empresaId: evento.empresa_id,
+                brincadeiraId: gameId,
+              }
+            );
+            console.log(`   ✓ Partida INDIVIDUAL criada: ${partidaId}`);
           }
           
           console.log(`   ✓ Zone Conquest iniciado (Modo: ${zoneMode})`);
@@ -1920,6 +1933,88 @@ async function startServer() {
   } catch (err) {
     console.error('⚠️ Erro na migração 022 do Caça ao Tesouro:', err.message, '\n');
   }
+
+  // ✨ Migração 023: Partidas individuais do Zone Conquest
+  try {
+    await query(`
+      IF OBJECT_ID('dbo.zone_conquest_individual_partidas', 'U') IS NULL
+      BEGIN
+        CREATE TABLE zone_conquest_individual_partidas (
+          id NVARCHAR(36) NOT NULL PRIMARY KEY,
+          evento_id NVARCHAR(36) NOT NULL,
+          empresa_id NVARCHAR(36) NOT NULL,
+          brincadeira_id NVARCHAR(36) NOT NULL,
+          status NVARCHAR(20) NOT NULL,
+          round_number INT NOT NULL,
+          started_at DATETIME2 NULL,
+          finished_at DATETIME2 NULL,
+          created_at DATETIME2 DEFAULT GETDATE(),
+          updated_at DATETIME2 DEFAULT GETDATE()
+        )
+      END
+    `);
+    console.log('✅ Migração 023 - Tabela zone_conquest_individual_partidas criada!\n');
+  } catch (err) {
+    console.error('⚠️ Erro na migração 023 (Zone Conquest Individual):', err.message, '\n');
+  }
+
+  // ✨ Migração 024: Estados dos participantes no Zone Conquest Individual
+  try {
+    await query(`
+      IF OBJECT_ID('dbo.zone_conquest_individual_participant_states', 'U') IS NULL
+      BEGIN
+        CREATE TABLE zone_conquest_individual_participant_states (
+          id NVARCHAR(36) NOT NULL PRIMARY KEY,
+          partida_id NVARCHAR(36) NOT NULL,
+          empresa_id NVARCHAR(36) NOT NULL,
+          evento_id NVARCHAR(36) NOT NULL,
+          crianca_id NVARCHAR(36) NOT NULL,
+          status NVARCHAR(20) NOT NULL,
+          checkpoints_read INT DEFAULT 0,
+          total_points DECIMAL(10, 2) DEFAULT 0,
+          ranking INT NULL,
+          version INT DEFAULT 0,
+          started_at DATETIME2 NULL,
+          finished_at DATETIME2 NULL,
+          created_at DATETIME2 DEFAULT GETDATE(),
+          updated_at DATETIME2 DEFAULT GETDATE(),
+          FOREIGN KEY (partida_id) REFERENCES zone_conquest_individual_partidas(id)
+        )
+      END
+    `);
+    console.log('✅ Migração 024 - Tabela zone_conquest_individual_participant_states criada!\n');
+  } catch (err) {
+    console.error('⚠️ Erro na migração 024 (Zone Conquest Participant States):', err.message, '\n');
+  }
+
+  // ✨ Migração 025: Scans individuais do Zone Conquest
+  try {
+    await query(`
+      IF OBJECT_ID('dbo.zone_conquest_individual_scans', 'U') IS NULL
+      BEGIN
+        CREATE TABLE zone_conquest_individual_scans (
+          id NVARCHAR(36) NOT NULL PRIMARY KEY,
+          partida_id NVARCHAR(36) NOT NULL,
+          empresa_id NVARCHAR(36) NOT NULL,
+          evento_id NVARCHAR(36) NOT NULL,
+          brincadeira_id NVARCHAR(36) NOT NULL,
+          checkpoint_id NVARCHAR(36) NOT NULL,
+          crianca_id NVARCHAR(36) NOT NULL,
+          uid NVARCHAR(50) NOT NULL,
+          leitura_id NVARCHAR(36) NOT NULL UNIQUE,
+          points_awarded DECIMAL(10, 2),
+          version INT DEFAULT 0,
+          scanned_at DATETIME2 NULL,
+          created_at DATETIME2 DEFAULT GETDATE(),
+          FOREIGN KEY (partida_id) REFERENCES zone_conquest_individual_partidas(id)
+        )
+      END
+    `);
+    console.log('✅ Migração 025 - Tabela zone_conquest_individual_scans criada!\n');
+  } catch (err) {
+    console.error('⚠️ Erro na migração 025 (Zone Conquest Individual Scans):', err.message, '\n');
+  }
+
   } else {
     console.log('ℹ️ Migrações T-SQL do SQL Server ignoradas: DB_DRIVER=postgres.\n');
   }
