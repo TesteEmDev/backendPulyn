@@ -496,18 +496,23 @@ router.get('/active-event', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Nenhum evento associado' });
     }
 
-    // Buscar evento com status
+    // Buscar evento com brincadeira ativa (jogo ativo)
     const activeEvent = await queryOne(`
       SELECT e.id, e.name, e.date, e.status, e.empresa_id,
+             e.active_game_type, e.active_brincadeira_id,
+             b.name as active_game_name, b.type as game_type, b.description as game_description,
              COUNT(DISTINCT c.id) as child_count,
              COUNT(DISTINCT t.id) as team_count,
              COUNT(DISTINCT cp.id) as checkpoint_count
       FROM eventos e
+      LEFT JOIN brincadeiras b ON b.id = e.active_brincadeira_id
       LEFT JOIN criancas c ON c.evento_id = e.id
       LEFT JOIN times t ON t.evento_id = e.id
       LEFT JOIN checkpoints cp ON cp.evento_id = e.id AND cp.checkpoint_purpose != 'reception'
       WHERE e.id = @eventoId
-      GROUP BY e.id, e.name, e.date, e.status, e.empresa_id
+      GROUP BY e.id, e.name, e.date, e.status, e.empresa_id,
+               e.active_game_type, e.active_brincadeira_id,
+               b.name, b.type, b.description
     `, { eventoId: firstChild.evento_id });
 
     if (!activeEvent) {
@@ -515,7 +520,8 @@ router.get('/active-event', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    console.log(`✅ [FAMILIAS] Evento ativo encontrado: ${activeEvent.name} (${activeEvent.status})`);
+    console.log(`✅ [FAMILIAS] Evento ativo encontrado: ${activeEvent.name}`);
+    console.log(`   🎮 Jogo ativo: ${activeEvent.active_game_name || 'Nenhum jogo ativo'}`);
 
     // Montar resposta com info do jogo ativo
     res.json({
@@ -525,10 +531,18 @@ router.get('/active-event', verifyToken, async (req, res) => {
         name: activeEvent.name,
         date: activeEvent.date,
         status: activeEvent.status,
+        // 🎮 Info do jogo ativo
+        gameId: activeEvent.active_brincadeira_id || null,
+        gameName: activeEvent.active_game_name || 'Nenhum jogo em andamento',
+        gameType: activeEvent.active_game_type || 'none',
+        gameTypeDetail: activeEvent.game_type || null,
+        gameDescription: activeEvent.game_description || null,
+        // 📊 Contadores
         childCount: activeEvent.child_count || 0,
         teamCount: activeEvent.team_count || 0,
         checkpointCount: activeEvent.checkpoint_count || 0,
-        isActive: activeEvent.status === 'active'
+        isActive: activeEvent.status === 'active',
+        hasActiveGame: !!activeEvent.active_brincadeira_id
       }
     });
   } catch (error) {
