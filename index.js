@@ -629,8 +629,12 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // ✅ IMPORTANTE: Atualizar o banco de dados
     console.log(`📝 [INICIAR-JOGO] Atualizando evento no banco de dados...`);
     const updateResult = await query(
-      `UPDATE eventos SET status = @status WHERE LOWER(id) = LOWER(@eventoId)`,
-      { status: 'active', eventoId }
+      `UPDATE eventos SET 
+        status = @status, 
+        active_brincadeira_id = @gameId,
+        active_game_type = @gameType
+       WHERE LOWER(id) = LOWER(@eventoId)`,
+      { status: 'active', eventoId, gameId, gameType }
     );
     console.log(`   Atualização executada`);
     
