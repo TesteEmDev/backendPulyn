@@ -396,24 +396,23 @@ router.get('/children', verifyToken, async (req, res) => {
              COALESCE(c.scores, 0) as "currentScore",
              COALESCE(c.scores, 0) as "totalScore",
              l.relationship, l.status as link_status,
-             e.name as evento_name, e.date as evento_date, e.status as evento_status,
              t.id as "teamId", t.name as "teamName", t.color as "teamColor", t.points as team_points
       FROM family_child_links l
       JOIN criancas c ON c.id = l.crianca_id
-      JOIN eventos e ON e.id = c.evento_id
       LEFT JOIN times t ON t.id = c.time_id
       WHERE l.login_id = @loginId AND (l.status = 'approved' OR l.status = 'pending')
-      ORDER BY e.date DESC, c.name ASC
+      ORDER BY c.name ASC
     `, { loginId: req.user.id });
     
     console.log(`📊 [FAMILIAS] Crianças encontradas: ${children.length}`);
     children.forEach((c, idx) => {
-      console.log(`   [${idx}] ${c.nickname || c.name} (status: ${c.link_status})`);
+      console.log(`   [${idx}] ${c.nickname || c.name} → evento_id: ${c.evento_id} (${typeof c.evento_id})`);
     });
     
     // Mapear para o formato esperado pela app
     const mappedChildren = children.map(child => ({
       id: child.id,
+      evento_id: child.evento_id,  // ✅ ADICIONADO - importante para o app mobile!
       name: child.name,
       nickname: child.nickname,
       age: child.age,
@@ -426,6 +425,11 @@ router.get('/children', verifyToken, async (req, res) => {
       rank: 0,
       achievements: []
     }));
+    
+    console.log(`✅ [FAMILIAS] Crianças mapeadas com evento_id:`);
+    mappedChildren.forEach((c, idx) => {
+      console.log(`   [${idx}] ${c.nickname || c.name} → evento_id: ${c.evento_id} (${c.evento_id ? '✓' : '❌'})`);
+    });
     
     res.json({
       success: true,
