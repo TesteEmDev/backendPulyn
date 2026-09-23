@@ -469,6 +469,75 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
 });
 
 /**
+ * ✅ GET /api/familias/active-event
+ * Retorna o evento/jogo ativo para a família
+ * Baseado no evento_id da primeira criança vinculada
+ */
+router.get('/active-event', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') {
+      return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+    }
+
+    console.log(`🎮 [FAMILIAS] GET /active-event chamado para login: ${req.user.id}`);
+
+    // Buscar primeira criança vinculada (aprovada ou pendente)
+    const firstChild = await queryOne(`
+      SELECT c.id, c.evento_id, c.name
+      FROM family_child_links l
+      JOIN criancas c ON c.id = l.crianca_id
+      WHERE l.login_id = @loginId AND (l.status = 'approved' OR l.status = 'pending')
+      ORDER BY c.name ASC
+      LIMIT 1
+    `, { loginId: req.user.id });
+
+    if (!firstChild || !firstChild.evento_id) {
+      console.log(`⚠️ [FAMILIAS] Nenhuma criança com evento_id encontrada`);
+      return res.status(404).json({ error: 'Nenhum evento associado' });
+    }
+
+    // Buscar evento com status
+    const activeEvent = await queryOne(`
+      SELECT e.id, e.name, e.date, e.status, e.empresa_id,
+             COUNT(DISTINCT c.id) as child_count,
+             COUNT(DISTINCT t.id) as team_count,
+             COUNT(DISTINCT cp.id) as checkpoint_count
+      FROM eventos e
+      LEFT JOIN criancas c ON c.evento_id = e.id
+      LEFT JOIN times t ON t.evento_id = e.id
+      LEFT JOIN checkpoints cp ON cp.evento_id = e.id AND cp.checkpoint_purpose != 'reception'
+      WHERE e.id = @eventoId
+      GROUP BY e.id, e.name, e.date, e.status, e.empresa_id
+    `, { eventoId: firstChild.evento_id });
+
+    if (!activeEvent) {
+      console.log(`⚠️ [FAMILIAS] Evento não encontrado: ${firstChild.evento_id}`);
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+
+    console.log(`✅ [FAMILIAS] Evento ativo encontrado: ${activeEvent.name} (${activeEvent.status})`);
+
+    // Montar resposta com info do jogo ativo
+    res.json({
+      success: true,
+      activeGame: {
+        id: activeEvent.id,
+        name: activeEvent.name,
+        date: activeEvent.date,
+        status: activeEvent.status,
+        childCount: activeEvent.child_count || 0,
+        teamCount: activeEvent.team_count || 0,
+        checkpointCount: activeEvent.checkpoint_count || 0,
+        isActive: activeEvent.status === 'active'
+      }
+    });
+  } catch (error) {
+    console.error('❌ [FAMILIAS] Erro ao buscar evento ativo:', error);
+    res.status(500).json({ error: 'Erro ao buscar evento ativo', details: error.message });
+  }
+});
+
+/**
  * ✅ GET /api/familias/notifications
  * Lista notificações da família
  * Implementação básica: por enquanto retorna lista vazia
