@@ -710,6 +710,105 @@ router.delete('/:id', verifyToken, async (req, res) => {
   }
 });
 
+/**
+ * ✅ POST /:evento_id/setup-active-game
+ * Configura uma brincadeira como ativa no evento
+ * Se brincadeiraId não for fornecido, cria uma nova "Captura de Territórios"
+ */
+router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+  try {
+    const evento_id = req.params.evento_id;
+    const { brincadeiraId } = req.body || {};
+    
+    console.log(`🎮 [routes/events.js] Configurando jogo ativo para evento: ${evento_id}`);
+
+    // 1️⃣ Validar evento existe e pertence à empresa
+    const evento = await queryOne(
+      isMaster(req)
+        ? 'SELECT id, empresa_id, name FROM eventos WHERE id = @id'
+        : 'SELECT id, empresa_id, name FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
+      isMaster(req) 
+        ? { id: evento_id }
+        : { id: evento_id, empresa_id: req.user.empresa_id }
+    );
+
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado ou acesso negado' });
+    }
+
+    let finalBrincadeiraId = brincadeiraId;
+
+    // 2️⃣ Se não forneceu ID, criar nova brincadeira
+    if (!finalBrincadeiraId) {
+      console.log(`   📝 Criando nova brincadeira para evento ${evento.name}`);
+      
+      const newBrincadeiraId = require('uuid').v4().toString();
+      
+      await query(`
+        INSERT INTO brincadeiras (id, name, description, type, game_type, status, default_points, empresa_id, duration)
+        VALUES (@id, @name, @description, @type, @gameType, @status, @points, @empresa_id, @duration)
+      `, {
+        id: newBrincadeiraId,
+        name: 'Captura de Territórios',
+        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseiras em checkpoints',
+        type: 'team',
+        gameType: 'standard',
+        status: 'active',
+        points: 10,
+        empresa_id: evento.empresa_id,
+        duration: 120
+      });
+      
+      finalBrincadeiraId = newBrincadeiraId;
+      console.log(`   ✅ Brincadeira criada: ${finalBrincadeiraId}`);
+    }
+
+    // 3️⃣ Validar que a brincadeira existe e pertence à empresa
+    const brincadeira = await queryOne(
+      'SELECT id, name, game_type FROM brincadeiras WHERE id = @id AND empresa_id = @empresa_id',
+      { id: finalBrincadeiraId, empresa_id: evento.empresa_id }
+    );
+
+    if (!brincadeira) {
+      return res.status(404).json({ error: 'Brincadeira não encontrada ou não pertence à empresa' });
+    }
+
+    // 4️⃣ Atualizar evento
+    await query(`
+      UPDATE eventos
+      SET 
+        active_brincadeira_id = @brincadeiraId,
+        active_game_type = @gameType,
+        status = 'active'
+      WHERE id = @id
+    `, {
+      id: evento_id,
+      brincadeiraId: finalBrincadeiraId,
+      gameType: brincadeira.game_type || 'standard'
+    });
+
+    console.log(`   ✅ Evento atualizado com brincadeira: ${brincadeira.name}`);
+
+    // 5️⃣ Retornar resultado
+    res.json({
+      success: true,
+      message: 'Jogo ativo configurado com sucesso',
+      evento: {
+        id: evento.id,
+        name: evento.name,
+      },
+      brincadeira: {
+        id: brincadeira.id,
+        name: brincadeira.name,
+        game_type: brincadeira.game_type,
+      }
+    });
+  } catch (err) {
+    console.error('❌ Erro ao configurar jogo ativo:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
 // ==================== ZONAS DO MAPA ====================
