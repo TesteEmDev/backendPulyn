@@ -509,14 +509,32 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
 // Planta do evento: armazenada no banco para sobreviver a reload/redeploy do frontend.
 router.get('/:id/floor-plan', verifyToken, async (req, res) => {
   try {
-    const evento = await queryOne(
-      isMaster(req)
-        ? 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id'
-        : 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
-      isMaster(req) ? { id: req.params.id } : { id: req.params.id, empresa_id: req.user.empresa_id }
-    );
+    // 🎯 Para family role: verificar se tem criança vinculada neste evento
+    let query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+    let params = { id: req.params.id };
+    
+    if (isMaster(req)) {
+      // Master: acesso total
+      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+    } else if (req.user.role === 'family') {
+      // Family: só pode ver eventos onde tem criança vinculada
+      query = `
+        SELECT DISTINCT e.id, e.empresa_id, e.floor_plan_data, e.floor_plan_name, e.floor_plan_type 
+        FROM eventos e
+        JOIN criancas c ON c.evento_id = e.id
+        JOIN family_child_links l ON l.crianca_id = c.id
+        WHERE e.id = @id AND l.login_id = @loginId AND (l.status = 'approved' OR l.status = 'pending')
+      `;
+      params.loginId = req.user.id;
+    } else {
+      // Admin/Reception: vê eventos da sua empresa
+      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id AND empresa_id = @empresa_id';
+      params.empresa_id = req.user.empresa_id;
+    }
+    
+    const evento = await queryOne(query, params);
 
-    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado ou você não tem permissão' });
     res.json({
       eventId: evento.id,
       floorPlan: evento.floor_plan_data
