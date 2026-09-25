@@ -191,6 +191,30 @@ async function processZoneConquestIndividualScan({
       };
     }
 
+    // 3b. Regra de releitura: só pode ler de novo o MESMO checkpoint depois
+    // de ler outros 3 checkpoints. Olhamos as últimas 3 leituras aceitas
+    // deste participante nesta partida — se este checkpoint aparecer entre
+    // elas, ainda não passou tempo/leituras suficientes.
+    const recentScans = await allQuery(
+      `SELECT checkpoint_id FROM zone_conquest_individual_scans
+       WHERE partida_id = @partidaId AND crianca_id = @criancaId
+       ORDER BY scanned_at DESC
+       LIMIT 3`,
+      { partidaId: partida.id, criancaId: crianca.id }
+    );
+    const repeatedTooSoon = recentScans.some((scan) => String(scan.checkpoint_id) === String(checkpointId));
+    if (repeatedTooSoon) {
+      const otherCheckpointsSince = recentScans.findIndex((scan) => String(scan.checkpoint_id) === String(checkpointId));
+      const remainingReads = 3 - otherCheckpointsSince;
+      console.log(`   ⚠️ Releitura bloqueada: faltam ${remainingReads} checkpoint(s) diferente(s) antes de reler este`);
+      return {
+        accepted: false,
+        error: `Leia outros ${remainingReads} checkpoint(s) antes de reler este`,
+        repeatRestriction: true,
+        remainingReads,
+      };
+    }
+
     // 4. Calcular pontos com multiplicador
     const checkpointsReadCount = participantState.checkpoints_read;
     const basePoints = 10;
