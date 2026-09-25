@@ -431,7 +431,16 @@ router.post('/', async (req, res) => {
             { id: checkpointId }
           );
           
-          console.log(`🎬 [RASTREIO] Monster Hunt - Checkpoint: ${checkpointId}, Coords: map_x=${checkpointData?.map_x}, map_y=${checkpointData?.map_y}`);
+          console.log(`🎬 [RASTREIO] Monster Hunt - Checkpoint: ${checkpointId}`);
+          console.log(`🎬 [RASTREIO]   - checkpointData: ${JSON.stringify(checkpointData)}`);
+          console.log(`🎬 [RASTREIO]   - map_x: ${checkpointData?.map_x} (type: ${typeof checkpointData?.map_x})`);
+          console.log(`🎬 [RASTREIO]   - map_y: ${checkpointData?.map_y} (type: ${typeof checkpointData?.map_y})`);
+          
+          // ⚠️ CRITICAL DEBUG: Se coordinates são NULL, esse é o problema!
+          if (checkpointData?.map_x == null || checkpointData?.map_y == null) {
+            console.error(`❌ [RASTREIO] CRÍTICO: Checkpoint ${checkpointId} não tem coordenadas! map_x=${checkpointData?.map_x}, map_y=${checkpointData?.map_y}`);
+            console.error(`   Verifique se a coluna 'map_x' e 'map_y' existem e têm valores para este checkpoint`);
+          }
           
           const territoryPayload = {
             type: 'TERRITORY_CONQUERED',
@@ -453,7 +462,12 @@ router.post('/', async (req, res) => {
             }
           };
           
-          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Monster Hunt:`, JSON.stringify(territoryPayload, null, 2));
+          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Monster Hunt:`);
+          console.log(`   - Destinatário: evento ${crianca.evento_id}`);
+          console.log(`   - Criança: ${crianca.name}`);
+          console.log(`   - Checkpoint: ${checkpointId}`);
+          console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
+          console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
           broadcast(territoryPayload);
         }
 
@@ -565,6 +579,17 @@ router.post('/', async (req, res) => {
             { id: checkpointId }
           );
           
+          console.log(`🎬 [RASTREIO] Treasure Hunt - Checkpoint: ${checkpointId}`);
+          console.log(`🎬 [RASTREIO]   - checkpointCoords: ${JSON.stringify(checkpointCoords)}`);
+          console.log(`🎬 [RASTREIO]   - map_x: ${checkpointCoords?.map_x} (type: ${typeof checkpointCoords?.map_x})`);
+          console.log(`🎬 [RASTREIO]   - map_y: ${checkpointCoords?.map_y} (type: ${typeof checkpointCoords?.map_y})`);
+          
+          // ⚠️ CRITICAL DEBUG: Se coordinates são NULL, esse é o problema!
+          if (checkpointCoords?.map_x == null || checkpointCoords?.map_y == null) {
+            console.error(`❌ [RASTREIO] CRÍTICO: Checkpoint ${checkpointId} não tem coordenadas! map_x=${checkpointCoords?.map_x}, map_y=${checkpointCoords?.map_y}`);
+            console.error(`   Verifique se a coluna 'map_x' e 'map_y' existem e têm valores para este checkpoint`);
+          }
+          
           const territoryPayload = {
             type: 'TERRITORY_CONQUERED',
             payload: {
@@ -585,7 +610,12 @@ router.post('/', async (req, res) => {
             }
           };
           
-          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Treasure Hunt:`, JSON.stringify(territoryPayload, null, 2));
+          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Treasure Hunt:`);
+          console.log(`   - Destinatário: evento ${checkpoint.evento_id}`);
+          console.log(`   - Criança: ${crianca.name}`);
+          console.log(`   - Checkpoint: ${checkpointId}`);
+          console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
+          console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
           broadcast(territoryPayload);
         }
 
@@ -873,7 +903,18 @@ router.post('/', async (req, res) => {
       { id: checkpointId }
     );
     
-    broadcast({
+    console.log(`🎬 [RASTREIO] Zone Conquest - Checkpoint: ${checkpointId}`);
+    console.log(`🎬 [RASTREIO]   - checkpointCoords: ${JSON.stringify(checkpointCoords)}`);
+    console.log(`🎬 [RASTREIO]   - map_x: ${checkpointCoords?.map_x} (type: ${typeof checkpointCoords?.map_x})`);
+    console.log(`🎬 [RASTREIO]   - map_y: ${checkpointCoords?.map_y} (type: ${typeof checkpointCoords?.map_y})`);
+    
+    // ⚠️ CRITICAL DEBUG: Se coordinates são NULL, esse é o problema!
+    if (checkpointCoords?.map_x == null || checkpointCoords?.map_y == null) {
+      console.error(`❌ [RASTREIO] CRÍTICO: Checkpoint ${checkpointId} não tem coordenadas! map_x=${checkpointCoords?.map_x}, map_y=${checkpointCoords?.map_y}`);
+      console.error(`   Verifique se a coluna 'map_x' e 'map_y' existem e têm valores para este checkpoint`);
+    }
+    
+    const zonePayload = {
       type: 'TERRITORY_CONQUERED',
       payload: {
         id: leituraId,
@@ -886,12 +927,21 @@ router.post('/', async (req, res) => {
         points: pointsAwarded,
         lockDurationSeconds: 15,
         timestamp: now.toISOString(),
-        eventoId: crianca.evento_id,  // ✨ NOVO: Adicionar evento_id para broadcast por sala
+        eventoId: crianca.evento_id,
         gameType: 'zone_conquest',
         mapX: checkpointCoords?.map_x,
         mapY: checkpointCoords?.map_y,
       }
-    });
+    };
+    
+    console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Zone Conquest:`);
+    console.log(`   - Destinatário: evento ${crianca.evento_id}`);
+    console.log(`   - Criança: ${crianca.name}`);
+    console.log(`   - Checkpoint: ${checkpointId}`);
+    console.log(`   - Coordenadas: mapX=${zonePayload.payload.mapX}, mapY=${zonePayload.payload.mapY}`);
+    console.log(`   - Estrutura completa: ${JSON.stringify(zonePayload, null, 2)}`);
+    
+    broadcast(zonePayload);
     
     console.log(`✅ [LEITURA] Pontos processados com sucesso!\n`);
     
