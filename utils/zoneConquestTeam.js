@@ -261,6 +261,19 @@ async function processZoneConquestTeamScan({
         }
       );
 
+      // Esse ponto só era gravado em zone_conquest_team_tempos, nunca em
+      // criancas.scores/times.points — que é o que o ranking geral do telão,
+      // o card de Pontuação e o app da família leem.
+      await tx.query(
+        'UPDATE criancas SET scores = scores + @points WHERE id = @criancaId',
+        { points: pontos, criancaId: crianca.id }
+      );
+      await tx.query(
+        `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
+         WHERE id = @timeId`,
+        { timeId: crianca.time_id }
+      );
+
       // UPDATE checkpoint: marcar como dominado por esta equipe
       await tx.query(
         `UPDATE checkpoints SET

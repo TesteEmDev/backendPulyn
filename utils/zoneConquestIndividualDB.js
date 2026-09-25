@@ -279,6 +279,14 @@ async function processZoneConquestIndividualScan({
         };
       }
 
+      // Esse ponto só era gravado em zone_conquest_individual_participant_states,
+      // nunca em criancas.scores — que é o que o ranking geral do telão
+      // ("Top Participantes"), o card de Pontuação e o app da família leem.
+      await tx.query(
+        'UPDATE criancas SET scores = scores + @points WHERE id = @criancaId',
+        { points: pontos, criancaId: crianca.id }
+      );
+
       // UPDATE checkpoint: marcar como dominado pelo participante
       // Em modo INDIVIDUAL, usamos territory_owner_crianca_id (novo campo)
       await tx.query(

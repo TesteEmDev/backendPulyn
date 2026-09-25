@@ -706,6 +706,32 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
               }
             );
             console.log(`   ✓ Partida TEAM criada: ${partidaId}`);
+
+            // Sem essas linhas, o UPDATE de pontuação em processZoneConquestTeamScan
+            // (WHERE partida_id = ... AND time_id = ...) não encontra nenhuma
+            // linha pra atualizar — zone_conquest_team_tempos ficava sempre
+            // vazia e o status dedicado de equipe nunca refletia os pontos.
+            const teamsWithChildren = await allQuery(
+              `SELECT DISTINCT t.id
+               FROM times t
+               INNER JOIN criancas c ON c.time_id = t.id
+               WHERE LOWER(t.evento_id) = LOWER(@eventoId) AND c.status = 'ativo'`,
+              { eventoId }
+            );
+            for (const time of teamsWithChildren) {
+              await query(
+                `INSERT INTO zone_conquest_team_tempos (id, partida_id, empresa_id, evento_id, time_id, status, zones_dominated, checkpoints_read, total_points, started_at)
+                 VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, 'active', 0, 0, 0, CURRENT_TIMESTAMP)`,
+                {
+                  id: require('uuid').v4(),
+                  partidaId,
+                  empresaId: evento.empresa_id,
+                  eventoId,
+                  timeId: time.id,
+                }
+              );
+            }
+            console.log(`   ✓ ${teamsWithChildren.length} time(s) inicializados em zone_conquest_team_tempos`);
           } else if (zoneMode === 'individual') {
             // 🆕 Inicializar Zone Conquest INDIVIDUAL com participant states
             console.log(`   🎯 [INICIAR-JOGO] Inicializando modo INDIVIDUAL...`);
