@@ -633,6 +633,16 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       await stopMonsterGame(eventoId);
     }
 
+    // Fecha qualquer game_session anterior presa como 'active' neste evento.
+    // Sem isso, uma sessão fantasma de um teste anterior (nunca finalizado)
+    // pode ficar com a duração já estourada, e checkExpiredGames acabaria
+    // encerrando o evento inteiro pouco depois deste jogo novo começar.
+    await query(
+      `UPDATE game_sessions SET status = 'finished', finished_at = CURRENT_TIMESTAMP
+       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
+      { eventoId }
+    );
+
     // 🆕 CRIAR NOVO REGISTRO DE SESSÃO NO BANCO
     await query(
       `INSERT INTO game_sessions (id, evento_id, brincadeira_id, game_type, mode, status, started_at, created_at, updated_at)
@@ -1093,6 +1103,8 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
 // ficava 'active' no banco para sempre.
 async function checkExpiredGames() {
   try {
+    // Considera só a sessão 'active' mais recente de cada evento — uma sessão
+    // fantasma mais antiga (nunca finalizada) não pode derrubar o jogo atual.
     const activeSessions = await allQuery(`
       SELECT gs.evento_id, gs.started_at, b.duration
       FROM game_sessions gs
@@ -1100,6 +1112,12 @@ async function checkExpiredGames() {
       WHERE gs.status = 'active'
         AND b.duration IS NOT NULL
         AND b.duration > 0
+        AND NOT EXISTS (
+          SELECT 1 FROM game_sessions gs2
+          WHERE gs2.evento_id = gs.evento_id
+            AND gs2.status = 'active'
+            AND gs2.started_at > gs.started_at
+        )
     `);
 
     const now = Date.now();
