@@ -70,6 +70,7 @@ const {
   startZoneConquestIndividual,
   stopZoneConquestIndividual,
 } = require('./utils/zoneConquestIndividualDB');
+const { stopZoneConquestTeam } = require('./utils/zoneConquestTeam');
 
 const app = express();
 const server = http.createServer(app);
@@ -682,6 +683,11 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         if (evento) {
           // 🔧 Criar partida em zone_conquest_team_partidas
           if (zoneMode === 'team') {
+            // Fecha qualquer partida TEAM anterior presa como 'active' (mesmo
+            // problema que existia no modo individual: sem isso, cada novo
+            // início empilha mais uma linha 'active' e nenhuma é finalizada).
+            await stopZoneConquestTeam(eventoId);
+
             const firstTeam = await queryOne(
               `SELECT id FROM times WHERE LOWER(evento_id) = LOWER(@eventoId) ORDER BY created_at ASC LIMIT 1`,
               { eventoId }
@@ -847,17 +853,13 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
   }
 });
 
-app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
-  try {
-    const { eventoId } = req.body;
-    
-    if (!eventoId) {
-      return res.status(400).json({ error: 'eventoId é obrigatório' });
-    }
-    
+// Lógica compartilhada de "parar jogo": usada tanto pelo endpoint HTTP
+// quanto pela varredura automática que finaliza a brincadeira sozinha
+// quando o tempo (brincadeiras.duration) expira (ver checkExpiredGames).
+async function stopGameForEvento(eventoId) {
     console.log(`\n⛔ [PARAR-JOGO] Iniciando processo...`);
     console.log(`   Evento ID: ${eventoId}`);
-    
+
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [PARAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
@@ -865,13 +867,12 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
-    
+
     if (!eventoAntes) {
       console.error(`❌ [PARAR-JOGO] Evento NÃO ENCONTRADO no banco de dados!`);
-      return res.status(404).json({ error: 'Evento não encontrado' });
-    }
-    if (!isMaster(req) && eventoAntes.empresa_id !== req.user.empresa_id) {
-      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+      const error = new Error('Evento não encontrado');
+      error.statusCode = 404;
+      throw error;
     }
 
     await stopTreasureGame(eventoId);
@@ -898,13 +899,22 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     );
     console.log(`   ✓ Sessões de jogo finalizadas`);
     
-    // 🆕 Também finalizar as partidas de zone_conquest
-    await query(
-      `UPDATE zone_conquest_team_partidas
-       SET status = 'finished', finished_at = GETDATE()
+    // Guardar os ids das partidas de equipe que ainda estão ativas ANTES de
+    // finalizá-las: stopZoneConquestTeam já marca status='finished', e o
+    // clearPartidaStates logo abaixo precisa desses ids para limpar os states.
+    const activeTeamPartidas = await allQuery(
+      `SELECT id FROM zone_conquest_team_partidas
        WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
+
+    // 🆕 Também finalizar as partidas de zone_conquest (equipe e individual)
+    try {
+      await stopZoneConquestTeam(eventoId);
+      console.log(`   ✓ Partida de equipe de Zone Conquest finalizada (se havia alguma ativa)`);
+    } catch (err) {
+      console.warn(`   ⚠️ Erro ao finalizar partida de equipe de Zone Conquest: ${err.message}`);
+    }
 
     // stopZoneConquestIndividual finaliza a partida individual ativa, os
     // participant_states e limpa territory_owner_crianca_id dos checkpoints.
@@ -926,22 +936,16 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     if (gameStatus.gameType === 'zone_conquest') {
       try {
         const { clearPartidaStates } = require('./utils/zoneConquestStateManager');
-        const { v4: uuidv4 } = require('uuid');
-        
-        // Buscar todas as partidas ativas para este evento
-        const partidas = await allQuery(
-          `SELECT id FROM zone_conquest_team_partidas
-           WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
-          { eventoId }
-        );
-        
-        // Limpar states de todas as partidas
-        for (const partida of partidas) {
+
+        // Limpar states das partidas que estavam ativas antes de serem
+        // finalizadas acima (activeTeamPartidas foi capturado antes do
+        // stopZoneConquestTeam mudar o status para 'finished').
+        for (const partida of activeTeamPartidas) {
           await clearPartidaStates(partida.id, eventoId);
         }
-        
-        if (partidas.length > 0) {
-          console.log(`   ✓ ${partidas.length} partida(s) de Zone Conquest limpas`);
+
+        if (activeTeamPartidas.length > 0) {
+          console.log(`   ✓ ${activeTeamPartidas.length} partida(s) de Zone Conquest limpas`);
         }
       } catch (err) {
         console.warn(`   ⚠️ Erro ao limpar Zone Conquest states: ${err.message}`);
@@ -966,11 +970,9 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     
     if (eventoDepois?.status !== 'scheduled') {
       console.error(`❌ [PARAR-JOGO] ⚠️ FALHA NA ATUALIZAÇÃO! Status ainda é: ${eventoDepois?.status}`);
-      return res.status(500).json({ 
-        error: 'Falha ao atualizar status do evento',
-        statusAntes: eventoAntes?.status,
-        statusDepois: eventoDepois?.status
-      });
+      const error = new Error('Falha ao atualizar status do evento');
+      error.statusCode = 500;
+      throw error;
     }
     
     console.log(`✅ [PARAR-JOGO] Banco de dados atualizado com SUCESSO!`);
@@ -1017,22 +1019,83 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     });
     
     console.log(`✅ [PARAR-JOGO] Processo finalizado com sucesso!\n`);
-    
-    res.json({ 
-      ok: true, 
+
+    return {
+      ok: true,
       status: gameStatus,
       verification: {
         statusAntes: eventoAntes?.status,
         statusDepois: eventoDepois?.status,
         stopped: eventoDepois?.status === 'scheduled'
       }
-    });
+    };
+}
+
+app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+  try {
+    const { eventoId } = req.body;
+
+    if (!eventoId) {
+      return res.status(400).json({ error: 'eventoId é obrigatório' });
+    }
+
+    const evento = await queryOne(
+      `SELECT id, empresa_id FROM eventos WHERE id = @eventoId`,
+      { eventoId }
+    );
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+
+    const result = await stopGameForEvento(eventoId);
+    res.json(result);
   } catch (err) {
     console.error('❌ [PARAR-JOGO] Erro ao parar jogo:', err.message);
     console.error('   Stack:', err.stack);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
+
+// Varredura periódica que finaliza sozinha a brincadeira quando o tempo
+// configurado (brincadeiras.duration, em minutos) se esgota. Antes disso,
+// o fim do jogo dependia só de um timer no navegador do recreacionista
+// (GameMasterDashboard) chamando /api/debug/stop-game — se a aba fosse
+// fechada, atualizada ou perdesse a conexão antes do timer zerar, o jogo
+// ficava 'active' no banco para sempre.
+async function checkExpiredGames() {
+  try {
+    const activeSessions = await allQuery(`
+      SELECT gs.evento_id, gs.started_at, b.duration
+      FROM game_sessions gs
+      INNER JOIN brincadeiras b ON b.id = gs.brincadeira_id
+      WHERE gs.status = 'active'
+        AND b.duration IS NOT NULL
+        AND b.duration > 0
+    `);
+
+    const now = Date.now();
+    for (const session of activeSessions) {
+      const startedAt = new Date(session.started_at).getTime();
+      const durationMs = Number(session.duration) * 60 * 1000;
+      if (!Number.isFinite(startedAt) || !Number.isFinite(durationMs) || durationMs <= 0) continue;
+      if (now - startedAt < durationMs) continue;
+
+      console.log(`⏱️ [TIMER] Tempo esgotado para o evento ${session.evento_id}, finalizando a brincadeira automaticamente...`);
+      try {
+        await stopGameForEvento(session.evento_id);
+      } catch (err) {
+        console.error(`❌ [TIMER] Erro ao finalizar automaticamente o evento ${session.evento_id}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('❌ [TIMER] Erro ao verificar brincadeiras com tempo esgotado:', err.message);
+  }
+}
+
+const expiredGamesInterval = setInterval(checkExpiredGames, 15000);
 
 // DEBUG: Reset territory lock de um checkpoint
 app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
@@ -1970,6 +2033,7 @@ async function shutdown(signal) {
   console.log(`\n🛑 Recebido ${signal}, encerrando servidor com segurança...`);
 
   clearInterval(interval);
+  clearInterval(expiredGamesInterval);
   wss.clients.forEach((client) => client.close(1001, 'Servidor reiniciando'));
 
   server.close(() => {
