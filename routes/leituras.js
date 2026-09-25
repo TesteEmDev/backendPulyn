@@ -431,7 +431,7 @@ router.post('/', async (req, res) => {
             { id: checkpointId }
           );
           
-          broadcastEvent({
+          broadcast({
             type: 'TERRITORY_CONQUERED',
             payload: {
               id: leituraId,
@@ -444,7 +444,7 @@ router.post('/', async (req, res) => {
               points: 0,
               lockDurationSeconds: 0,
               timestamp: now.toISOString(),
-              eventoId: checkpoint.evento_id,
+              eventoId: crianca.evento_id,
               gameType: 'monster_hunt',
               mapX: checkpointData?.map_x,
               mapY: checkpointData?.map_y,
