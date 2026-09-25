@@ -1,6 +1,3 @@
-// utils/zoneConquestStateManager.js - Gerenciador de Estado para Zone Conquest
-// Persiste e recupera estado de checkpoints e zonas do banco de dados
-
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 

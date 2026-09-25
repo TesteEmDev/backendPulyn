@@ -1,6 +1,3 @@
-// utils/zoneConquestModeDetector.js - Detector de modo TEAM vs INDIVIDUAL
-// Fornece funções para determinar qual modo de Zone Conquest está ativo
-
 const { queryOne } = require('../database');
 
 /**

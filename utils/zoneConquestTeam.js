@@ -1,6 +1,3 @@
-// utils/zoneConquestTeam.js - Zone Conquest TEAM mode com persistência em BD
-// Baseado em Treasure Hunt: partidas, tempos por equipe, histórico de scans
-
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 

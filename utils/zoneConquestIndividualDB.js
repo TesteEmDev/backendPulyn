@@ -1,6 +1,3 @@
-// utils/zoneConquestIndividualDB.js - Zone Conquest INDIVIDUAL com persistência em BD
-// Baseado em Monster Hunt: partidas com versionning, participant states, scans com versioning
-
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 
@@ -446,13 +443,12 @@ async function getZoneConquestIndividualStatus(eventoId) {
     const participantes = await getZoneConquestIndividualRanking(partida.id);
 
     // 3. Obter checkpoints dominados
-    const dominatedCheckpoints = await allQuery(
+    const allCheckpoints = await allQuery(
       `SELECT c.id, c.name, c.territory_owner_crianca_id AS owner_crianca_id, cr.name AS owner_name, ps.color AS owner_color
        FROM checkpoints c
        LEFT JOIN criancas cr ON cr.id = c.territory_owner_crianca_id
        LEFT JOIN zone_conquest_individual_participant_states ps ON ps.crianca_id = c.territory_owner_crianca_id
-       WHERE c.evento_id = @eventoId
-         AND c.territory_owner_crianca_id IS NOT NULL`,
+       WHERE c.evento_id = @eventoId`,
       { eventoId }
     );
 
@@ -471,7 +467,18 @@ async function getZoneConquestIndividualStatus(eventoId) {
         color: p.color || generateColorFromId(p.crianca_id), // Use stored color or generate if missing
         status: p.status,
       })),
-      dominated_checkpoints: dominatedCheckpoints.map(c => ({
+      checkpoints: allCheckpoints.map(c => ({
+        id: c.id,
+        participantId: c.owner_crianca_id || null,
+        participantName: c.owner_name || null,
+        participantColor: c.owner_crianca_id
+          ? (c.owner_color || generateColorFromId(c.owner_crianca_id))
+          : null,
+        protectedUntil: null,
+        isProtected: false,
+        lastReadAt: null,
+      })),
+      dominated_checkpoins: allCheckpoints.filter(c => c.owner_crianca_id).map( c => ({
         checkpointId: c.id,
         checkpointName: c.name,
         ownerCriancaId: c.owner_crianca_id,

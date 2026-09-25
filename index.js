@@ -546,7 +546,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
 
 app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
-    const { gameId, gameName, eventoId, zoneConquestMode } = req.body;
+    const { gameId, gameName, eventoId } = req.body;
     
     if (!eventoId) {
       return res.status(400).json({ error: 'eventoId é obrigatório' });
@@ -609,6 +609,14 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     const gameType = selectedGame.type === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
       : selectedGame.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+    // O modo (equipe/individual) é um dado persistido em brincadeiras.type,
+    // escolhido pelo admin ao criar o jogo (AdminGameForm). Nunca inferir
+    // isso do nome do jogo (texto livre) ou aceitar cegamente o que o
+    // cliente mandou em zoneConquestMode — isso já causou domínios sendo
+    // renderizados como se fossem do modo errado.
+    const zoneMode = gameType === 'zone_conquest'
+      ? (selectedGame.type === 'individual' ? 'individual' : 'team')
+      : null;
     let treasureStart = null;
     let monsterStart = null;
     if (gameType === TREASURE_GAME_TYPE) {
@@ -633,7 +641,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         eventoId,
         gameId,
         gameType,
-        mode: zoneConquestMode || null,
+        mode: zoneMode,
         status: 'active'
       }
     );
@@ -665,24 +673,6 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
           initializeCheckpointStates,
           initializeZoneStates,
         } = require('./utils/zoneConquestStateManager');
-        
-        // Determinar o modo do jogo (TEAM ou INDIVIDUAL)
-        // Tentar obter do parâmetro ou inferir do nome do jogo
-        let zoneMode = (zoneConquestMode || 'team').toLowerCase();
-        
-        // Se não foi passado explicitamente, tentar extrair do nome do jogo
-        if (!zoneConquestMode && gameName) {
-          const nameUpper = String(gameName).toUpperCase();
-          if (nameUpper.includes('INDIVIDUAL')) {
-            zoneMode = 'individual';
-          } else if (nameUpper.includes('EQUIPE') || nameUpper.includes('TEAM')) {
-            zoneMode = 'team';
-          }
-        }
-        
-        if (!['team', 'individual'].includes(zoneMode)) {
-          throw new Error(`Modo inválido: ${zoneMode}. Use 'team' ou 'individual'`);
-        }
         
         const evento = await queryOne(
           `SELECT empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
