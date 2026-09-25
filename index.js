@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
-const { query, allQuery, queryOne, DB_DRIVER } = require('./database');
+const { query, allQuery, queryOne, closeDB, DB_DRIVER } = require('./database');
 
 // Importar rotas
 const authRoutes = require('./routes/auth');
@@ -900,12 +900,24 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     
     // 🆕 Também finalizar as partidas de zone_conquest
     await query(
-      `UPDATE zone_conquest_team_partidas 
+      `UPDATE zone_conquest_team_partidas
        SET status = 'finished', finished_at = GETDATE()
        WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
-    
+
+    // stopZoneConquestIndividual finaliza a partida individual ativa, os
+    // participant_states e limpa territory_owner_crianca_id dos checkpoints.
+    // Faltava essa chamada aqui: a partida individual nunca era marcada como
+    // 'finished' ao parar o jogo, só ficava "esquecida" como active para
+    // sempre (a próxima partida individual criada nunca fechava a anterior).
+    try {
+      await stopZoneConquestIndividual(eventoId);
+      console.log(`   ✓ Partida individual de Zone Conquest finalizada (se havia alguma ativa)`);
+    } catch (err) {
+      console.warn(`   ⚠️ Erro ao finalizar partida individual de Zone Conquest: ${err.message}`);
+    }
+
     // 🆕 Limpar variável global de sessão
     currentSessionId = null;
     currentSessionGameType = null;
@@ -1945,5 +1957,36 @@ startServer().catch((err) => {
   console.error('❌ Falha fatal ao iniciar a API:', err);
   process.exit(1);
 });
+
+// O Render (e qualquer plataforma com deploy contínuo) manda SIGTERM no
+// processo antigo antes de subir o novo. Sem isso, o pool de conexões com o
+// Postgres/Supabase fica aberto até o processo morrer à força, e os dois
+// processos (antigo + novo) disputam o mesmo limite de conexões do pooler
+// em modo session — é isso que causa o "max clients reached in session mode".
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n🛑 Recebido ${signal}, encerrando servidor com segurança...`);
+
+  clearInterval(interval);
+  wss.clients.forEach((client) => client.close(1001, 'Servidor reiniciando'));
+
+  server.close(() => {
+    console.log('✅ Servidor HTTP encerrado');
+  });
+
+  try {
+    await closeDB();
+    console.log('✅ Conexões com o banco de dados encerradas');
+  } catch (err) {
+    console.error('❌ Erro ao encerrar conexões com o banco de dados:', err.message);
+  } finally {
+    process.exit(0);
+  }
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 module.exports = { app, server, wss };

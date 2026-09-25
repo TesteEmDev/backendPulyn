@@ -52,7 +52,13 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
       throw new Error('Evento não encontrado');
     }
 
-    // 3. Criar partida (sem exigir participantes)
+    // 3. Fechar qualquer partida individual anterior que tenha ficado presa
+    // como 'active' (ex.: servidor reiniciado sem passar por stopGame). Sem
+    // isso, cada novo início empilha mais uma linha 'active' e nenhuma delas
+    // é finalizada de verdade.
+    await stopZoneConquestIndividual(eventoId);
+
+    // 4. Criar partida (sem exigir participantes)
     const partidaId = uuidv4();
     const agora = new Date();
 
