@@ -424,6 +424,32 @@ router.post('/', async (req, res) => {
               eventoId: checkpoint.evento_id,
             },
           });
+
+          // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile
+          const checkpointData = await queryOne(
+            'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+            { id: checkpointId }
+          );
+          
+          broadcastEvent({
+            type: 'TERRITORY_CONQUERED',
+            payload: {
+              id: leituraId,
+              checkpointId,
+              uid: normalizedUid,
+              criancaId: crianca.id,
+              criancaName: crianca.name,
+              timeId: crianca.time_id,
+              teamColor: monsterResult.teamColor || '#FF0000',
+              points: 0,
+              lockDurationSeconds: 0,
+              timestamp: now.toISOString(),
+              eventoId: checkpoint.evento_id,
+              gameType: 'monster_hunt',
+              mapX: checkpointData?.map_x,
+              mapY: checkpointData?.map_y,
+            }
+          });
         }
 
         if (monsterResult.gameCompleted && typeof global.finishMonsterGameState === 'function') {
@@ -526,6 +552,34 @@ router.post('/', async (req, res) => {
             eventoId: checkpoint.evento_id,
           },
         });
+
+        // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile
+        if (treasureResult.accepted) {
+          const checkpointData = await queryOne(
+            'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+            { id: checkpointId }
+          );
+          
+          broadcast({
+            type: 'TERRITORY_CONQUERED',
+            payload: {
+              id: leituraId,
+              checkpointId,
+              uid: normalizedUid,
+              criancaId: crianca.id,
+              criancaName: crianca.name,
+              timeId: crianca.time_id,
+              teamColor: treasureResult.teamColor || '#00AA00',
+              points: 0,
+              lockDurationSeconds: 0,
+              timestamp: now.toISOString(),
+              eventoId: checkpoint.evento_id,
+              gameType: 'treasure_hunt',
+              mapX: checkpointData?.map_x,
+              mapY: checkpointData?.map_y,
+            }
+          });
+        }
 
         if (treasureResult.finished && typeof global.finishTreasureGameState === 'function') {
           global.finishTreasureGameState(checkpoint.evento_id, now.toISOString());
@@ -804,6 +858,13 @@ router.post('/', async (req, res) => {
     
     // ✅ Broadcast APENAS quando evento está ativo (já passou na validação acima)
     console.log(`📡 [LEITURA] Enviando TERRITORY_CONQUERED broadcast...`);
+    
+    // 📍 Buscar coordenadas do checkpoint para rastreio no mobile
+    const checkpointCoords = await queryOne(
+      'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+      { id: checkpointId }
+    );
+    
     broadcast({
       type: 'TERRITORY_CONQUERED',
       payload: {
@@ -817,7 +878,10 @@ router.post('/', async (req, res) => {
         points: pointsAwarded,
         lockDurationSeconds: 15,
         timestamp: now.toISOString(),
-        eventoId: crianca.evento_id  // ✨ NOVO: Adicionar evento_id para broadcast por sala
+        eventoId: crianca.evento_id,  // ✨ NOVO: Adicionar evento_id para broadcast por sala
+        gameType: 'zone_conquest',
+        mapX: checkpointCoords?.map_x,
+        mapY: checkpointCoords?.map_y,
       }
     });
     
