@@ -981,6 +981,9 @@ router.post('/', async (req, res) => {
     
   } catch (err) {
     console.error('❌ [LEITURA] Erro ao processar leitura:', err);
+    console.error('   Stack:', err.stack);
+    console.error('   Message:', err.message);
+    console.error('   Code:', err.code);
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
