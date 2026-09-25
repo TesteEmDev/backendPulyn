@@ -706,11 +706,20 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
               console.warn(`   ⚠️ Erro ao fechar partida TEAM anterior: ${err.message}`);
             }
 
-            const firstTeam = await queryOne(
-              `SELECT id FROM times WHERE LOWER(evento_id) = LOWER(@eventoId) ORDER BY created_at ASC LIMIT 1`,
+            // Times sem nenhuma criança ativa não entram no rodízio de turnos
+            // (senão o jogo pode começar travado numa equipe vazia, e
+            // zone_conquest_team_tempos também precisa ter uma linha por
+            // time pra pontuação/turno funcionarem).
+            const teamsWithChildren = await allQuery(
+              `SELECT DISTINCT t.id
+               FROM times t
+               INNER JOIN criancas c ON c.time_id = t.id
+               WHERE LOWER(t.evento_id) = LOWER(@eventoId) AND c.status = 'active'
+               ORDER BY t.created_at ASC`,
               { eventoId }
             );
-            
+            const firstTeamId = teamsWithChildren[0]?.id || null;
+
             const partidaId = require('uuid').v4();
             await query(
               `INSERT INTO zone_conquest_team_partidas (id, evento_id, empresa_id, brincadeira_id, status, round_number, current_team_id, started_at, created_at, updated_at)
@@ -720,22 +729,11 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
                 eventoId,
                 empresaId: evento.empresa_id,
                 brincadeiraId: gameId,
-                currentTeamId: firstTeam?.id || null,
+                currentTeamId: firstTeamId,
               }
             );
             console.log(`   ✓ Partida TEAM criada: ${partidaId}`);
 
-            // Sem essas linhas, o UPDATE de pontuação em processZoneConquestTeamScan
-            // (WHERE partida_id = ... AND time_id = ...) não encontra nenhuma
-            // linha pra atualizar — zone_conquest_team_tempos ficava sempre
-            // vazia e o status dedicado de equipe nunca refletia os pontos.
-            const teamsWithChildren = await allQuery(
-              `SELECT DISTINCT t.id
-               FROM times t
-               INNER JOIN criancas c ON c.time_id = t.id
-               WHERE LOWER(t.evento_id) = LOWER(@eventoId) AND c.status = 'ativo'`,
-              { eventoId }
-            );
             for (const time of teamsWithChildren) {
               await query(
                 `INSERT INTO zone_conquest_team_tempos (id, partida_id, empresa_id, evento_id, time_id, status, zones_dominated, checkpoints_read, total_points, started_at)
