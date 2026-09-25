@@ -288,6 +288,39 @@ async function processZoneConquestTeamScan({
       );
       console.log(`   🎨 [ZONE-TEAM] Checkpoint ${checkpointId} marcado para equipe ${crianca.time_id}`);
 
+      // Passar o turno pra próxima equipe (round-robin). Sem isso,
+      // current_team_id nunca mudava do valor definido na criação da
+      // partida — só a primeira equipe conseguia ler qualquer checkpoint,
+      // e todas as outras eram sempre rejeitadas com "não é sua vez".
+      const teamsOrder = await tx.allQuery(
+        `SELECT tt.time_id
+         FROM zone_conquest_team_tempos tt
+         INNER JOIN times t ON t.id = tt.time_id
+         WHERE tt.partida_id = @partidaId
+         ORDER BY t.created_at ASC`,
+        { partidaId: partida.id }
+      );
+      const teamIds = teamsOrder.map((row) => String(row.time_id));
+      const currentIndex = teamIds.findIndex((id) => id.toLowerCase() === String(crianca.time_id).toLowerCase());
+      const nextIndex = teamIds.length > 0 ? (currentIndex + 1) % teamIds.length : -1;
+      const nextTeamId = nextIndex >= 0 ? teamIds[nextIndex] : partida.current_team_id;
+      const nextRound = nextIndex === 0 ? partida.round_number + 1 : partida.round_number;
+
+      await tx.query(
+        `UPDATE zone_conquest_team_partidas SET
+           current_team_id = @nextTeamId,
+           round_number = @nextRound,
+           updated_at = @agora
+         WHERE id = @partidaId`,
+        {
+          nextTeamId,
+          nextRound,
+          agora: now,
+          partidaId: partida.id,
+        }
+      );
+      console.log(`   🔁 [ZONE-TEAM] Turno passou para equipe ${nextTeamId} (rodada ${nextRound})`);
+
       return { points: pontos, accepted: true };
     });
 
