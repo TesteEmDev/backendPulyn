@@ -4,6 +4,23 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 
+// ==================== HELPERS ====================
+
+/**
+ * Gera uma cor HSL determinística baseada em um ID
+ * Mesma cor sempre para o mesmo ID
+ */
+function generateColorFromId(id) {
+  // Usar hash simples do ID para gerar um hue determinístico
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = ((hash << 5) - hash) + id.charCodeAt(i);
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 70%, 60%)`;
+}
+
 // ==================== FUNÇÕES DE INICIALIZAÇÃO ====================
 
 /**
@@ -130,20 +147,22 @@ async function processZoneConquestIndividualScan({
       console.log(`   📝 Participant state não encontrado - criando sob demanda...`);
       // Criar participant state sob demanda
       const participantId = uuidv4();
+      const participantColor = generateColorFromId(crianca.id);
       await query(
         `INSERT INTO zone_conquest_individual_participant_states
-         (id, partida_id, empresa_id, evento_id, crianca_id, status, checkpoints_read, total_points, ranking, version, started_at, created_at, updated_at)
-         VALUES (@id, @partidaId, @empresaId, @eventoId, @criancaId, 'active', 0, 0, NULL, 0, @agora, @agora, @agora)`,
+         (id, partida_id, empresa_id, evento_id, crianca_id, status, checkpoints_read, total_points, ranking, color, version, started_at, created_at, updated_at)
+         VALUES (@id, @partidaId, @empresaId, @eventoId, @criancaId, 'active', 0, 0, NULL, @color, 0, @agora, @agora, @agora)`,
         {
           id: participantId,
           partidaId: partida.id,
           empresaId: crianca.empresa_id,
           eventoId,
           criancaId: crianca.id,
+          color: participantColor,
           agora: now,
         }
       );
-      console.log(`   ✅ Participant state criado: ${participantId}`);
+      console.log(`   ✅ Participant state criado: ${participantId} (cor: ${participantColor})`);
       
       // Recarregar o state
       participantState = await queryOne(
@@ -428,9 +447,10 @@ async function getZoneConquestIndividualStatus(eventoId) {
 
     // 3. Obter checkpoints dominados
     const dominatedCheckpoints = await allQuery(
-      `SELECT c.id, c.name, c.territory_owner_crianca_id AS owner_crianca_id, cr.name AS owner_name
+      `SELECT c.id, c.name, c.territory_owner_crianca_id AS owner_crianca_id, cr.name AS owner_name, ps.color AS owner_color
        FROM checkpoints c
        LEFT JOIN criancas cr ON cr.id = c.territory_owner_crianca_id
+       LEFT JOIN zone_conquest_individual_participant_states ps ON ps.crianca_id = c.territory_owner_crianca_id
        WHERE c.evento_id = @eventoId
          AND c.territory_owner_crianca_id IS NOT NULL`,
       { eventoId }
@@ -448,10 +468,16 @@ async function getZoneConquestIndividualStatus(eventoId) {
         totalPoints: p.total_points,
         checkpointsRead: p.checkpoints_read,
         ranking: p.ranking,
-        color: `hsl(${Math.random() * 360}, 70%, 60%)`, // Generate random color for each participant
+        color: p.color || generateColorFromId(p.crianca_id), // Use stored color or generate if missing
         status: p.status,
       })),
-      dominated_checkpoints: dominatedCheckpoints.length,
+      dominated_checkpoints: dominatedCheckpoints.map(c => ({
+        checkpointId: c.id,
+        checkpointName: c.name,
+        ownerCriancaId: c.owner_crianca_id,
+        ownerName: c.owner_name,
+        ownerColor: c.owner_color || generateColorFromId(c.owner_crianca_id),
+      })),
       created_at: partida.started_at,
     };
   } catch (err) {
