@@ -97,38 +97,39 @@ const interval = setInterval(() => {
 }, 30000);
 
 // ✨ NOVO: Verificar checkpoints offline (não enviaram leitura há 5 minutos)
-const offlineCheckInterval = setInterval(async () => {
-  try {
-    // Verificar se coluna last_seen existe
-    const checkColumn = await require('./database').queryOne(`
-      SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'checkpoints' AND COLUMN_NAME = 'last_seen'
-    `);
-    
-    if (!checkColumn) {
-      // Coluna não existe ainda, pular verificação
-      return;
-    }
-    
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    
-    // Marcar como offline se não foram vistos há 5 minutos
-    await require('./database').query(
-      `UPDATE checkpoints 
-       SET status = 'offline' 
-       WHERE status = 'online'
-       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
-       AND (last_seen IS NULL OR last_seen < @fiveMinutesAgo)`,
-      { fiveMinutesAgo }
-    );
-  } catch (err) {
-    console.error('❌ Erro ao verificar checkpoints offline:', err);
-  }
-}, 60000); // A cada 1 minuto
+// 🔴 DESABILITADO TEMPORARIAMENTE: Causa timeout ao tentar conectar ao banco remoto
+// const offlineCheckInterval = setInterval(async () => {
+//   try {
+//     // Verificar se coluna last_seen existe
+//     const checkColumn = await require('./database').queryOne(`
+//       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS 
+//       WHERE TABLE_NAME = 'checkpoints' AND COLUMN_NAME = 'last_seen'
+//     `);
+//     
+//     if (!checkColumn) {
+//       // Coluna não existe ainda, pular verificação
+//       return;
+//     }
+//     
+//     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+//     
+//     // Marcar como offline se não foram vistos há 5 minutos
+//     await require('./database').query(
+//       `UPDATE checkpoints 
+//        SET status = 'offline' 
+//        WHERE status = 'online'
+//        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+//        AND (last_seen IS NULL OR last_seen < @fiveMinutesAgo)`,
+//       { fiveMinutesAgo }
+//     );
+//   } catch (err) {
+//     console.error('❌ Erro ao verificar checkpoints offline:', err);
+//   }
+// }, 60000); // A cada 1 minuto
 
 wss.on('close', () => {
   clearInterval(interval);
-  clearInterval(offlineCheckInterval);
+  // clearInterval(offlineCheckInterval); // Desabilitado temporariamente
 });
 
 // Armazenar WebSocket globalmente para broadcast
@@ -1714,7 +1715,7 @@ async function startServer() {
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);
-    clearInterval(offlineCheckInterval);
+    // clearInterval(offlineCheckInterval); // Desabilitado temporariamente
     process.exit(1);
   }
 
