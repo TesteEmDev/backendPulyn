@@ -258,10 +258,10 @@ async function processZoneConquestIndividualScan({
       }
 
       // UPDATE checkpoint: marcar como dominado pelo participante
-      // Em modo INDIVIDUAL, usamos crianca_id como territory_owner_time_id
+      // Em modo INDIVIDUAL, usamos territory_owner_crianca_id (novo campo)
       await tx.query(
         `UPDATE checkpoints SET
-           territory_owner_time_id = @criancaId,
+           territory_owner_crianca_id = @criancaId,
            last_conquered_at = @agora
          WHERE id = @checkpointId`,
         {
@@ -428,11 +428,11 @@ async function getZoneConquestIndividualStatus(eventoId) {
 
     // 3. Obter checkpoints dominados
     const dominatedCheckpoints = await allQuery(
-      `SELECT c.id, c.name, c.territory_owner_time_id AS owner_crianca_id, cr.name AS owner_name
+      `SELECT c.id, c.name, c.territory_owner_crianca_id AS owner_crianca_id, cr.name AS owner_name
        FROM checkpoints c
-       LEFT JOIN criancas cr ON cr.id = c.territory_owner_time_id
+       LEFT JOIN criancas cr ON cr.id = c.territory_owner_crianca_id
        WHERE c.evento_id = @eventoId
-         AND c.territory_owner_time_id IS NOT NULL`,
+         AND c.territory_owner_crianca_id IS NOT NULL`,
       { eventoId }
     );
 
@@ -499,6 +499,16 @@ async function stopZoneConquestIndividual(eventoId) {
           eventoId,
           agora,
         }
+      );
+
+      // LIMPAR territory_owner_crianca_id dos checkpoints
+      await tx.query(
+        `UPDATE checkpoints SET
+           territory_owner_crianca_id = NULL,
+           territory_locked_until = NULL,
+           territory_cooldown_until = NULL
+         WHERE evento_id = @eventoId`,
+        { eventoId }
       );
 
       return { success: true };

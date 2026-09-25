@@ -148,6 +148,51 @@ async function ensureZoneConquestSchema() {
     await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_scans_partida ON zone_conquest_individual_scans (partida_id, crianca_id)');
     await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_protection_checkpoint ON zone_conquest_individual_checkpoint_protection (checkpoint_id, protection_until)');
 
+    // ========================================================================
+    // CHECKPOINT & ZONE STATE TRACKING (novo para ambos os modos)
+    // ========================================================================
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS zone_conquest_checkpoint_states (
+        id varchar(36) PRIMARY KEY,
+        partida_id varchar(36) NOT NULL,
+        empresa_id varchar(36) NOT NULL,
+        evento_id varchar(36) NOT NULL,
+        checkpoint_id varchar(36) NOT NULL,
+        current_owner_id varchar(36) NULL,
+        owner_type varchar(20) NOT NULL DEFAULT 'team',
+        protected_until timestamptz NULL,
+        last_conquered_at timestamptz NULL,
+        conquest_count integer NOT NULL DEFAULT 0,
+        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS zone_conquest_zone_states (
+        id varchar(36) PRIMARY KEY,
+        partida_id varchar(36) NOT NULL,
+        empresa_id varchar(36) NOT NULL,
+        evento_id varchar(36) NOT NULL,
+        zone_id varchar(36) NOT NULL,
+        current_owner_id varchar(36) NULL,
+        owner_type varchar(20) NOT NULL DEFAULT 'team',
+        is_disputed boolean NOT NULL DEFAULT false,
+        checkpoints_count integer NOT NULL DEFAULT 0,
+        checkpoints_owned integer NOT NULL DEFAULT 0,
+        last_updated_at timestamptz NULL,
+        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // STATE TRACKING indices
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_checkpoint_state_partida ON zone_conquest_checkpoint_states (partida_id, checkpoint_id)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_checkpoint_state_owner ON zone_conquest_checkpoint_states (partida_id, current_owner_id)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_zone_state_partida ON zone_conquest_zone_states (partida_id, zone_id)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_zone_state_owner ON zone_conquest_zone_states (partida_id, current_owner_id)');
+
     return;
   }
 
@@ -344,6 +389,72 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_individual_protection_checkpoint' AND object_id = OBJECT_ID('dbo.zone_conquest_individual_checkpoint_protection'))
       CREATE INDEX idx_zone_individual_protection_checkpoint ON zone_conquest_individual_checkpoint_protection (checkpoint_id, protection_until)
+  `);
+
+  // ========================================================================
+  // CHECKPOINT & ZONE STATE TRACKING (novo para ambos os modos)
+  // ========================================================================
+
+  await query(`
+    IF OBJECT_ID('dbo.zone_conquest_checkpoint_states', 'U') IS NULL
+    BEGIN
+      CREATE TABLE zone_conquest_checkpoint_states (
+        id NVARCHAR(36) NOT NULL PRIMARY KEY,
+        partida_id NVARCHAR(36) NOT NULL,
+        empresa_id NVARCHAR(36) NOT NULL,
+        evento_id NVARCHAR(36) NOT NULL,
+        checkpoint_id NVARCHAR(36) NOT NULL,
+        current_owner_id NVARCHAR(36) NULL,
+        owner_type NVARCHAR(20) NOT NULL DEFAULT 'team',
+        protected_until DATETIME2 NULL,
+        last_conquered_at DATETIME2 NULL,
+        conquest_count INT NOT NULL DEFAULT 0,
+        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+      )
+    END
+  `);
+
+  await query(`
+    IF OBJECT_ID('dbo.zone_conquest_zone_states', 'U') IS NULL
+    BEGIN
+      CREATE TABLE zone_conquest_zone_states (
+        id NVARCHAR(36) NOT NULL PRIMARY KEY,
+        partida_id NVARCHAR(36) NOT NULL,
+        empresa_id NVARCHAR(36) NOT NULL,
+        evento_id NVARCHAR(36) NOT NULL,
+        zone_id NVARCHAR(36) NOT NULL,
+        current_owner_id NVARCHAR(36) NULL,
+        owner_type NVARCHAR(20) NOT NULL DEFAULT 'team',
+        is_disputed BIT NOT NULL DEFAULT 0,
+        checkpoints_count INT NOT NULL DEFAULT 0,
+        checkpoints_owned INT NOT NULL DEFAULT 0,
+        last_updated_at DATETIME2 NULL,
+        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
+        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+      )
+    END
+  `);
+
+  // STATE TRACKING indices
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_checkpoint_state_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_checkpoint_states'))
+      CREATE INDEX idx_zone_checkpoint_state_partida ON zone_conquest_checkpoint_states (partida_id, checkpoint_id)
+  `);
+
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_checkpoint_state_owner' AND object_id = OBJECT_ID('dbo.zone_conquest_checkpoint_states'))
+      CREATE INDEX idx_zone_checkpoint_state_owner ON zone_conquest_checkpoint_states (partida_id, current_owner_id)
+  `);
+
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_zone_state_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_zone_states'))
+      CREATE INDEX idx_zone_zone_state_partida ON zone_conquest_zone_states (partida_id, zone_id)
+  `);
+
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_zone_state_owner' AND object_id = OBJECT_ID('dbo.zone_conquest_zone_states'))
+      CREATE INDEX idx_zone_zone_state_owner ON zone_conquest_zone_states (partida_id, current_owner_id)
   `);
 }
 

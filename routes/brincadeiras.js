@@ -132,6 +132,7 @@ router.post('/', verifyToken, async (req, res) => {
     }
     const id = uuidv4();
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
+    
     await query(
       'INSERT INTO brincadeiras (id, name, description, rules, type, duration, default_points, empresa_id, status, evento_id, checkpoints) VALUES (@id, @name, @description, @rules, @type, @duration, @default_points, @empresa_id, @status, @evento_id, @checkpoints)',
       { 
@@ -149,7 +150,7 @@ router.post('/', verifyToken, async (req, res) => {
       }
     );
     
-    console.log(`✅ Jogo criado: ${name} (empresa: ${evento.empresa_id}, checkpoints: ${checkpoints?.length || 0})`);
+    console.log(`✅ Jogo criado: ${name}`);
     res.json({ id, name, description, rules, type, duration, default_points, empresa_id: evento.empresa_id, status: 'active', evento_id, checkpoints: normalizedCheckpoints });
   } catch (err) {
     console.error('❌ Erro ao criar brincadeira:', err);

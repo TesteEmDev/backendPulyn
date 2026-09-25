@@ -646,6 +646,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     await query(`
       UPDATE checkpoints SET
         territory_owner_time_id = NULL,
+        territory_owner_crianca_id = NULL,
         territory_locked_until = NULL,
         territory_cooldown_until = NULL,
         last_conquered_at = NULL

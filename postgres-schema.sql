@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS "checkpoints" (
   "points" integer DEFAULT 10,
   "status" varchar(20) DEFAULT 'offline',
   "territory_owner_time_id" varchar(36),
+  "territory_owner_crianca_id" varchar(36),
   "territory_locked_until" timestamptz,
   "territory_cooldown_until" timestamptz,
   "last_conquered_at" timestamptz,
@@ -459,6 +460,10 @@ END IF; END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__checkpoin__terri__7C4F7684') THEN
   ALTER TABLE "checkpoints" ADD CONSTRAINT "FK__checkpoin__terri__7C4F7684" FOREIGN KEY ("territory_owner_time_id") REFERENCES "times" ("id");
+END IF; END $$;
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__checkpoin__owner_crianca') THEN
+  ALTER TABLE "checkpoints" ADD CONSTRAINT "FK__checkpoin__owner_crianca" FOREIGN KEY ("territory_owner_crianca_id") REFERENCES "criancas" ("id");
 END IF; END $$;
 
 DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK_checkpoints_empresas') THEN
