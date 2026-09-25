@@ -433,7 +433,7 @@ router.post('/', async (req, res) => {
           
           console.log(`🎬 [RASTREIO] Monster Hunt - Checkpoint: ${checkpointId}, Coords: map_x=${checkpointData?.map_x}, map_y=${checkpointData?.map_y}`);
           
-          broadcast({
+          const territoryPayload = {
             type: 'TERRITORY_CONQUERED',
             payload: {
               id: leituraId,
@@ -451,7 +451,10 @@ router.post('/', async (req, res) => {
               mapX: checkpointData?.map_x || null,
               mapY: checkpointData?.map_y || null,
             }
-          });
+          };
+          
+          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Monster Hunt:`, JSON.stringify(territoryPayload, null, 2));
+          broadcast(territoryPayload);
         }
 
         if (monsterResult.gameCompleted && typeof global.finishMonsterGameState === 'function') {
@@ -562,7 +565,7 @@ router.post('/', async (req, res) => {
             { id: checkpointId }
           );
           
-          broadcast({
+          const territoryPayload = {
             type: 'TERRITORY_CONQUERED',
             payload: {
               id: leituraId,
@@ -580,7 +583,10 @@ router.post('/', async (req, res) => {
               mapX: checkpointCoords?.map_x,
               mapY: checkpointCoords?.map_y,
             }
-          });
+          };
+          
+          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Treasure Hunt:`, JSON.stringify(territoryPayload, null, 2));
+          broadcast(territoryPayload);
         }
 
         if (treasureResult.finished && typeof global.finishTreasureGameState === 'function') {
