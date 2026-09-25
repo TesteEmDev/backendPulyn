@@ -257,20 +257,19 @@ async function processZoneConquestIndividualScan({
         };
       }
 
-      // UPDATE checkpoint: marcar como dominado
-      // Em modo INDIVIDUAL, não vinculamos a um time, então pulamos a atualização
-      // de territory_owner_time_id para evitar constraint violation
-      // await tx.query(
-      //   `UPDATE checkpoints SET
-      //      territory_owner_time_id = @criancaId,
-      //      last_conquered_at = @agora
-      //    WHERE id = @checkpointId`,
-      //   {
-      //     checkpointId,
-      //     criancaId: crianca.id,
-      //     agora: now,
-      //   }
-      // );
+      // UPDATE checkpoint: marcar como dominado pelo participante
+      // Em modo INDIVIDUAL, usamos crianca_id como territory_owner_time_id
+      await tx.query(
+        `UPDATE checkpoints SET
+           territory_owner_time_id = @criancaId,
+           last_conquered_at = @agora
+         WHERE id = @checkpointId`,
+        {
+          checkpointId,
+          criancaId: crianca.id,
+          agora: now,
+        }
+      );
       console.log(`   🎨 [ZONE-INDIVIDUAL] Checkpoint ${checkpointId} conquistado por participante ${crianca.id}`);
 
       // TODO: Recalcular ranking para a partida (precisa ser feito corretamente com transação)
