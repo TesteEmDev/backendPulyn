@@ -431,6 +431,8 @@ router.post('/', async (req, res) => {
             { id: checkpointId }
           );
           
+          console.log(`🎬 [RASTREIO] Monster Hunt - Checkpoint: ${checkpointId}, Coords: map_x=${checkpointData?.map_x}, map_y=${checkpointData?.map_y}`);
+          
           broadcast({
             type: 'TERRITORY_CONQUERED',
             payload: {
@@ -446,8 +448,8 @@ router.post('/', async (req, res) => {
               timestamp: now.toISOString(),
               eventoId: crianca.evento_id,
               gameType: 'monster_hunt',
-              mapX: checkpointData?.map_x,
-              mapY: checkpointData?.map_y,
+              mapX: checkpointData?.map_x || null,
+              mapY: checkpointData?.map_y || null,
             }
           });
         }
