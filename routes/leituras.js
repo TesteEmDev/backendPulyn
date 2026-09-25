@@ -555,9 +555,9 @@ router.post('/', async (req, res) => {
           },
         });
 
-        // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile
+        // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile (replicado de Zone)
         if (treasureResult.accepted) {
-          const checkpointData = await queryOne(
+          const checkpointCoords = await queryOne(
             'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
             { id: checkpointId }
           );
@@ -577,8 +577,8 @@ router.post('/', async (req, res) => {
               timestamp: now.toISOString(),
               eventoId: checkpoint.evento_id,
               gameType: 'treasure_hunt',
-              mapX: checkpointData?.map_x,
-              mapY: checkpointData?.map_y,
+              mapX: checkpointCoords?.map_x,
+              mapY: checkpointCoords?.map_y,
             }
           });
         }
