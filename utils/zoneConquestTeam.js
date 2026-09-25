@@ -443,11 +443,15 @@ async function stopZoneConquestTeam(eventoId) {
         }
       );
 
-      // UPDATE tempos
+      // UPDATE tempos — a coluna nesta tabela se chama completed_at, não
+      // finished_at (diferente de zone_conquest_team_partidas). Usar o nome
+      // errado aqui derrubava toda a transação com "column does not exist",
+      // e como esse método é chamado ANTES de criar a partida nova no
+      // start-game, a criação da partida TEAM nunca chegava a rodar.
       await tx.query(
         `UPDATE zone_conquest_team_tempos SET
            status = 'finished',
-           finished_at = @agora
+           completed_at = @agora
          WHERE partida_id IN (
            SELECT id FROM zone_conquest_team_partidas
            WHERE LOWER(evento_id) = LOWER(@eventoId)

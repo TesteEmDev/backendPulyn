@@ -55,8 +55,14 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
     // 3. Fechar qualquer partida individual anterior que tenha ficado presa
     // como 'active' (ex.: servidor reiniciado sem passar por stopGame). Sem
     // isso, cada novo início empilha mais uma linha 'active' e nenhuma delas
-    // é finalizada de verdade.
-    await stopZoneConquestIndividual(eventoId);
+    // é finalizada de verdade. Em try/catch: uma falha aqui não pode abortar
+    // a criação da partida nova abaixo (isso já quebrou o modo TEAM quando
+    // um UPDATE referenciava uma coluna que não existia).
+    try {
+      await stopZoneConquestIndividual(eventoId);
+    } catch (err) {
+      console.warn(`   ⚠️ Erro ao fechar partida individual anterior: ${err.message}`);
+    }
 
     // 4. Criar partida (sem exigir participantes)
     const partidaId = uuidv4();

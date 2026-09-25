@@ -696,7 +696,15 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             // Fecha qualquer partida TEAM anterior presa como 'active' (mesmo
             // problema que existia no modo individual: sem isso, cada novo
             // início empilha mais uma linha 'active' e nenhuma é finalizada).
-            await stopZoneConquestTeam(eventoId);
+            // Em try/catch: uma falha aqui não pode impedir a criação da
+            // partida nova abaixo — foi exatamente isso que aconteceu com o
+            // bug do "column finished_at does not exist", que abortava a
+            // criação inteira da partida TEAM silenciosamente.
+            try {
+              await stopZoneConquestTeam(eventoId);
+            } catch (err) {
+              console.warn(`   ⚠️ Erro ao fechar partida TEAM anterior: ${err.message}`);
+            }
 
             const firstTeam = await queryOne(
               `SELECT id FROM times WHERE LOWER(evento_id) = LOWER(@eventoId) ORDER BY created_at ASC LIMIT 1`,
