@@ -709,15 +709,23 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             // Times sem nenhuma criança ativa não entram no rodízio de turnos
             // (senão o jogo pode começar travado numa equipe vazia, e
             // zone_conquest_team_tempos também precisa ter uma linha por
-            // time pra pontuação/turno funcionarem).
-            const teamsWithChildren = await allQuery(
-              `SELECT DISTINCT t.id
-               FROM times t
-               INNER JOIN criancas c ON c.time_id = t.id
-               WHERE LOWER(t.evento_id) = LOWER(@eventoId) AND c.status = 'active'
-               ORDER BY t.created_at ASC`,
-              { eventoId }
-            );
+            // time pra pontuação/turno funcionarem). Em try/catch e SEM
+            // bloquear a criação da partida abaixo: uma falha só aqui (como o
+            // "ORDER BY must appear in SELECT DISTINCT" que já aconteceu)
+            // não pode voltar a impedir o INSERT da partida TEAM em si.
+            let teamsWithChildren = [];
+            try {
+              teamsWithChildren = await allQuery(
+                `SELECT DISTINCT t.id, t.created_at
+                 FROM times t
+                 INNER JOIN criancas c ON c.time_id = t.id
+                 WHERE LOWER(t.evento_id) = LOWER(@eventoId) AND c.status = 'active'
+                 ORDER BY t.created_at ASC`,
+                { eventoId }
+              );
+            } catch (err) {
+              console.warn(`   ⚠️ Erro ao buscar equipes com participantes: ${err.message}`);
+            }
             const firstTeamId = teamsWithChildren[0]?.id || null;
 
             const partidaId = require('uuid').v4();
@@ -734,20 +742,24 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             );
             console.log(`   ✓ Partida TEAM criada: ${partidaId}`);
 
-            for (const time of teamsWithChildren) {
-              await query(
-                `INSERT INTO zone_conquest_team_tempos (id, partida_id, empresa_id, evento_id, time_id, status, zones_dominated, checkpoints_read, total_points, started_at)
-                 VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, 'active', 0, 0, 0, CURRENT_TIMESTAMP)`,
-                {
-                  id: require('uuid').v4(),
-                  partidaId,
-                  empresaId: evento.empresa_id,
-                  eventoId,
-                  timeId: time.id,
-                }
-              );
+            try {
+              for (const time of teamsWithChildren) {
+                await query(
+                  `INSERT INTO zone_conquest_team_tempos (id, partida_id, empresa_id, evento_id, time_id, status, zones_dominated, checkpoints_read, total_points, started_at)
+                   VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, 'active', 0, 0, 0, CURRENT_TIMESTAMP)`,
+                  {
+                    id: require('uuid').v4(),
+                    partidaId,
+                    empresaId: evento.empresa_id,
+                    eventoId,
+                    timeId: time.id,
+                  }
+                );
+              }
+              console.log(`   ✓ ${teamsWithChildren.length} time(s) inicializados em zone_conquest_team_tempos`);
+            } catch (err) {
+              console.warn(`   ⚠️ Erro ao inicializar zone_conquest_team_tempos: ${err.message}`);
             }
-            console.log(`   ✓ ${teamsWithChildren.length} time(s) inicializados em zone_conquest_team_tempos`);
           } else if (zoneMode === 'individual') {
             // 🆕 Inicializar Zone Conquest INDIVIDUAL com participant states
             console.log(`   🎯 [INICIAR-JOGO] Inicializando modo INDIVIDUAL...`);
