@@ -1,6 +1,12 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 
+// Tempo sem nenhuma leitura para um checkpoint voltar a ficar livre (sem
+// equipe dominando). Usado tanto para liberar a mesma criança pra
+// reconquistar quanto pela varredura periódica que zera o domínio sozinho
+// (checkStaleTeamCheckpoints, em index.js).
+const TEAM_CHECKPOINT_RESET_MS = 90 * 1000;
+
 // ==================== FUNÇÕES DE INICIALIZAÇÃO ====================
 
 /**
@@ -169,26 +175,30 @@ async function processZoneConquestTeamScan({
     // a qualquer momento — checkpoints são disputados em tempo real, não em
     // rodízio como o Treasure Hunt.
 
-    // 2. Validar se criança já leu este checkpoint nesta rodada (CONSTRAINT UNIQUE)
-    const existingRead = await queryOne(
-      `SELECT id FROM zone_conquest_team_scans
-       WHERE partida_id = @partidaId
-         AND round_number = @roundNumber
-         AND crianca_id = @criancaId
-         AND checkpoint_id = @checkpointId`,
-      {
-        partidaId: partida.id,
-        roundNumber: partida.round_number,
-        criancaId: crianca.id,
-        checkpointId,
-      }
+    // 2. Uma criança não pode reconquistar um checkpoint que ela mesma já
+    // domina (evita farm de pontos batendo a pulseira repetidamente). Isso
+    // só vale enquanto o checkpoint estiver "ativo": se ninguém o ler por
+    // TEAM_CHECKPOINT_RESET_MS, ele volta a ficar livre para todo mundo,
+    // inclusive para quem já dominou antes (ver checkExpiredGames/
+    // checkStaleTeamCheckpoints no index.js, que zera o domínio sozinho
+    // depois desse tempo de inatividade).
+    const checkpointState = await queryOne(
+      `SELECT territory_owner_crianca_id, last_conquered_at FROM checkpoints WHERE id = @checkpointId`,
+      { checkpointId }
     );
+    const lastConqueredAt = checkpointState?.last_conquered_at
+      ? new Date(checkpointState.last_conquered_at).getTime()
+      : null;
+    const stillActive = lastConqueredAt !== null && (now.getTime() - lastConqueredAt) < TEAM_CHECKPOINT_RESET_MS;
+    const dominatedBySameChild = stillActive
+      && checkpointState.territory_owner_crianca_id
+      && String(checkpointState.territory_owner_crianca_id).toLowerCase() === String(crianca.id).toLowerCase();
 
-    if (existingRead) {
-      console.log(`   ⚠️ Criança já leu este checkpoint nesta rodada`);
+    if (dominatedBySameChild) {
+      console.log(`   ⚠️ ${crianca.name} já domina este checkpoint — aguarde outra equipe conquistar ou 1m30s sem leituras`);
       return {
         accepted: false,
-        error: 'Você já leu este checkpoint nesta rodada',
+        error: 'Você já dominou este checkpoint. Aguarde outra equipe conquistar ou 1m30s sem leituras para liberar.',
       };
     }
 
@@ -269,15 +279,21 @@ async function processZoneConquestTeamScan({
         { timeId: crianca.time_id }
       );
 
-      // UPDATE checkpoint: marcar como dominado por esta equipe
+      // UPDATE checkpoint: marcar como dominado por esta equipe. Também
+      // grava qual criança fez a leitura (territory_owner_crianca_id) —
+      // usado só para a regra de "não pode reconquistar o que já domina",
+      // sem relação com o modo individual (que usa a mesma coluna, mas
+      // nunca roda ao mesmo tempo que o modo equipe).
       await tx.query(
         `UPDATE checkpoints SET
            territory_owner_time_id = @timeId,
+           territory_owner_crianca_id = @criancaId,
            last_conquered_at = @agora
          WHERE id = @checkpointId`,
         {
           checkpointId,
           timeId: crianca.time_id,
+          criancaId: crianca.id,
           agora: now,
         }
       );
@@ -444,4 +460,5 @@ module.exports = {
   getActiveZoneConquestTeamGame,
   getZoneConquestTeamStatus,
   stopZoneConquestTeam,
+  TEAM_CHECKPOINT_RESET_MS,
 };

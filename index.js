@@ -70,7 +70,7 @@ const {
   startZoneConquestIndividual,
   stopZoneConquestIndividual,
 } = require('./utils/zoneConquestIndividualDB');
-const { stopZoneConquestTeam } = require('./utils/zoneConquestTeam');
+const { stopZoneConquestTeam, TEAM_CHECKPOINT_RESET_MS } = require('./utils/zoneConquestTeam');
 
 const app = express();
 const server = http.createServer(app);
@@ -1159,6 +1159,54 @@ async function checkExpiredGames() {
 
 const expiredGamesInterval = setInterval(checkExpiredGames, 15000);
 
+// Zone Conquest TEAM não tem fila: qualquer equipe pode ler qualquer
+// checkpoint disponível a qualquer momento. Mas um checkpoint dominado deve
+// voltar a ficar livre (sem equipe dominando) sozinho depois de
+// TEAM_CHECKPOINT_RESET_MS sem nenhuma leitura — isso precisa de uma
+// varredura ativa, não só reagir na próxima leitura, porque o telão deve
+// mostrar o checkpoint livre mesmo que ninguém escaneie nada depois.
+async function checkStaleTeamCheckpoints() {
+  try {
+    const cutoff = new Date(Date.now() - TEAM_CHECKPOINT_RESET_MS);
+    const staleCheckpoints = await allQuery(
+      `SELECT c.id, c.evento_id
+       FROM checkpoints c
+       WHERE c.territory_owner_time_id IS NOT NULL
+         AND c.last_conquered_at IS NOT NULL
+         AND c.last_conquered_at < @cutoff
+         AND EXISTS (
+           SELECT 1 FROM zone_conquest_team_partidas p
+           WHERE LOWER(p.evento_id) = LOWER(c.evento_id) AND p.status = 'active'
+         )`,
+      { cutoff }
+    );
+
+    const eventosAfetados = new Set();
+    for (const checkpoint of staleCheckpoints) {
+      await query(
+        `UPDATE checkpoints SET
+           territory_owner_time_id = NULL,
+           territory_owner_crianca_id = NULL
+         WHERE id = @id`,
+        { id: checkpoint.id }
+      );
+      eventosAfetados.add(checkpoint.evento_id);
+      console.log(`   🔓 [ZONE-TEAM] Checkpoint ${checkpoint.id} liberado após 1m30s sem leituras`);
+    }
+
+    for (const eventoId of eventosAfetados) {
+      global.broadcastToEvent(eventoId, {
+        type: 'TERRITORY_RESET',
+        payload: { eventoId, timestamp: new Date().toISOString() },
+      });
+    }
+  } catch (err) {
+    console.error('❌ [ZONE-TEAM] Erro ao liberar checkpoints inativos:', err.message);
+  }
+}
+
+const staleTeamCheckpointsInterval = setInterval(checkStaleTeamCheckpoints, 10000);
+
 // DEBUG: Reset territory lock de um checkpoint
 app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
@@ -2096,6 +2144,7 @@ async function shutdown(signal) {
 
   clearInterval(interval);
   clearInterval(expiredGamesInterval);
+  clearInterval(staleTeamCheckpointsInterval);
   wss.clients.forEach((client) => client.close(1001, 'Servidor reiniciando'));
 
   server.close(() => {
