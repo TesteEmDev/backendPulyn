@@ -39,8 +39,18 @@ function broadcastGameEvent(eventoId, type, payload = {}) {
   }
 }
 
+// ✅ Exceção: leitura de zonas e planta baixa do mapa — o app da família
+// precisa desses dois endpoints para exibir o mapa/rastreio do evento (eles
+// já têm sua própria checagem de acesso liberando o role 'family' logo
+// abaixo). Sem essa exceção, esse portão bloqueava a requisição antes
+// mesmo de chegar nessa checagem, tornando-a inalcançável.
+const FAMILY_ALLOWED_READ_PATH = /\/[^/]+\/(zones|floor-plan)$/;
+
 router.use(verifyToken, (req, res, next) => {
-  if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
+  const isFamilyAllowedRead = req.method === 'GET' && FAMILY_ALLOWED_READ_PATH.test(req.path);
+  if (req.user?.role === 'family' && !isFamilyAllowedRead) {
+    return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
+  }
   next();
 });
 
