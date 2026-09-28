@@ -206,6 +206,7 @@ router.post('/', async (req, res) => {
   try {
     console.log(`\n🔵 [LEITURA-DEBUG] POST /api/leituras recebido!`);
     const { checkpointId, uid, brincadeiraId, signal, readingId: requestedReadingId } = req.body;
+    
     const normalizedUid = normalizeUid(uid);
     const readingId = getReadingId(req, requestedReadingId);
     const now = new Date();
@@ -219,17 +220,14 @@ router.post('/', async (req, res) => {
     // O checkpoint define a empresa e o evento da leitura.
     const checkpoint = await queryOne('SELECT id, empresa_id, evento_id, status, checkpoint_purpose FROM checkpoints WHERE id = @id', { id: checkpointId });
     if (!checkpoint) {
-      console.log(`❌ [LEITURA] Checkpoint não encontrado: ${checkpointId}`);
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
     if (String(checkpoint.checkpoint_purpose || 'game').trim().toLowerCase() === 'reception') {
-      console.log(`❌ [LEITURA] Checkpoint de recepção rejeitado na rota de jogo: ${checkpointId}`);
       return res.status(409).json({ ok: false, error: 'Use a rota de recepção para este checkpoint' });
     }
 
     const processedReading = await findProcessedReading(readingId, checkpoint);
     if (processedReading) {
-      console.log(`↩️ [LEITURA] Leitura ${readingId} já processada; sem nova pontuação ou broadcast`);
       return await sendProcessedReading(res, processedReading);
     }
 
@@ -247,7 +245,6 @@ router.post('/', async (req, res) => {
 
     // A leitura é enviada também quando a pulseira ainda não existe no banco,
     // pois as telas de recepção precisam poder cadastrá-la pelo NFC.
-    console.log(`\n📱 [LEITURA] Pulseira lida: ${normalizedUid} (original: ${uid})`);
     broadcast(broadcastData);
 
     const treasureSession = await getActiveSession(checkpoint.evento_id);
@@ -265,7 +262,6 @@ router.post('/', async (req, res) => {
       } catch (err) {
       // Se coluna last_seen não existe ainda, só atualiza o status
       if (err.message.includes('last_seen')) {
-        console.log('⚠️ Coluna last_seen ainda não existe, atualizando apenas status...');
         await query(
           `UPDATE checkpoints SET status = 'online' WHERE id = @checkpointId`,
           { checkpointId }
@@ -286,12 +282,10 @@ router.post('/', async (req, res) => {
     );
 
     if (pulseira && String(pulseira.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
-      console.log(`❌ [LEITURA] Pulseira de outra empresa no checkpoint ${checkpointId}`);
       return res.status(403).json({ ok: false, error: 'Pulseira não pertence a esta empresa' });
     }
 
     if (!pulseira) {
-      console.log('   ⚠️ [LEITURA] Pulseira não cadastrada ainda');
       return res.json({
         ok: true,
         registered: false,
@@ -303,7 +297,6 @@ router.post('/', async (req, res) => {
 
     const braceletStatus = String(pulseira.status || '').trim().toLowerCase();
     if (braceletStatus !== 'em_uso' || !pulseira.crianca_id) {
-      console.log(`   ⚠️ [LEITURA] Pulseira não está vinculada a uma criança ativa (status: ${pulseira.status})`);
       return res.json({
         ok: true,
         registered: false,
@@ -322,7 +315,6 @@ router.post('/', async (req, res) => {
     );
 
     if (!crianca) {
-      console.log('   ⚠️ [LEITURA] Vínculo da pulseira inconsistente com a criança');
       return res.json({
         ok: true,
         registered: false,
@@ -336,7 +328,6 @@ router.post('/', async (req, res) => {
     // ✅ VALIDAÇÃO CROSS-TENANT/EVENTO: a criança deve pertencer ao mesmo
     // tenant e ao mesmo evento do checkpoint que recebeu a leitura.
     if (String(crianca.empresa_id).trim().toLowerCase() !== String(checkpoint.empresa_id).trim().toLowerCase()) {
-      console.log(`❌ [LEITURA] Violação de segurança: criança da empresa ${crianca.empresa_id} tentou usar checkpoint da empresa ${checkpoint.empresa_id}`);
       return res.status(403).json({ 
         ok: false,
         error: 'Segurança: empresa_id não corresponde' 
@@ -344,7 +335,6 @@ router.post('/', async (req, res) => {
     }
 
     if (String(crianca.evento_id).trim().toLowerCase() !== String(checkpoint.evento_id).trim().toLowerCase()) {
-      console.log(`⚠️ [LEITURA] Pulseira cadastrada em outro evento: criança=${crianca.evento_id}, checkpoint=${checkpoint.evento_id}`);
       return res.json({
         ok: true,
         registered: true,
@@ -355,36 +345,9 @@ router.post('/', async (req, res) => {
     }
     
     // ✅ Pulseira já cadastrada - processar como leitura de jogo
-    console.log(`   ✅ [LEITURA] Pulseira cadastrada: ${crianca.name} (evento_id: ${crianca.evento_id}, empresa_id: ${crianca.empresa_id})`);
     
     // ✨ NOVO: Validar se o evento está ACTIVE antes de processar pontos
     const evento = await queryOne('SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@id)', { id: crianca.evento_id });
-    
-    console.log(`   📋 [LEITURA] Verificando status do evento...`);
-    console.log(`      ID do Evento: ${crianca.evento_id}`);
-    console.log(`      Status: ${evento?.status || 'NÃO ENCONTRADO'}`);
-    
-    if (!evento) {
-      console.log(`   ❌ [LEITURA] Evento não encontrado! Pulseira não será processada.`);
-      return res.json({ 
-        ok: true, 
-        registered: true, 
-        braceletCode: normalizedUid,
-        authorized: false,
-        message: 'Evento não encontrado. Inicie o evento primeiro.'
-      });
-    }
-    
-    if (evento.status !== 'active') {
-      console.log(`   ⚠️ [LEITURA] Evento NÃO está ativo (status: ${evento.status}). BLOQUEANDO pontos e feedback de cor.`);
-      return res.json({
-        ok: true,
-        registered: true,
-        braceletCode: normalizedUid,
-        authorized: false,
-        message: 'Leitura fora de jogo. Nenhum ponto foi contabilizado.'
-      });
-    }
     
     // Caça ao Monstro tem prioridade sobre o fluxo de território e confirma
     // scan, HP, vencedor e leitura na mesma transação.
@@ -472,6 +435,51 @@ router.post('/', async (req, res) => {
               eventoId: checkpoint.evento_id,
             },
           });
+
+          // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile
+          const checkpointData = await queryOne(
+            'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+            { id: checkpointId }
+          );
+          
+          console.log(`🎬 [RASTREIO] Monster Hunt - Checkpoint: ${checkpointId}`);
+          console.log(`🎬 [RASTREIO]   - checkpointData: ${JSON.stringify(checkpointData)}`);
+          console.log(`🎬 [RASTREIO]   - map_x: ${checkpointData?.map_x} (type: ${typeof checkpointData?.map_x})`);
+          console.log(`🎬 [RASTREIO]   - map_y: ${checkpointData?.map_y} (type: ${typeof checkpointData?.map_y})`);
+          
+          // ⚠️ CRITICAL DEBUG: Se coordinates são NULL, esse é o problema!
+          if (checkpointData?.map_x == null || checkpointData?.map_y == null) {
+            console.error(`❌ [RASTREIO] CRÍTICO: Checkpoint ${checkpointId} não tem coordenadas! map_x=${checkpointData?.map_x}, map_y=${checkpointData?.map_y}`);
+            console.error(`   Verifique se a coluna 'map_x' e 'map_y' existem e têm valores para este checkpoint`);
+          }
+          
+          const territoryPayload = {
+            type: 'TERRITORY_CONQUERED',
+            payload: {
+              id: leituraId,
+              checkpointId,
+              uid: normalizedUid,
+              criancaId: crianca.id,
+              criancaName: crianca.name,
+              timeId: crianca.time_id,
+              teamColor: monsterResult.teamColor || '#FF0000',
+              points: 0,
+              lockDurationSeconds: 0,
+              timestamp: now.toISOString(),
+              eventoId: crianca.evento_id,
+              gameType: 'monster_hunt',
+              mapX: checkpointData?.map_x || null,
+              mapY: checkpointData?.map_y || null,
+            }
+          };
+          
+          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Monster Hunt:`);
+          console.log(`   - Destinatário: evento ${crianca.evento_id}`);
+          console.log(`   - Criança: ${crianca.name}`);
+          console.log(`   - Checkpoint: ${checkpointId}`);
+          console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
+          console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
+          broadcast(territoryPayload);
         }
 
         if (monsterResult.gameCompleted && typeof global.finishMonsterGameState === 'function') {
@@ -576,6 +584,53 @@ router.post('/', async (req, res) => {
           },
         });
 
+        // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile (replicado de Zone)
+        if (treasureResult.accepted) {
+          const checkpointCoords = await queryOne(
+            'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+            { id: checkpointId }
+          );
+          
+          console.log(`🎬 [RASTREIO] Treasure Hunt - Checkpoint: ${checkpointId}`);
+          console.log(`🎬 [RASTREIO]   - checkpointCoords: ${JSON.stringify(checkpointCoords)}`);
+          console.log(`🎬 [RASTREIO]   - map_x: ${checkpointCoords?.map_x} (type: ${typeof checkpointCoords?.map_x})`);
+          console.log(`🎬 [RASTREIO]   - map_y: ${checkpointCoords?.map_y} (type: ${typeof checkpointCoords?.map_y})`);
+          
+          // ⚠️ CRITICAL DEBUG: Se coordinates são NULL, esse é o problema!
+          if (checkpointCoords?.map_x == null || checkpointCoords?.map_y == null) {
+            console.error(`❌ [RASTREIO] CRÍTICO: Checkpoint ${checkpointId} não tem coordenadas! map_x=${checkpointCoords?.map_x}, map_y=${checkpointCoords?.map_y}`);
+            console.error(`   Verifique se a coluna 'map_x' e 'map_y' existem e têm valores para este checkpoint`);
+          }
+          
+          const territoryPayload = {
+            type: 'TERRITORY_CONQUERED',
+            payload: {
+              id: leituraId,
+              checkpointId,
+              uid: normalizedUid,
+              criancaId: crianca.id,
+              criancaName: crianca.name,
+              timeId: crianca.time_id,
+              teamColor: treasureResult.teamColor || '#00AA00',
+              points: 0,
+              lockDurationSeconds: 0,
+              timestamp: now.toISOString(),
+              eventoId: checkpoint.evento_id,
+              gameType: 'treasure_hunt',
+              mapX: checkpointCoords?.map_x,
+              mapY: checkpointCoords?.map_y,
+            }
+          };
+          
+          console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Treasure Hunt:`);
+          console.log(`   - Destinatário: evento ${checkpoint.evento_id}`);
+          console.log(`   - Criança: ${crianca.name}`);
+          console.log(`   - Checkpoint: ${checkpointId}`);
+          console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
+          console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
+          broadcast(territoryPayload);
+        }
+
         if (treasureResult.finished && typeof global.finishTreasureGameState === 'function') {
           global.finishTreasureGameState(checkpoint.evento_id, now.toISOString());
         }
@@ -609,10 +664,73 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // ✅ ZONE CONQUEST: Novo jogo de domínio de zonas por equipe
+    const { getZoneConquestPartidaAtiva } = require('../utils/zoneConquest');
+    const zonePartidaAtiva = await getZoneConquestPartidaAtiva(checkpoint.evento_id);
+    
+    if (zonePartidaAtiva) {
+      const zoneResult = await withTransaction(async (tx) => {
+        const result = await processZoneConquestScan({
+          eventoId: checkpoint.evento_id,
+          checkpointId,
+          crianca,
+          brincadeiraId: zonePartidaAtiva.brincadeira_id,
+          uid: normalizedUid,
+          leituraId,
+          now,
+        });
+
+        if (result?.accepted) {
+          await tx.query(
+            `INSERT INTO leituras
+              (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
+               points_awarded, signal_strength, empresa_id)
+             VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
+                     0, @signal, @empresaId)`,
+            {
+              id: leituraId,
+              checkpointId,
+              criancaId: crianca.id,
+              uid: normalizedUid,
+              brincadeiraId: zonePartidaAtiva.brincadeira_id || null,
+              signal: signal || -45,
+              empresaId: crianca.empresa_id,
+            }
+          );
+        }
+
+        return result;
+      });
+
+      if (zoneResult) {
+        broadcast({
+          type: 'ZONE_CHECKPOINT_SCANNED',
+          payload: {
+            ...zoneResult,
+            checkpointId,
+            criancaId: crianca.id,
+            criancaName: crianca.name,
+            timeId: crianca.time_id,
+            eventoId: checkpoint.evento_id,
+          },
+        });
+
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: Boolean(zoneResult.accepted),
+          zone: true,
+          zoneAccepted: Boolean(zoneResult.accepted),
+          readingId: leituraId,
+          braceletCode: normalizedUid,
+          message: zoneResult.message || 'Leitura processada',
+        });
+      }
+    }
+
     const checkpointData = await queryOne('SELECT * FROM checkpoints WHERE id = @id', { id: checkpointId });
     
     if (!checkpointData) {
-      console.log(`   ⚠️ [LEITURA] Checkpoint não encontrado`);
       return res.json({ ok: true, registered: true, braceletCode: normalizedUid, message: 'Pulseira cadastrada' });
     }
     
@@ -775,7 +893,6 @@ router.post('/', async (req, res) => {
     
     if (isLocked) {
       const remainingSeconds = Math.ceil((new Date(checkpointData.territory_locked_until) - now) / 1000);
-      console.log(`   🔒 [LEITURA] Território BLOQUEADO por ${remainingSeconds}s`);
       return res.json({ 
         ok: true, registered: true, braceletCode: normalizedUid,
         territoryLocked: true, remainingSeconds,
@@ -801,7 +918,6 @@ router.post('/', async (req, res) => {
     // Depois que o lock termina, o mesmo time respeita o cooldown de 60s.
     if (ownerIsSameTeam && isCooldown) {
       const remainingSeconds = Math.ceil((new Date(checkpointData.territory_cooldown_until) - now) / 1000);
-      console.log(`   ⏳ [LEITURA] Time já conquistou este território; cooldown de ${remainingSeconds}s`);
       return res.json({
         ok: true, registered: true, authorized: false,
         braceletCode: normalizedUid,
@@ -818,8 +934,6 @@ router.post('/', async (req, res) => {
     
     const lockedUntil = new Date(now.getTime() + lockDuration);
     const cooldownUntil = new Date(now.getTime() + cooldownDuration);
-    
-    console.log(`🎨 [LEITURA] Buscando cor do time para criança: ${crianca.name} (time_id: ${crianca.time_id})`);
     
     // A conquista, a pontuação e os dois históricos precisam ser confirmados
     // juntos. Se qualquer escrita falhar, toda a operação é desfeita.
@@ -949,7 +1063,25 @@ router.post('/', async (req, res) => {
     
     // ✅ Broadcast APENAS quando evento está ativo (já passou na validação acima)
     console.log(`📡 [LEITURA] Enviando TERRITORY_CONQUERED broadcast...`);
-    broadcast({
+    
+    // 📍 Buscar coordenadas do checkpoint para rastreio no mobile
+    const checkpointCoords = await queryOne(
+      'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+      { id: checkpointId }
+    );
+    
+    console.log(`🎬 [RASTREIO] Zone Conquest - Checkpoint: ${checkpointId}`);
+    console.log(`🎬 [RASTREIO]   - checkpointCoords: ${JSON.stringify(checkpointCoords)}`);
+    console.log(`🎬 [RASTREIO]   - map_x: ${checkpointCoords?.map_x} (type: ${typeof checkpointCoords?.map_x})`);
+    console.log(`🎬 [RASTREIO]   - map_y: ${checkpointCoords?.map_y} (type: ${typeof checkpointCoords?.map_y})`);
+    
+    // ⚠️ CRITICAL DEBUG: Se coordinates são NULL, esse é o problema!
+    if (checkpointCoords?.map_x == null || checkpointCoords?.map_y == null) {
+      console.error(`❌ [RASTREIO] CRÍTICO: Checkpoint ${checkpointId} não tem coordenadas! map_x=${checkpointCoords?.map_x}, map_y=${checkpointCoords?.map_y}`);
+      console.error(`   Verifique se a coluna 'map_x' e 'map_y' existem e têm valores para este checkpoint`);
+    }
+    
+    const zonePayload = {
       type: 'TERRITORY_CONQUERED',
       payload: {
         id: leituraId,
@@ -962,9 +1094,21 @@ router.post('/', async (req, res) => {
         points: pointsAwarded,
         lockDurationSeconds: 15,
         timestamp: now.toISOString(),
-        eventoId: crianca.evento_id  // ✨ NOVO: Adicionar evento_id para broadcast por sala
+        eventoId: crianca.evento_id,
+        gameType: 'zone_conquest',
+        mapX: checkpointCoords?.map_x,
+        mapY: checkpointCoords?.map_y,
       }
-    });
+    };
+    
+    console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Zone Conquest:`);
+    console.log(`   - Destinatário: evento ${crianca.evento_id}`);
+    console.log(`   - Criança: ${crianca.name}`);
+    console.log(`   - Checkpoint: ${checkpointId}`);
+    console.log(`   - Coordenadas: mapX=${zonePayload.payload.mapX}, mapY=${zonePayload.payload.mapY}`);
+    console.log(`   - Estrutura completa: ${JSON.stringify(zonePayload, null, 2)}`);
+    
+    broadcast(zonePayload);
     
     console.log(`✅ [LEITURA] Pontos processados com sucesso!\n`);
     
@@ -1039,6 +1183,7 @@ router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
 router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
   try {
     const eventoId = String(req.params.eventoId || '').trim();
+    const brincadeiraId = String(req.query.brincadeiraId || '').trim();
     const empresaId = req.user.empresa_id;
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
     const master = isMaster(req) ? 1 : 0;

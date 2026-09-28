@@ -151,7 +151,6 @@ global.broadcast = (message) => {
 // ✨ NOVO: Função de broadcast para um evento específico
 global.broadcastToEvent = (eventoId, message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
-  console.log(`📡 Broadcasting para evento ${eventoId}: ${typeof message === 'object' ? message.type : message}`);
   
   wss.clients.forEach((client) => {
     if (client.readyState === 1
@@ -330,7 +329,6 @@ wss.on('connection', async (ws, req) => {
       return;
     }
   }
-  
   console.log(`✅ Cliente WebSocket conectado ao evento: ${eventoId}. Total: ${wss.clients.size}`);
   
   // Ping/Pong para manter vivo
@@ -349,8 +347,6 @@ wss.on('connection', async (ws, req) => {
       if (ws.controlScope) return;
       if (!ws.kioskAuthorized) return;
       
-      console.log(`📨 Mensagem recebida via WebSocket (evento: ${eventoId}):`, data.type);
-      
       // Os terminais de autoatendimento apenas recebem leituras; nunca alteram modo/comandos.
       if (KIOSK_ROLES.has(ws.user?.role) && (data.type === 'SET_MODE' || data.type === 'COMMAND')) {
         return;
@@ -365,13 +361,11 @@ wss.on('connection', async (ws, req) => {
           persistEventMode(eventoId, currentMode, currentGameType).catch((error) => {
             console.error('❌ Erro ao persistir modo do evento:', error.message);
           });
-          console.log(`🎯 Modo atualizado via WebSocket: ${currentMode} (evento: ${eventoId})`);
         }
       }
 
       // Se é comando para Arduino, broadcast para o evento
       if (data.type === 'SET_MODE' || data.type === 'COMMAND') {
-        console.log(`📡 Enviando comando para Arduino (evento: ${eventoId}): ${data.type}`);
         global.broadcastToEvent(eventoId, data);
       }
     } catch (err) {
@@ -620,17 +614,31 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       : null;
     let treasureStart = null;
     let monsterStart = null;
+    let zoneConquestStart = null;
+    
     if (gameType === TREASURE_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
       treasureStart = await startTreasureGame(eventoId, selectedGame.id);
       await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
     } else if (gameType === MONSTER_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch MONSTER`);
       monsterStart = await startMonsterGame(eventoId, selectedGame.id);
       await stopTreasureGame(eventoId);
+      await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Monstro iniciado com checkpoint especial`);
-    } else {
+    } else if (gameType === ZONE_CONQUEST_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch ZONE_CONQUEST`);
+      zoneConquestStart = await startZoneConquestGame(eventoId, selectedGame.id);
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
+      console.log(`   ✓ Zona Conquest iniciado`);
+    } else {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch STOP_ALL (tipo desconhecido: ${gameType})`);
+      await stopTreasureGame(eventoId);
+      await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
     }
 
     // Fecha qualquer game_session anterior presa como 'active' neste evento.
@@ -783,8 +791,12 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // ✅ IMPORTANTE: Atualizar o banco de dados
     console.log(`📝 [INICIAR-JOGO] Atualizando evento no banco de dados...`);
     const updateResult = await query(
-      `UPDATE eventos SET status = @status WHERE LOWER(id) = LOWER(@eventoId)`,
-      { status: 'active', eventoId }
+      `UPDATE eventos SET 
+        status = @status, 
+        active_brincadeira_id = @gameId,
+        active_game_type = @gameType
+       WHERE LOWER(id) = LOWER(@eventoId)`,
+      { status: 'active', eventoId, gameId, gameType }
     );
     console.log(`   Atualização executada`);
     
@@ -931,6 +943,7 @@ async function stopGameForEvento(eventoId) {
 
     await stopTreasureGame(eventoId);
     await stopMonsterGame(eventoId);
+    await stopZoneConquestGame(eventoId);
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
@@ -1832,6 +1845,9 @@ app.use('/api/zone-conquest', zoneConquestRoutes);
 
 // QR Code
 app.use('/api/qrcode', qrcodeRoutes);
+
+// Vinculação Familiar (pais <-> crianças via QR Code)
+app.use('/api/family', familyLinkingRoutes);
 
 // Recursos do dashboard master
 app.use('/api/planos', planosRoutes);

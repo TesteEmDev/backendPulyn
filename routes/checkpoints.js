@@ -58,7 +58,6 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
     } catch (err) {
       // Se coluna last_seen não existe, só atualiza o status
       if (err.message.includes('last_seen')) {
-        console.log('⚠️ Coluna last_seen ainda não existe, atualizando apenas status...');
         await query(
           `UPDATE checkpoints SET status = 'online' WHERE id = @id`,
           { id: checkpoint_id }
@@ -68,7 +67,6 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
       }
     }
     
-    console.log(`💓 Heartbeat recebido do checkpoint ${checkpoint_id}`);
     res.json({ ok: true, message: 'Checkpoint online', timestamp: now });
   } catch (err) {
     console.error('❌ Erro ao processar heartbeat:', err);
@@ -79,16 +77,25 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
 router.get('/evento/:evento_id', verifyToken, async (req, res) => {
   try {
     const { evento_id } = req.params;
+    console.log(`📍 [CHECKPOINTS] GET /evento/:evento_id chamado`);
+    console.log(`   👤 User: ${req.user.email} (role: ${req.user.role})`);
+    console.log(`   🎯 evento_id: ${evento_id}`);
+    
     const evento = await queryOne(
       'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
       { evento_id }
     );
 
     if (!evento) {
+      console.log(`❌ [CHECKPOINTS] Evento ${evento_id} NÃO ENCONTRADO no banco`);
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+    console.log(`✅ [CHECKPOINTS] Evento encontrado: ${evento.id}, empresa_id: ${evento.empresa_id}`);
+
+    // Permitir: master (acesso total), family (acesso a leitura), ou mesma empresa
+    if (!isMaster(req) && req.user.role !== 'family' && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      console.log(`❌ [CHECKPOINTS] Acesso negado para usuario ${req.user.email}`);
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
@@ -101,6 +108,7 @@ router.get('/evento/:evento_id', verifyToken, async (req, res) => {
       { evento_id, empresa_id: evento.empresa_id }
     );
 
+    console.log(`📊 [CHECKPOINTS] Encontrados ${checkpoints.length} checkpoints para evento ${evento_id}`);
     res.json(checkpoints || []);
   } catch (err) {
     console.error('❌ Erro ao listar checkpoints:', err.message);
@@ -270,6 +278,7 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
 router.post('/:checkpoint_id/authorize-tags', async (req, res) => {
   try {
     const { checkpoint_id } = req.params;
+    console.log(`\n📖 [CHECKPOINTS-AUTH-TAGS] POST recebido: checkpointId=${checkpoint_id}, body=${JSON.stringify(req.body)}`);
     const { tags } = req.body; // Array de UIDs: ["1C:AB:3A:72", "AA:BB:CC:DD"]
 
     if (!Array.isArray(tags) || tags.length === 0) {
