@@ -178,4 +178,70 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
   }
 });
 
+/**
+ * ✅ DELETE /api/family/children/:childId/unlink
+ * Desvincula uma criança da família
+ * Chamado quando pais quer remover uma criança da sua conta
+ */
+router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
+  console.log('📞 [FAMILY-LINKING] DELETE /children/:childId/unlink chamado');
+  console.log(`   Usuario: ${req.user?.email || 'ANÔNIMO'}`);
+  console.log(`   Role: ${req.user?.role || 'NENHUMA'}`);
+  console.log(`   childId: ${req.params.childId}`);
+  
+  try {
+    const { childId } = req.params;
+
+    // Verificar se é role 'family'
+    if (req.user.role !== 'family') {
+      console.log(`   ❌ Acesso negado: role é ${req.user.role}, esperado 'family'`);
+      return res.status(403).json({ error: 'Apenas usuários com perfil familiar podem desvincullar' });
+    }
+
+    if (!childId) {
+      console.log(`   ❌ childId vazio`);
+      return res.status(400).json({ error: 'childId é obrigatório' });
+    }
+
+    console.log(`   🔍 Buscando vínculo...`);
+    // Verificar se a criança pertence a essa família
+    const link = await queryOne(
+      `SELECT l.* FROM family_child_links l
+       WHERE l.crianca_id = @childId AND l.login_id = @loginId`,
+      { childId, loginId: req.user.id }
+    );
+
+    if (!link) {
+      console.log(`   ❌ Vínculo não encontrado`);
+      return res.status(404).json({
+        error: 'Criança não vinculada a sua família',
+        code: 'LINK_NOT_FOUND'
+      });
+    }
+
+    console.log(`   ✅ Vínculo encontrado: ${link.id}`);
+    console.log(`   📝 Status atual: ${link.status}`);
+
+    // Desvincullar = marcar como 'inactive'
+    await query(
+      `UPDATE family_child_links
+       SET status = 'inactive'
+       WHERE id = @linkId`,
+      { linkId: link.id }
+    );
+
+    console.log(`   ✅ Criança desvinculada com sucesso`);
+
+    res.json({
+      success: true,
+      message: 'Criança desvinculada com sucesso!'
+    });
+
+  } catch (error) {
+    console.error('❌ ERRO ao desvincullar criança:', error.message);
+    console.error('   Stack:', error.stack);
+    res.status(500).json({ error: 'Erro ao desvincullar criança', details: error.message });
+  }
+});
+
 module.exports = router;
