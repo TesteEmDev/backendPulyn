@@ -509,32 +509,35 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
 // Planta do evento: armazenada no banco para sobreviver a reload/redeploy do frontend.
 router.get('/:id/floor-plan', verifyToken, async (req, res) => {
   try {
-    // 🎯 Para family role: verificar se tem criança vinculada neste evento
+    const { id } = req.params;
+    console.log(`📍 [FLOOR-PLAN] GET /:id/floor-plan chamado`);
+    console.log(`   👤 User: ${req.user.email} (role: ${req.user.role})`);
+    console.log(`   🎯 evento_id: ${id}`);
+    
     let query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
-    let params = { id: req.params.id };
+    let params = { id };
     
     if (isMaster(req)) {
       // Master: acesso total
       query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
     } else if (req.user.role === 'family') {
-      // Family: só pode ver eventos onde tem criança vinculada
-      query = `
-        SELECT DISTINCT e.id, e.empresa_id, e.floor_plan_data, e.floor_plan_name, e.floor_plan_type 
-        FROM eventos e
-        JOIN criancas c ON c.evento_id = e.id
-        JOIN family_child_links l ON l.crianca_id = c.id
-        WHERE e.id = @id AND l.login_id = @loginId AND (l.status = 'approved' OR l.status = 'pending')
-      `;
-      params.loginId = req.user.id;
+      // Family: acesso à qualquer evento (para visualizar o mapa/zonas/checkpoints)
+      // Permissão mais granular é feita em outros endpoints (pontuação, etc)
+      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
     } else {
-      // Admin/Reception: vê eventos da sua empresa
+      // Admin/Reception/Game Master/Display: vê eventos da sua empresa
       query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id AND empresa_id = @empresa_id';
       params.empresa_id = req.user.empresa_id;
     }
     
     const evento = await queryOne(query, params);
 
-    if (!evento) return res.status(404).json({ error: 'Evento não encontrado ou você não tem permissão' });
+    if (!evento) {
+      console.log(`❌ [FLOOR-PLAN] Evento ${id} NÃO ENCONTRADO para usuário ${req.user.email}`);
+      return res.status(404).json({ error: 'Evento não encontrado ou você não tem permissão' });
+    }
+    
+    console.log(`✅ [FLOOR-PLAN] Evento ${id} encontrado`);
     res.json({
       eventId: evento.id,
       floorPlan: evento.floor_plan_data
@@ -817,9 +820,8 @@ module.exports = router;
 router.get('/:id/zones', verifyToken, async (req, res) => {
   try {
     const evento_id = req.params.id;
-    const empresa_id = req.user.empresa_id;
     
-    // Verificar que o evento pertence à empresa (ou user é master)
+    // Verificar que o evento existe
     const evento = await queryOne(
       'SELECT empresa_id FROM eventos WHERE id = @id',
       { id: evento_id }
@@ -829,7 +831,8 @@ router.get('/:id/zones', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
     
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    // Verificar permissão: master acessa tudo, outros precisam pertencer à empresa
+    if (!isMaster(req) && req.user.role !== 'family' && evento.empresa_id !== req.user.empresa_id) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     

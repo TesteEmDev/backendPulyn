@@ -77,16 +77,25 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
 router.get('/evento/:evento_id', verifyToken, async (req, res) => {
   try {
     const { evento_id } = req.params;
+    console.log(`📍 [CHECKPOINTS] GET /evento/:evento_id chamado`);
+    console.log(`   👤 User: ${req.user.email} (role: ${req.user.role})`);
+    console.log(`   🎯 evento_id: ${evento_id}`);
+    
     const evento = await queryOne(
       'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
       { evento_id }
     );
 
     if (!evento) {
+      console.log(`❌ [CHECKPOINTS] Evento ${evento_id} NÃO ENCONTRADO no banco`);
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+    console.log(`✅ [CHECKPOINTS] Evento encontrado: ${evento.id}, empresa_id: ${evento.empresa_id}`);
+
+    // Permitir: master (acesso total), family (acesso a leitura), ou mesma empresa
+    if (!isMaster(req) && req.user.role !== 'family' && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      console.log(`❌ [CHECKPOINTS] Acesso negado para usuario ${req.user.email}`);
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
@@ -99,6 +108,7 @@ router.get('/evento/:evento_id', verifyToken, async (req, res) => {
       { evento_id, empresa_id: evento.empresa_id }
     );
 
+    console.log(`📊 [CHECKPOINTS] Encontrados ${checkpoints.length} checkpoints para evento ${evento_id}`);
     res.json(checkpoints || []);
   } catch (err) {
     console.error('❌ Erro ao listar checkpoints:', err.message);
