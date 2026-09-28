@@ -6,6 +6,33 @@ const { queryOne, query } = require('../database');
 const { createQRCodeForChild } = require('../utils/qrcode');
 
 /**
+ * 🌐 Detectar URL base automaticamente (funciona em localhost, dev e Render)
+ */
+const getBaseUrl = () => {
+  // Prioridade 1: Variável de ambiente explícita
+  if (process.env.FRONTEND_URL) {
+    console.log(`🌐 [QRCode] Usando FRONTEND_URL: ${process.env.FRONTEND_URL}`);
+    return process.env.FRONTEND_URL;
+  }
+
+  // Prioridade 2: URL do Render (automática)
+  if (process.env.RENDER_EXTERNAL_URL) {
+    console.log(`🌐 [QRCode] Usando RENDER_EXTERNAL_URL: ${process.env.RENDER_EXTERNAL_URL}`);
+    return process.env.RENDER_EXTERNAL_URL;
+  }
+
+  // Prioridade 3: Ambiente de produção
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`🌐 [QRCode] Produção detectada, usando Render URL`);
+    return 'https://backendpulyn.onrender.com';
+  }
+
+  // Fallback: Local
+  console.log(`🌐 [QRCode] Usando localhost (desenvolvimento)`);
+  return 'http://localhost:3000';
+};
+
+/**
  * Gerar QR Code para uma criança
  * GET /api/qrcode/generate/:criancaId
  */
@@ -32,10 +59,13 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     console.log(`✅ [QRCode] Criança encontrada: ${crianca.name}`);
 
-    // Usar a função correta que gera URL de rastreamento + salva no banco
+    // ✅ Usar a função que detecta URL automaticamente
+    const baseUrl = getBaseUrl();
+    console.log(`📌 [QRCode] URL base para QR: ${baseUrl}`);
+
     const { qrCode, trackingUrl, image } = await createQRCodeForChild(
       criancaId,
-      process.env.FRONTEND_URL || 'http://localhost:3000'
+      baseUrl
     );
 
     // Salvar código QR no banco para validação posterior
@@ -52,6 +82,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
     );
 
     console.log(`✅ [QRCode] QR Code salvo no banco: ${qrCode}`);
+    console.log(`✅ [QRCode] Tracking URL: ${trackingUrl}`);
 
     res.json({
       qrCodeDataUrl: `data:image/png;base64,${image.toString('base64')}`,
@@ -94,10 +125,13 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     console.log(`✅ [QRCode] Criança encontrada: ${crianca.name}`);
 
-    // Usar a função correta que gera URL de rastreamento + salva no banco
+    // ✅ Usar a função que detecta URL automaticamente
+    const baseUrl = getBaseUrl();
+    console.log(`📌 [QRCode] URL base para QR: ${baseUrl}`);
+
     const { qrCode, trackingUrl, image } = await createQRCodeForChild(
       criancaId,
-      process.env.FRONTEND_URL || 'http://localhost:3000'
+      baseUrl
     );
 
     // Salvar código QR no banco para validação posterior
@@ -114,6 +148,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
     );
 
     console.log(`✅ [QRCode] QR Code salvo no banco: ${qrCode}`);
+    console.log(`✅ [QRCode] Tracking URL: ${trackingUrl}`);
 
     res.json({
       qrCodeDataUrl: `data:image/png;base64,${image.toString('base64')}`,
