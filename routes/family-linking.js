@@ -1,3 +1,8 @@
+const express = require('express');
+const router = express.Router();
+const { verifyToken } = require('../utils/middleware');
+const { queryOne, query, withTransaction } = require('../database');
+
 /**
  * MOBILE: POST /api/family/qrcode/validate
  * Valida um QR code e vincula o pais/responsável à criança
@@ -25,27 +30,21 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     }
 
     // 🔍 Extrair o código QR do que foi escaneado
-    // O QR agora contém a URL de rastreamento: http://localhost:3000/child-performance/base64token
-    // Token = base64(criancaId:qrCode)
-    // Logo, precisamos extrair o código da URL
-    
     let codigoQR = null;
     
     // Tenta extrair de URL
     if (typeof qrCodeValue === 'string' && qrCodeValue.startsWith('http')) {
       console.log(`   🔗 Detectado como URL, extraindo token...`);
       try {
-        // Extrair token da URL: /child-performance/{token}
         const urlObj = new URL(qrCodeValue);
         const pathParts = urlObj.pathname.split('/');
         const token = pathParts[pathParts.length - 1];
         
-        // Decodificar base64: criancaId:qrCode
         const decoded = Buffer.from(token, 'base64').toString('utf-8');
         const parts = decoded.split(':');
         
         if (parts.length === 2) {
-          codigoQR = parts[1]; // O código QR está no segundo índice
+          codigoQR = parts[1];
           console.log(`   ✅ Código extraído de URL: ${codigoQR}`);
         }
       } catch (e) {
@@ -102,14 +101,13 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         `SELECT id, status FROM family_child_links
          WHERE login_id = @loginId 
            AND crianca_id = @criancaId
-         FOR UPDATE`, // ✅ Lock para thread safety
+         FOR UPDATE`,
         { loginId: req.user.id, criancaId: codigoVinculacao.crianca_id }
       );
 
       if (vinculacaoExistente) {
         // ✅ Já existe - verificar status
         if (vinculacaoExistente.status === 'inactive') {
-          // Re-ativar se estava inativa
           console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.id}`);
           await tx.query(
             `UPDATE family_child_links
@@ -118,7 +116,6 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
             { linkId: vinculacaoExistente.id }
           );
         } else {
-          // Já está ativa - lançar erro
           throw new Error('ALREADY_LINKED');
         }
       } else {
@@ -180,3 +177,5 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     res.status(500).json({ error: 'Erro ao validar QR code', details: error.message });
   }
 });
+
+module.exports = router;
