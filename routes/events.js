@@ -432,11 +432,13 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     
     // Iniciar o jogo conforme seu tipo
     if (gameType === MONSTER_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando Monster Game');
       await startMonsterGame(evento_id, brincadeira.id);
       await stopTreasureGame(evento_id);
       await stopZoneConquestTeam(evento_id);
       await stopZoneConquestIndividual(evento_id);
     } else if (gameType === TREASURE_GAME_TYPE) {
+      console.log('📍 [routes/events.js] Iniciando Treasure Game');
       await startTreasureGame(evento_id, brincadeira.id);
       await stopMonsterGame(evento_id);
       await stopZoneConquestTeam(evento_id);
@@ -454,6 +456,7 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       await stopTreasureGame(evento_id);
       await stopZoneConquestTeam(evento_id);
     } else {
+      console.log('📍 [routes/events.js] Parando todos os jogos (tipo:', gameType, ')');
       await stopMonsterGame(evento_id);
       await stopTreasureGame(evento_id);
       await stopZoneConquestTeam(evento_id);
@@ -599,14 +602,35 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
 // Planta do evento: armazenada no banco para sobreviver a reload/redeploy do frontend.
 router.get('/:id/floor-plan', verifyToken, async (req, res) => {
   try {
-    const evento = await queryOne(
-      isMaster(req)
-        ? 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id'
-        : 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
-      isMaster(req) ? { id: req.params.id } : { id: req.params.id, empresa_id: req.user.empresa_id }
-    );
+    const { id } = req.params;
+    console.log(`📍 [FLOOR-PLAN] GET /:id/floor-plan chamado`);
+    console.log(`   👤 User: ${req.user.email} (role: ${req.user.role})`);
+    console.log(`   🎯 evento_id: ${id}`);
+    
+    let query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+    let params = { id };
+    
+    if (isMaster(req)) {
+      // Master: acesso total
+      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+    } else if (req.user.role === 'family') {
+      // Family: acesso à qualquer evento (para visualizar o mapa/zonas/checkpoints)
+      // Permissão mais granular é feita em outros endpoints (pontuação, etc)
+      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+    } else {
+      // Admin/Reception/Game Master/Display: vê eventos da sua empresa
+      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id AND empresa_id = @empresa_id';
+      params.empresa_id = req.user.empresa_id;
+    }
+    
+    const evento = await queryOne(query, params);
 
-    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!evento) {
+      console.log(`❌ [FLOOR-PLAN] Evento ${id} NÃO ENCONTRADO para usuário ${req.user.email}`);
+      return res.status(404).json({ error: 'Evento não encontrado ou você não tem permissão' });
+    }
+    
+    console.log(`✅ [FLOOR-PLAN] Evento ${id} encontrado`);
     res.json({
       eventId: evento.id,
       floorPlan: evento.floor_plan_data
@@ -782,6 +806,105 @@ router.delete('/:id', verifyToken, async (req, res) => {
   }
 });
 
+/**
+ * ✅ POST /:evento_id/setup-active-game
+ * Configura uma brincadeira como ativa no evento
+ * Se brincadeiraId não for fornecido, cria uma nova "Captura de Territórios"
+ */
+router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+  try {
+    const evento_id = req.params.evento_id;
+    const { brincadeiraId } = req.body || {};
+    
+    console.log(`🎮 [routes/events.js] Configurando jogo ativo para evento: ${evento_id}`);
+
+    // 1️⃣ Validar evento existe e pertence à empresa
+    const evento = await queryOne(
+      isMaster(req)
+        ? 'SELECT id, empresa_id, name FROM eventos WHERE id = @id'
+        : 'SELECT id, empresa_id, name FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
+      isMaster(req) 
+        ? { id: evento_id }
+        : { id: evento_id, empresa_id: req.user.empresa_id }
+    );
+
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado ou acesso negado' });
+    }
+
+    let finalBrincadeiraId = brincadeiraId;
+
+    // 2️⃣ Se não forneceu ID, criar nova brincadeira
+    if (!finalBrincadeiraId) {
+      console.log(`   📝 Criando nova brincadeira para evento ${evento.name}`);
+      
+      const newBrincadeiraId = require('uuid').v4().toString();
+      
+      await query(`
+        INSERT INTO brincadeiras (id, name, description, type, game_type, status, default_points, empresa_id, duration)
+        VALUES (@id, @name, @description, @type, @gameType, @status, @points, @empresa_id, @duration)
+      `, {
+        id: newBrincadeiraId,
+        name: 'Captura de Territórios',
+        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseiras em checkpoints',
+        type: 'team',
+        gameType: 'standard',
+        status: 'active',
+        points: 10,
+        empresa_id: evento.empresa_id,
+        duration: 120
+      });
+      
+      finalBrincadeiraId = newBrincadeiraId;
+      console.log(`   ✅ Brincadeira criada: ${finalBrincadeiraId}`);
+    }
+
+    // 3️⃣ Validar que a brincadeira existe e pertence à empresa
+    const brincadeira = await queryOne(
+      'SELECT id, name, game_type FROM brincadeiras WHERE id = @id AND empresa_id = @empresa_id',
+      { id: finalBrincadeiraId, empresa_id: evento.empresa_id }
+    );
+
+    if (!brincadeira) {
+      return res.status(404).json({ error: 'Brincadeira não encontrada ou não pertence à empresa' });
+    }
+
+    // 4️⃣ Atualizar evento
+    await query(`
+      UPDATE eventos
+      SET 
+        active_brincadeira_id = @brincadeiraId,
+        active_game_type = @gameType,
+        status = 'active'
+      WHERE id = @id
+    `, {
+      id: evento_id,
+      brincadeiraId: finalBrincadeiraId,
+      gameType: brincadeira.game_type || 'standard'
+    });
+
+    console.log(`   ✅ Evento atualizado com brincadeira: ${brincadeira.name}`);
+
+    // 5️⃣ Retornar resultado
+    res.json({
+      success: true,
+      message: 'Jogo ativo configurado com sucesso',
+      evento: {
+        id: evento.id,
+        name: evento.name,
+      },
+      brincadeira: {
+        id: brincadeira.id,
+        name: brincadeira.name,
+        game_type: brincadeira.game_type,
+      }
+    });
+  } catch (err) {
+    console.error('❌ Erro ao configurar jogo ativo:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
 
 // ==================== ZONAS DO MAPA ====================
@@ -790,9 +913,8 @@ module.exports = router;
 router.get('/:id/zones', verifyToken, async (req, res) => {
   try {
     const evento_id = req.params.id;
-    const empresa_id = req.user.empresa_id;
     
-    // Verificar que o evento pertence à empresa (ou user é master)
+    // Verificar que o evento existe
     const evento = await queryOne(
       'SELECT empresa_id FROM eventos WHERE id = @id',
       { id: evento_id }
@@ -802,7 +924,8 @@ router.get('/:id/zones', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
     
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    // Verificar permissão: master acessa tudo, outros precisam pertencer à empresa
+    if (!isMaster(req) && req.user.role !== 'family' && evento.empresa_id !== req.user.empresa_id) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     

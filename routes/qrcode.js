@@ -2,7 +2,35 @@ const express = require('express');
 const router = express.Router();
 const QRCode = require('qrcode');
 const { verifyToken } = require('../utils/middleware');
-const { queryOne } = require('../database');
+const { queryOne, query } = require('../database');
+const { createQRCodeForChild } = require('../utils/qrcode');
+
+/**
+ * 🌐 Detectar URL base automaticamente (funciona em localhost, dev e Render)
+ */
+const getBaseUrl = () => {
+  // Prioridade 1: Variável de ambiente explícita
+  if (process.env.FRONTEND_URL) {
+    console.log(`🌐 [QRCode] Usando FRONTEND_URL: ${process.env.FRONTEND_URL}`);
+    return process.env.FRONTEND_URL;
+  }
+
+  // Prioridade 2: URL do Render (automática)
+  if (process.env.RENDER_EXTERNAL_URL) {
+    console.log(`🌐 [QRCode] Usando RENDER_EXTERNAL_URL: ${process.env.RENDER_EXTERNAL_URL}`);
+    return process.env.RENDER_EXTERNAL_URL;
+  }
+
+  // Prioridade 3: Ambiente de produção
+  if (process.env.NODE_ENV === 'production') {
+    console.log(`🌐 [QRCode] Produção detectada, usando Render URL`);
+    return 'https://backendpulyn.onrender.com';
+  }
+
+  // Fallback: Local
+  console.log(`🌐 [QRCode] Usando localhost (desenvolvimento)`);
+  return 'http://localhost:3000';
+};
 
 /**
  * Gerar QR Code para uma criança
@@ -20,7 +48,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, name, evento_id FROM criancas WHERE id = @criancaId',
+      'SELECT id, name, evento_id, empresa_id FROM criancas WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -31,30 +59,35 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     console.log(`✅ [QRCode] Criança encontrada: ${crianca.name}`);
 
-    // Gerar QR Code com o ID da criança
-    // O QR Code conterá: criancaId:eventoId:nome
-    const qrData = JSON.stringify({
-      criancaId: crianca.id,
-      eventoId: crianca.evento_id,
-      name: crianca.name,
-      timestamp: new Date().toISOString(),
-    });
+    // ✅ Usar a função que detecta URL automaticamente
+    const baseUrl = getBaseUrl();
+    console.log(`📌 [QRCode] URL base para QR: ${baseUrl}`);
 
-    console.log(`🔄 [QRCode] Gerando imagem do QR Code com dados:`, qrData);
+    const { qrCode, trackingUrl, image } = await createQRCodeForChild(
+      criancaId,
+      baseUrl
+    );
 
-    // Gerar QR Code como Data URL (base64)
-    const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
-      errorCorrectionLevel: 'H',
-      type: 'image/png',
-      quality: 0.95,
-      margin: 2,
-      width: 300,
-    });
+    // Salvar código QR no banco para validação posterior
+    await query(
+      `INSERT INTO family_linking_codes (crianca_id, evento_id, empresa_id, qr_code_value, tracking_url, created_at, expires_at, status)
+       VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
+      {
+        criancaId,
+        eventoId: crianca.evento_id,
+        empresaId: crianca.empresa_id,
+        qrCode,
+        trackingUrl
+      }
+    );
 
-    console.log(`✅ [QRCode] QR Code gerado com sucesso para ${crianca.name}`);
+    console.log(`✅ [QRCode] QR Code salvo no banco: ${qrCode}`);
+    console.log(`✅ [QRCode] Tracking URL: ${trackingUrl}`);
 
     res.json({
-      qrCodeDataUrl,
+      qrCodeDataUrl: `data:image/png;base64,${image.toString('base64')}`,
+      qrCode,
+      trackingUrl,
       criancaId: crianca.id,
       criancaNome: crianca.name,
       eventoId: crianca.evento_id,
@@ -81,7 +114,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, name, evento_id FROM criancas WHERE id = @criancaId',
+      'SELECT id, name, evento_id, empresa_id FROM criancas WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -92,29 +125,35 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     console.log(`✅ [QRCode] Criança encontrada: ${crianca.name}`);
 
-    // Gerar QR Code com o ID da criança
-    const qrData = JSON.stringify({
-      criancaId: crianca.id,
-      eventoId: crianca.evento_id,
-      name: crianca.name,
-      timestamp: new Date().toISOString(),
-    });
+    // ✅ Usar a função que detecta URL automaticamente
+    const baseUrl = getBaseUrl();
+    console.log(`📌 [QRCode] URL base para QR: ${baseUrl}`);
 
-    console.log(`🔄 [QRCode] Gerando imagem do QR Code com dados:`, qrData);
+    const { qrCode, trackingUrl, image } = await createQRCodeForChild(
+      criancaId,
+      baseUrl
+    );
 
-    // Gerar QR Code como Data URL (base64)
-    const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
-      errorCorrectionLevel: 'H',
-      type: 'image/png',
-      quality: 0.95,
-      margin: 2,
-      width: 300,
-    });
+    // Salvar código QR no banco para validação posterior
+    await query(
+      `INSERT INTO family_linking_codes (crianca_id, evento_id, empresa_id, qr_code_value, tracking_url, created_at, expires_at, status)
+       VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
+      {
+        criancaId,
+        eventoId: crianca.evento_id,
+        empresaId: crianca.empresa_id,
+        qrCode,
+        trackingUrl
+      }
+    );
 
-    console.log(`✅ [QRCode] QR Code gerado com sucesso para ${crianca.name}`);
+    console.log(`✅ [QRCode] QR Code salvo no banco: ${qrCode}`);
+    console.log(`✅ [QRCode] Tracking URL: ${trackingUrl}`);
 
     res.json({
-      qrCodeDataUrl,
+      qrCodeDataUrl: `data:image/png;base64,${image.toString('base64')}`,
+      qrCode,
+      trackingUrl,
       criancaId: crianca.id,
       criancaNome: crianca.name,
       eventoId: crianca.evento_id,
