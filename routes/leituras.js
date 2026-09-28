@@ -15,8 +15,15 @@ const {
   processMonsterScan,
 } = require('../utils/monster');
 const {
-  processZoneConquestScan,
-} = require('../utils/zoneConquestProcessor');
+  getActiveZoneConquestTeamGame,
+  getZoneConquestTeamStatus,
+  processZoneConquestTeamScan,
+} = require('../utils/zoneConquestTeam');
+const {
+  getActiveZoneConquestIndividualGame,
+  getZoneConquestIndividualStatus,
+  processZoneConquestIndividualScan,
+} = require('../utils/zoneConquestIndividualDB');
 
 function getReadingId(req, bodyReadingId) {
   const candidate = bodyReadingId || req.get('Idempotency-Key');
@@ -197,11 +204,14 @@ router.post('/reception', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
+    console.log(`\n🔵 [LEITURA-DEBUG] POST /api/leituras recebido!`);
     const { checkpointId, uid, brincadeiraId, signal, readingId: requestedReadingId } = req.body;
     
     const normalizedUid = normalizeUid(uid);
     const readingId = getReadingId(req, requestedReadingId);
     const now = new Date();
+
+    console.log(`\n📡 [LEITURA] Recebida: checkpoint=${checkpointId}, uid=${normalizedUid}`);
 
     if (!checkpointId || !normalizedUid) {
       return res.status(400).json({ error: 'checkpointId e uid são obrigatórios' });
@@ -359,9 +369,9 @@ router.post('/', async (req, res) => {
               await tx.query(
                 `INSERT INTO leituras
                   (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-                   points_awarded, signal_strength, empresa_id)
+                   points_awarded, signal_strength, empresa_id, session_id)
                  VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                         0, @signal, @empresaId)`,
+                         0, @signal, @empresaId, @sessionId)`,
                 {
                   id: leituraId,
                   checkpointId,
@@ -370,6 +380,7 @@ router.post('/', async (req, res) => {
                   brincadeiraId: monsterSession.brincadeira_id,
                   signal: signal || -45,
                   empresaId: crianca.empresa_id,
+                  sessionId: global.currentSessionId || null,
                 }
               );
             }
@@ -537,9 +548,9 @@ router.post('/', async (req, res) => {
           await tx.query(
             `INSERT INTO leituras
               (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-               points_awarded, signal_strength, empresa_id)
+               points_awarded, signal_strength, empresa_id, session_id)
              VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                     0, @signal, @empresaId)`,
+                     0, @signal, @empresaId, @sessionId)`,
             {
               id: leituraId,
               checkpointId,
@@ -548,6 +559,7 @@ router.post('/', async (req, res) => {
               brincadeiraId: treasureSession.brincadeira_id,
               signal: signal || -45,
               empresaId: crianca.empresa_id,
+              sessionId: global.currentSessionId || null,
             }
           );
         }
@@ -722,7 +734,160 @@ router.post('/', async (req, res) => {
       return res.json({ ok: true, registered: true, braceletCode: normalizedUid, message: 'Pulseira cadastrada' });
     }
     
-    // Processar conquista de território
+    // 🆕 ZONE CONQUEST - Processar TEAM ou INDIVIDUAL antes de modo territorial
+    const zoneConquestTeamGame = await getActiveZoneConquestTeamGame(checkpoint.evento_id);
+    const zoneConquestIndividualGame = await getActiveZoneConquestIndividualGame(checkpoint.evento_id);
+
+    // 🔍 Recuperar sessionId ativo do banco (em vez de usar global que não persiste no Render)
+    let activeSessionId = null;
+    if (zoneConquestTeamGame || zoneConquestIndividualGame) {
+      try {
+        const activeSession = await queryOne(
+          `SELECT id FROM game_sessions 
+           WHERE LOWER(evento_id) = LOWER(@eventoId) 
+             AND status = 'active'
+           ORDER BY started_at DESC
+           LIMIT 1`,
+          { eventoId: checkpoint.evento_id }
+        );
+        if (activeSession) {
+          activeSessionId = activeSession.id;
+          console.log(`   🔍 [SESSÃO] sessionId recuperada do banco: ${activeSessionId}`);
+        } else {
+          console.log(`   ❌ [SESSÃO] Nenhuma sessão ativa encontrada para evento ${checkpoint.evento_id}`);
+        }
+      } catch (err) {
+        console.error(`   ❌ [SESSÃO] Erro ao recuperar sessionId:`, err.message);
+      }
+    }
+
+    if (zoneConquestTeamGame) {
+      console.log(`\n🎮 [ZONE-TEAM] Processando leitura de checkpoint...`);
+      
+      const scanResult = await processZoneConquestTeamScan({
+        eventoId: checkpoint.evento_id,
+        checkpointId,
+        crianca,
+        brincadeiraId: zoneConquestTeamGame.brincadeira_id,
+        uid: normalizedUid,
+        leituraId,
+        sessionId: activeSessionId || null,
+        now,
+      });
+
+      if (!scanResult.accepted) {
+        console.log(`   ❌ [ZONE-TEAM] Leitura rejeitada: ${scanResult.error}`);
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: false,
+          braceletCode: normalizedUid,
+          gameMode: 'zone_conquest_team',
+          error: scanResult.error,
+          message: scanResult.error,
+        });
+      }
+
+      console.log(`   ✅ [ZONE-TEAM] Leitura aceita!`);
+      
+      broadcastEvent({
+        type: 'ZONE_CONQUEST_TEAM_SCAN',
+        payload: {
+          checkpointId,
+          criancaId: crianca.id,
+          criancaName: crianca.name,
+          timeId: crianca.time_id,
+          teamColor: crianca.teamColor,
+          pointsGained: scanResult.points,
+          eventoId: checkpoint.evento_id,
+          timestamp: now.toISOString(),
+        },
+      });
+
+      return res.json({
+        ok: true,
+        registered: true,
+        authorized: true,
+        braceletCode: normalizedUid,
+        readingId: leituraId,
+        gameMode: 'zone_conquest_team',
+        pointsGained: scanResult.points,
+        criancaName: crianca.name,
+        message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt`,
+      });
+    }
+
+    if (zoneConquestIndividualGame) {
+      console.log(`\n🎮 [ZONE-INDIVIDUAL] Processando leitura de checkpoint...`);
+      
+      const scanResult = await processZoneConquestIndividualScan({
+        eventoId: checkpoint.evento_id,
+        checkpointId,
+        crianca,
+        brincadeiraId: zoneConquestIndividualGame.brincadeira_id,
+        uid: normalizedUid,
+        leituraId,
+        sessionId: activeSessionId || null,
+        now,
+      });
+
+      if (!scanResult.accepted) {
+        console.log(`   ❌ [ZONE-INDIVIDUAL] Leitura rejeitada: ${scanResult.error}`);
+        return res.json({
+          ok: true,
+          registered: true,
+          authorized: false,
+          braceletCode: normalizedUid,
+          gameMode: 'zone_conquest_individual',
+          error: scanResult.error,
+          versionConflict: scanResult.versionConflict || false,
+          message: scanResult.error,
+        });
+      }
+
+      console.log(`   ✅ [ZONE-INDIVIDUAL] Leitura aceita!`);
+      
+      // 🆕 INSERT em leituras já é feito dentro de processZoneConquestIndividualScan
+      // Não fazer INSERT duplicado aqui!
+      // await query(...);
+      console.log(`   📝 [LEITURA] Já inserida em leituras dentro do scan com session_id=${activeSessionId || 'NULL'}`);
+      
+      // Obter status atualizado
+      const statusAtualizado = await getZoneConquestIndividualStatus(checkpoint.evento_id);
+      
+      broadcastEvent({
+        type: 'ZONE_CONQUEST_INDIVIDUAL_SCAN',
+        payload: {
+          checkpointId,
+          criancaId: crianca.id,
+          criancaName: crianca.name,
+          pointsGained: scanResult.points,
+          totalPoints: scanResult.totalPoints,
+          checkpointsRead: scanResult.checkpointsRead,
+          version: scanResult.version,
+          ranking: statusAtualizado?.participants || [],
+          eventoId: checkpoint.evento_id,
+          timestamp: now.toISOString(),
+        },
+      });
+
+      return res.json({
+        ok: true,
+        registered: true,
+        authorized: true,
+        braceletCode: normalizedUid,
+        readingId: leituraId,
+        gameMode: 'zone_conquest_individual',
+        pointsGained: scanResult.points,
+        totalPoints: scanResult.totalPoints,
+        checkpointsRead: scanResult.checkpointsRead,
+        version: scanResult.version,
+        criancaName: crianca.name,
+        message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt (Total: ${scanResult.totalPoints}pt)`,
+      });
+    }
+    
+    // Processar conquista de território (TEAM mode)
     const isLocked = checkpointData.territory_locked_until && new Date(checkpointData.territory_locked_until) > now;
     const isCooldown = checkpointData.territory_cooldown_until && new Date(checkpointData.territory_cooldown_until) > now;
     
@@ -817,9 +982,9 @@ router.post('/', async (req, res) => {
       await tx.query(
         `INSERT INTO leituras
           (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-           points_awarded, signal_strength, empresa_id)
+           points_awarded, signal_strength, empresa_id, session_id)
          VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                 @points, @signal, @empresaId)`,
+                 @points, @signal, @empresaId, @sessionId)`,
         {
           id: leituraId,
           checkpointId,
@@ -829,8 +994,10 @@ router.post('/', async (req, res) => {
           points: pointsAwarded,
           signal: signal || -45,
           empresaId: crianca.empresa_id,
+          sessionId: global.currentSessionId || null,
         }
       );
+      console.log(`   📝 [LEITURA] Inserida com session_id=${global.currentSessionId || 'NULL'}`);
 
       await tx.query(
         `INSERT INTO pontuacoes
@@ -958,7 +1125,56 @@ router.post('/', async (req, res) => {
     
   } catch (err) {
     console.error('❌ [LEITURA] Erro ao processar leitura:', err);
+    console.error('   Stack:', err.stack);
+    console.error('   Message:', err.message);
+    console.error('   Code:', err.code);
     res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+// 🆕 Status do Zone Conquest (TEAM ou INDIVIDUAL)
+router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
+  try {
+    const eventoId = req.params.eventoId;
+    
+    // Validar acesso ao evento
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      { id: eventoId }
+    );
+    
+    if (!evento) {
+      return res.status(404).json({ error: 'Evento não encontrado' });
+    }
+    
+    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    // Verificar qual tipo de jogo está rodando
+    const teamGame = await getActiveZoneConquestTeamGame(eventoId);
+    const individualGame = await getActiveZoneConquestIndividualGame(eventoId);
+
+    let status = null;
+
+    if (teamGame) {
+      status = await getZoneConquestTeamStatus(eventoId);
+    } else if (individualGame) {
+      status = await getZoneConquestIndividualStatus(eventoId);
+    }
+    
+    if (!status) {
+      return res.json({
+        gameRunning: false,
+        mode: 'none',
+        message: 'Nenhum jogo de Zone Conquest ativo',
+      });
+    }
+
+    res.json(status);
+  } catch (err) {
+    console.error('❌ Erro ao buscar status do Zone Conquest:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -971,6 +1187,7 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
     const empresaId = req.user.empresa_id;
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
     const master = isMaster(req) ? 1 : 0;
+    const sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
 
     const evento = await queryOne(
       'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
@@ -981,34 +1198,54 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // Filtro por brincadeira_id se fornecido
-    let whereClause = 'WHERE LOWER(p.evento_id) = LOWER(@eventoId) AND (p.empresa_id = @empresaId OR @master = 1)';
-    const params = { limit, eventoId, empresaId, master };
-    
-    if (brincadeiraId) {
-      whereClause += ' AND LOWER(p.brincadeira_id) = LOWER(@brincadeiraId)';
-      params.brincadeiraId = brincadeiraId;
+    // 🆕 Se sessionId foi fornecido, buscar de leituras com filtro de session_id
+    // Caso contrário, buscar de pontuacoes (compatibilidade com dados antigos)
+    let history;
+    if (sessionId) {
+      console.log(`   🔍 [HISTORICO] Filtrando por session_id=${sessionId}`);
+      history = await allQuery(`
+        SELECT TOP (@limit)
+          l.id,
+          c.evento_id,
+          l.crianca_id AS child_id,
+          c.name AS child_name,
+          c.nickname AS child_nickname,
+          l.checkpoint_id,
+          cp.name AS checkpoint_name,
+          l.points_awarded AS points,
+          l.created_at,
+          t.color AS team_color
+        FROM leituras l
+        LEFT JOIN criancas c ON c.id = l.crianca_id
+        LEFT JOIN checkpoints cp ON cp.id = l.checkpoint_id
+        LEFT JOIN times t ON t.id = c.time_id
+        WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+          AND l.session_id = @sessionId
+          AND (l.empresa_id = @empresaId OR @master = 1)
+        ORDER BY l.created_at DESC
+      `, { limit, eventoId, empresaId, master, sessionId });
+    } else {
+      history = await allQuery(`
+        SELECT TOP (@limit)
+          p.id,
+          p.evento_id,
+          p.crianca_id AS child_id,
+          c.name AS child_name,
+          c.nickname AS child_nickname,
+          p.checkpoint_id,
+          cp.name AS checkpoint_name,
+          p.points,
+          p.created_at,
+          t.color AS team_color
+        FROM pontuacoes p
+        LEFT JOIN criancas c ON c.id = p.crianca_id
+        LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
+        LEFT JOIN times t ON t.id = c.time_id
+        WHERE LOWER(p.evento_id) = LOWER(@eventoId)
+          AND (p.empresa_id = @empresaId OR @master = 1)
+        ORDER BY p.created_at DESC
+      `, { limit, eventoId, empresaId, master });
     }
-
-    const history = await allQuery(`
-      SELECT TOP (@limit)
-        p.id,
-        p.evento_id,
-        p.crianca_id AS child_id,
-        c.name AS child_name,
-        c.nickname AS child_nickname,
-        p.checkpoint_id,
-        cp.name AS checkpoint_name,
-        p.points,
-        p.created_at,
-        t.color AS team_color
-      FROM pontuacoes p
-      LEFT JOIN criancas c ON c.id = p.crianca_id
-      LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
-      LEFT JOIN times t ON t.id = c.time_id
-      ${whereClause}
-      ORDER BY p.created_at DESC
-    `, params);
 
     res.json(history);
   } catch (error) {

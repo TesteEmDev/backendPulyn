@@ -16,10 +16,13 @@ const {
   stopTreasureGame,
 } = require('../utils/treasure');
 const {
-  ZONE_CONQUEST_GAME_TYPE,
-  startZoneConquestGame,
-  stopZoneConquestGame,
-} = require('../utils/zoneConquest');
+  startZoneConquestTeam,
+  stopZoneConquestTeam,
+} = require('../utils/zoneConquestTeam');
+const {
+  startZoneConquestIndividual,
+  stopZoneConquestIndividual,
+} = require('../utils/zoneConquestIndividualDB');
 
 function sameId(left, right) {
   return left !== null && left !== undefined
@@ -342,34 +345,122 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     }
     
     const rawGameType = brincadeira.type || brincadeira.game_type || 'standard';
-    const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE, ZONE_CONQUEST_GAME_TYPE].includes(rawGameType)
+    const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE, 'zone_conquest_team', 'zone_conquest_individual'].includes(rawGameType)
       ? rawGameType
       : rawGameType || 'standard';
     
-    console.log('🎮 [routes/events.js] Game Type:', gameType);
-    console.log('🎮 [routes/events.js] ZONE_CONQUEST_GAME_TYPE:', ZONE_CONQUEST_GAME_TYPE);
-    console.log('🎮 [routes/events.js] Comparação:', gameType === ZONE_CONQUEST_GAME_TYPE);
+    // 🆕 Resetar dados de leituras anteriores (reset dos dados de jogo)
+    await query(
+      `DELETE FROM leituras 
+       WHERE crianca_id IN (
+         SELECT id FROM criancas WHERE evento_id = @eventoId
+       )
+       AND brincadeira_id NOT IN (
+         SELECT id FROM brincadeiras 
+         WHERE LOWER(COALESCE(status, 'active')) = 'archived'
+       )`,
+      { eventoId: evento_id }
+    );
     
+    // 🆕 Resetar dados de Zone Conquest INDIVIDUAL (na ordem correta das foreign keys)
+    await query(
+      `DELETE FROM zone_conquest_individual_scans
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_individual_checkpoint_protection
+       WHERE partida_id IN (
+         SELECT id FROM zone_conquest_individual_partidas WHERE evento_id = @eventoId
+       )`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_individual_participant_states
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_individual_partidas
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar dados de Zone Conquest TEAM (na ordem correta das foreign keys)
+    await query(
+      `DELETE FROM zone_conquest_team_scans
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_team_tempos
+       WHERE partida_id IN (
+         SELECT id FROM zone_conquest_team_partidas WHERE evento_id = @eventoId
+       )`,
+      { eventoId: evento_id }
+    );
+    await query(
+      `DELETE FROM zone_conquest_team_partidas
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar scores dos participantes
+    await query(
+      `UPDATE criancas SET scores = 0 
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar pontos dos times
+    await query(
+      `UPDATE times SET points = 0 
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // 🆕 Resetar domínio dos checkpoints (zona-equipe)
+    await query(
+      `UPDATE checkpoints 
+       SET territory_owner_time_id = NULL,
+           territory_locked_until = NULL,
+           territory_cooldown_until = NULL,
+           last_conquered_at = NULL
+       WHERE evento_id = @eventoId`,
+      { eventoId: evento_id }
+    );
+    
+    // Iniciar o jogo conforme seu tipo
     if (gameType === MONSTER_GAME_TYPE) {
       console.log('📍 [routes/events.js] Iniciando Monster Game');
       await startMonsterGame(evento_id, brincadeira.id);
       await stopTreasureGame(evento_id);
-      await stopZoneConquestGame(evento_id);
+      await stopZoneConquestTeam(evento_id);
+      await stopZoneConquestIndividual(evento_id);
     } else if (gameType === TREASURE_GAME_TYPE) {
       console.log('📍 [routes/events.js] Iniciando Treasure Game');
       await startTreasureGame(evento_id, brincadeira.id);
       await stopMonsterGame(evento_id);
-      await stopZoneConquestGame(evento_id);
-    } else if (gameType === ZONE_CONQUEST_GAME_TYPE) {
-      console.log('📍 [routes/events.js] Iniciando ZONE CONQUEST Game');
-      await startZoneConquestGame(evento_id, brincadeira.id);
+      await stopZoneConquestTeam(evento_id);
+      await stopZoneConquestIndividual(evento_id);
+    } else if (gameType === 'zone_conquest_team') {
+      console.log(`🎮 [EVENTS] Iniciando Zone Conquest TEAM para evento: ${evento_id}`);
+      await startZoneConquestTeam(evento_id, brincadeira.id);
       await stopMonsterGame(evento_id);
       await stopTreasureGame(evento_id);
+      await stopZoneConquestIndividual(evento_id);
+    } else if (gameType === 'zone_conquest_individual') {
+      console.log(`🎮 [EVENTS] Iniciando Zone Conquest INDIVIDUAL para evento: ${evento_id}`);
+      await startZoneConquestIndividual(evento_id, brincadeira.id);
+      await stopMonsterGame(evento_id);
+      await stopTreasureGame(evento_id);
+      await stopZoneConquestTeam(evento_id);
     } else {
       console.log('📍 [routes/events.js] Parando todos os jogos (tipo:', gameType, ')');
       await stopMonsterGame(evento_id);
       await stopTreasureGame(evento_id);
-      await stopZoneConquestGame(evento_id);
+      await stopZoneConquestTeam(evento_id);
+      await stopZoneConquestIndividual(evento_id);
     }
     
     // Atualizar evento para ativar jogo
@@ -435,7 +526,9 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
     // Atualizar evento para pausar jogo
     await stopMonsterGame(evento_id);
     await stopTreasureGame(evento_id);
-    await stopZoneConquestGame(evento_id);
+    await stopZoneConquestTeam(evento_id);
+    await stopZoneConquestIndividual(evento_id);
+    
     await query(
       `UPDATE eventos 
        SET status = @status, 
