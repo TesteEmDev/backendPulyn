@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
+const { listPlatformClients } = require('../utils/platformClients');
 
 const PLAN_DEFINITIONS = {
   starter: {
@@ -37,13 +38,15 @@ function formatSince(value) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+// Empresas + cadastro legado `clientes`; o plano 'family' das contas de família continua contado.
 async function loadCompanies() {
-  return allQuery(`
-    SELECT id, nome, cidade, estado, plano, status, data_criacao
-    FROM empresas
-    WHERE nome <> @masterName
-    ORDER BY nome
-  `, { masterName: 'Master Admin' });
+  const list = await listPlatformClients({ includeFamily: true });
+  return list
+    .map((c) => ({
+      id: c.id, nome: c.name, cidade: c.city, estado: c.state,
+      plano: c.plan, status: c.status, data_criacao: c.createdAt,
+    }))
+    .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
 }
 
 router.get('/', verifyToken, requireMaster, async (req, res) => {

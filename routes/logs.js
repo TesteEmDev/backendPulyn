@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { query, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
+const { listPlatformClients } = require('../utils/platformClients');
 
 // A tabela `logs` existe mas nada no sistema nunca escreveu nela de verdade
 // (nenhuma rota chama POST /api/logs em produção) — por isso a tela de Logs
@@ -18,11 +19,14 @@ router.get('/', verifyToken, async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
 
     const [clientRows, ticketRows, checkpointRows] = await Promise.all([
-      allQuery(`
-        SELECT id, nome as empresa_nome, data_criacao
-        FROM empresas
-        WHERE nome <> 'Master Admin' ${master ? '' : 'AND id = @empresa_id'}
-      `, { empresa_id }),
+      master
+        ? listPlatformClients().then((list) =>
+            list.map((c) => ({ id: c.id, empresa_nome: c.name, data_criacao: c.createdAt })))
+        : allQuery(`
+            SELECT id, nome as empresa_nome, data_criacao
+            FROM empresas
+            WHERE nome <> 'Master Admin' AND id = @empresa_id
+          `, { empresa_id }),
       allQuery(`
         SELECT id, client as empresa_nome, subject, status, created_at
         FROM support_tickets

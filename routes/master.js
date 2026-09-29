@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
+const { listPlatformClients } = require('../utils/platformClients');
 
 // ✅ Dados para o dashboard master - APENAS master
 router.get('/dashboard', verifyToken, async (req, res) => {
@@ -14,10 +15,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     console.log('📊 [MASTER] Buscando dados do dashboard...');
     
-    // Clientes ativos (excluindo Master Admin)
-    const activeClients = await queryOne(`
-      SELECT COUNT(*) as count FROM empresas WHERE status = 'active' AND nome != 'Master Admin'
-    `);
+    // Clientes = empresas + cadastro legado `clientes` (sem contas de família)
+    const platformClients = await listPlatformClients();
     
     // Eventos em andamento (com empresa_id e não da Master)
     const activeEvents = await queryOne(`
@@ -57,19 +56,14 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         AND emp.nome != 'Master Admin'
     `);
     
-    // Total de clientes (excluindo Master Admin)
-    const totalClients = await queryOne(`
-      SELECT COUNT(*) as count FROM empresas WHERE nome != 'Master Admin'
-    `);
-    
     console.log('✅ Dashboard data loaded successfully');
     res.json({
-      activeClients: activeClients?.count || 0,
+      activeClients: platformClients.filter((c) => String(c.status).toLowerCase() === 'active').length,
       activeEvents: activeEvents?.count || 0,
       onlineCheckpoints: onlineCheckpoints?.count || 0,
       activeChildren: activeChildren?.count || 0,
       offlineCheckpoints: offlineCheckpoints?.count || 0,
-      totalClients: totalClients?.count || 0,
+      totalClients: platformClients.length,
     });
   } catch (err) {
     console.error('❌ Erro ao buscar dados do dashboard:', err.message);
@@ -88,24 +82,17 @@ router.get('/clients', verifyToken, async (req, res) => {
 
     console.log('📍 [MASTER] Buscando clientes...');
 
-    // A tabela empresas nunca teve colunas latitude/longitude — essa query
-    // sempre falhou em produção (Postgres não aceita SELECT de coluna
-    // inexistente), fazendo o mapa nunca receber nenhum cliente. O
-    // posicionamento real é feito no frontend a partir do "estado" (UF),
-    // que é um dado que a empresa de fato preenche no cadastro.
-    const clients = await allQuery(`
-      SELECT
-        id,
-        nome as name,
-        cidade as city,
-        estado as state,
-        status,
-        [plano] as plan
-      FROM empresas
-      WHERE nome != 'Master Admin'
-      ORDER BY nome
-    `);
-    
+    // Sem coordenadas no cadastro: o mapa posiciona pelo estado/cidade. Une
+    // `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
+    const clients = (await listPlatformClients()).map((c) => ({
+      id: c.id,
+      name: c.name,
+      city: c.city,
+      state: c.state,
+      status: c.status,
+      plan: c.plan,
+    }));
+
     console.log(`✅ ${clients?.length || 0} clientes carregados`);
     res.json(clients || []);
   } catch (err) {

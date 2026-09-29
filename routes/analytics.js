@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
+const { listPlatformClients } = require('../utils/platformClients');
 
 // ✅ Métricas gerais da plataforma - APENAS para master
 router.get('/metrics', verifyToken, async (req, res) => {
@@ -16,8 +17,10 @@ router.get('/metrics', verifyToken, async (req, res) => {
     const activeEvents = await queryOne("SELECT COUNT(*) as count FROM eventos WHERE status = 'active' AND empresa_id IS NOT NULL");
     const totalChildren = await queryOne('SELECT COUNT(*) as count FROM criancas');
     
-    const clients = await queryOne('SELECT COUNT(*) as count FROM empresas WHERE nome != @name', { name: 'Master Admin' });
-    const activeClients = await queryOne('SELECT COUNT(*) as count FROM empresas WHERE status = @status AND nome != @name', { status: 'active', name: 'Master Admin' });
+    // Empresas + cadastro legado `clientes` (ver utils/platformClients.js)
+    const platformClients = await listPlatformClients();
+    const clients = { count: platformClients.length };
+    const activeClients = { count: platformClients.filter((c) => String(c.status).toLowerCase() === 'active').length };
     
     res.json({
       activeClients: activeClients?.count || 0,
@@ -42,16 +45,18 @@ router.get('/client-growth', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode ver crescimento de clientes' });
     }
 
-    const data = await allQuery(`
-      SELECT 
-        CONVERT(VARCHAR(7), data_criacao, 120) as month,
-        COUNT(*) as clients
-      FROM empresas
-      WHERE data_criacao IS NOT NULL AND nome != 'Master Admin'
-      GROUP BY CONVERT(VARCHAR(7), data_criacao, 120)
-      ORDER BY CONVERT(VARCHAR(7), data_criacao, 120) ASC
-    `);
-    
+    // Agrupado por mês em JS a partir da lista unificada de clientes
+    const perMonth = new Map();
+    (await listPlatformClients()).forEach((client) => {
+      const created = client.createdAt ? new Date(client.createdAt) : null;
+      if (!created || Number.isNaN(created.getTime())) return;
+      const key = `${created.getUTCFullYear()}-${String(created.getUTCMonth() + 1).padStart(2, '0')}`;
+      perMonth.set(key, (perMonth.get(key) || 0) + 1);
+    });
+    const data = Array.from(perMonth.entries())
+      .sort(([x], [y]) => x.localeCompare(y))
+      .map(([month, clients]) => ({ month, clients }));
+
     // Formatar dados com nomes de meses legíveis
     const formattedData = (data || []).map(item => {
       const [year, monthNum] = item.month.split('-');
