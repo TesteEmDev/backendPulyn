@@ -124,14 +124,21 @@ router.get('/active-events', verifyToken, async (req, res) => {
 
     console.log('⚡ [MASTER] Buscando eventos ativos...');
     
-    const events = await allQuery(`
+    // O DATEDIFF com ISNULL aninhado vira SQL inválido no Postgres (o regex de
+    // tradução corta os argumentos na vírgula do ISNULL), o que derrubava a
+    // rota inteira e deixava "Eventos em Andamento" sempre vazio. O tempo
+    // decorrido e o camelCase agora são montados em JS (alias sem aspas volta
+    // minúsculo do Postgres, então childrenCount chegava undefined).
+    const rows = await allQuery(`
       SELECT TOP 10
         e.id,
         e.name,
+        e.empresa_id,
         e2.nome as client,
-        (SELECT COUNT(*) FROM criancas WHERE evento_id = e.id) as childrenCount,
+        (SELECT COUNT(*) FROM criancas WHERE evento_id = e.id) as children_count,
         e.status,
-        DATEDIFF(MINUTE, ISNULL(e.created_at, e.date), GETDATE()) as elapsed
+        e.date as event_date,
+        e.created_at
       FROM eventos e
       LEFT JOIN empresas e2 ON e.empresa_id = e2.id
       WHERE e.status IN ('active', 'scheduled')
@@ -139,9 +146,24 @@ router.get('/active-events', verifyToken, async (req, res) => {
         AND e2.nome != 'Master Admin'
       ORDER BY e.date DESC
     `);
-    
-    console.log(`✅ ${events?.length || 0} eventos carregados`);
-    res.json(events || []);
+
+    const now = Date.now();
+    const events = rows.map((e) => {
+      const startedAt = new Date(e.created_at || e.event_date).getTime();
+      return {
+        id: e.id,
+        name: e.name,
+        clientId: e.empresa_id,
+        client: e.client,
+        childrenCount: Number(e.children_count) || 0,
+        status: e.status,
+        date: e.event_date,
+        elapsed: Number.isFinite(startedAt) ? Math.max(0, Math.round((now - startedAt) / 60000)) : 0,
+      };
+    });
+
+    console.log(`✅ ${events.length} eventos carregados`);
+    res.json(events);
   } catch (err) {
     console.error('❌ Erro ao buscar eventos ativos:', err.message);
     res.status(500).json({ error: err.message });
