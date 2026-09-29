@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS "empresas" (
   "plano" varchar(50) DEFAULT 'starter',
   "status" varchar(50) DEFAULT 'active',
   "data_criacao" timestamptz DEFAULT CURRENT_TIMESTAMP,
-  "data_atualizacao" timestamptz DEFAULT CURRENT_TIMESTAMP
+  "data_atualizacao" timestamptz DEFAULT CURRENT_TIMESTAMP,
+  "cnpj" varchar(14)
 );
 
 CREATE TABLE IF NOT EXISTS "evento_brincadeiras" (

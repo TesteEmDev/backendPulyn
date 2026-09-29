@@ -24,6 +24,7 @@ const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
 const leiturasRoutes = require('./routes/leituras');
 const settingsRoutes = require('./routes/settings');
+const empresaRoutes = require('./routes/empresa');
 const rankingRoutes = require('./routes/ranking');
 const logsRoutes = require('./routes/logs');
 const loginsRoutes = require('./routes/logins');
@@ -41,6 +42,7 @@ const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
 const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
+const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
@@ -1825,6 +1827,9 @@ app.use('/api/master', masterRoutes);
 // Settings
 app.use('/api/settings', settingsRoutes);
 
+// Dados do próprio buffet (CNPJ)
+app.use('/api/empresa', empresaRoutes);
+
 // Ranking
 app.use('/api/ranking', rankingRoutes);
 
@@ -1896,6 +1901,7 @@ async function startServer() {
     await ensureGameStateSchema();
     await ensureEventControlSchema();
     await ensureEventLifecycleSchema();
+    await ensureEmpresaCnpjSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
