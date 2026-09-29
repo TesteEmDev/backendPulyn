@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
+const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
 const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -146,11 +147,10 @@ router.post('/invites/:token/register', async (req, res) => {
     if (String(password).length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
-    if (!invite.linked_child_id && (childrenPayload.length === 0 || childrenPayload.length > 10)) {
-      return res.status(400).json({ error: 'Informe entre 1 e 10 crianças' });
-    }
-    if (!invite.linked_child_id && childrenPayload.some((item) => !item?.name || !String(item.name).trim())) {
-      return res.status(400).json({ error: 'Informe o nome de todas as crianças' });
+    // O responsável pode se cadastrar sem crianças (vincula depois pelo QR Code no app)
+    const plan = planInviteRegistration({ linkedChildId: invite.linked_child_id, children: childrenPayload });
+    if (plan.error) {
+      return res.status(400).json({ error: plan.error });
     }
 
     const existingLogin = await queryOne(
@@ -180,13 +180,14 @@ router.post('/invites/:token/register', async (req, res) => {
       if (!existingLogin) {
         await query(`
           INSERT INTO logins (id, empresa_id, email, password, family_name, role, status, data_criacao)
-          VALUES (@id, @empresaId, @email, @password, @familyName, 'family', 'pending', GETDATE())
+          VALUES (@id, @empresaId, @email, @password, @familyName, 'family', @loginStatus, GETDATE())
         `, {
           id: loginId,
           empresaId: invite.empresa_id,
           email: normalizedEmail,
           password: Buffer.from(String(password)).toString('base64'),
           familyName,
+          loginStatus: plan.loginStatus,
         });
       }
 
@@ -232,10 +233,16 @@ router.post('/invites/:token/register', async (req, res) => {
         WHERE id = @inviteId AND status = 'processing'
       `, { inviteId: invite.id });
 
+      const result = describeRegistrationResult({
+        childless: plan.childless,
+        plannedLoginStatus: plan.loginStatus,
+        existingLoginStatus: existingLogin?.status,
+      });
+
       return res.status(201).json({
         success: true,
-        message: 'Cadastro realizado. Aguarde a aprovação da recepção.',
-        status: 'pending',
+        message: result.message,
+        status: result.status,
         childId: childIds[0],
         childIds,
         childrenCount: childIds.length,

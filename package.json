@@ -15,6 +15,7 @@
     "data:validate": "node test-data-migration.js",
     "test-postgres": "node test-postgres-connection.js",
     "test-api": "node test-api.js",
+    "test": "node --test \"test/*.test.js\"",
     "dev": "nodemon index.js"
   },
   "dependencies": {
