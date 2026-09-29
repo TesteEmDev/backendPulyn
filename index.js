@@ -35,6 +35,7 @@ const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
 const qrcodeRoutes = require('./routes/qrcode');
+const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
@@ -71,6 +72,11 @@ const {
   stopZoneConquestIndividual,
 } = require('./utils/zoneConquestIndividualDB');
 const { stopZoneConquestTeam, TEAM_CHECKPOINT_RESET_MS } = require('./utils/zoneConquestTeam');
+const {
+  ZONE_CONQUEST_GAME_TYPE,
+  startZoneConquestGame,
+  stopZoneConquestGame,
+} = require('./utils/zoneConquest');
 
 const app = express();
 const server = http.createServer(app);
@@ -1223,6 +1229,7 @@ const staleTeamCheckpointsInterval = setInterval(checkStaleTeamCheckpoints, 1000
 // DEBUG: Reset territory lock de um checkpoint
 app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
+    const { checkpointId } = req.params;
     const checkpoint = await queryOne(
       'SELECT id, empresa_id, checkpoint_purpose FROM checkpoints WHERE id = @checkpointId',
       { checkpointId }

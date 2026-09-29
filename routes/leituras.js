@@ -130,6 +130,52 @@ function broadcastEvent(data) {
   }
 }
 
+/**
+ * Avisa o app dos pais que uma criança passou por um checkpoint, para o avatar
+ * se mover até ele. Vale para TODOS os jogos (zona, tesouro, monstro e zone
+ * conquest por equipe/individual). É um evento separado de TERRITORY_CONQUERED
+ * de propósito: o web usa aquele para marcar o dono do território, o que seria
+ * errado no modo individual. Nunca lança erro — o rastreio não pode derrubar
+ * uma leitura já confirmada.
+ */
+async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameType, teamColor, leituraId, uid, now }) {
+  try {
+    const coords = await queryOne(
+      'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+      { id: checkpointId }
+    );
+    if (coords?.map_x == null || coords?.map_y == null) {
+      console.warn(`⚠️ [RASTREIO] Checkpoint ${checkpointId} sem map_x/map_y — avatar não poderá se mover (${gameType})`);
+    }
+
+    let color = teamColor || crianca.teamColor || null;
+    if (!color && crianca.time_id) {
+      const team = await queryOne('SELECT color FROM times WHERE id = @id', { id: crianca.time_id });
+      color = team?.color || null;
+    }
+
+    broadcastEvent({
+      type: 'CHILD_CHECKPOINT_PASSED',
+      payload: {
+        id: leituraId,
+        checkpointId,
+        uid,
+        criancaId: crianca.id,
+        criancaName: crianca.name,
+        timeId: crianca.time_id || null,
+        teamColor: color || '#1E9BD7',
+        timestamp: now.toISOString(),
+        eventoId,
+        gameType,
+        mapX: coords?.map_x ?? null,
+        mapY: coords?.map_y ?? null,
+      },
+    });
+  } catch (err) {
+    console.error(`❌ [RASTREIO] Falha ao enviar CHILD_CHECKPOINT_PASSED (${gameType}):`, err.message);
+  }
+}
+
 function rememberReceptionReading(reading) {
   if (!global.receptionReadingQueues) global.receptionReadingQueues = new Map();
 
@@ -480,6 +526,10 @@ router.post('/', async (req, res) => {
           console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
           console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
           broadcast(territoryPayload);
+          await broadcastChildCheckpointPassed({
+            checkpointId, crianca, eventoId: checkpoint.evento_id, gameType: 'monster_hunt',
+            teamColor: monsterResult.teamColor, leituraId, uid: normalizedUid, now,
+          });
         }
 
         if (monsterResult.gameCompleted && typeof global.finishMonsterGameState === 'function') {
@@ -629,6 +679,10 @@ router.post('/', async (req, res) => {
           console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
           console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
           broadcast(territoryPayload);
+          await broadcastChildCheckpointPassed({
+            checkpointId, crianca, eventoId: checkpoint.evento_id, gameType: 'treasure_hunt',
+            teamColor: treasureResult.teamColor, leituraId, uid: normalizedUid, now,
+          });
         }
 
         if (treasureResult.finished && typeof global.finishTreasureGameState === 'function') {
@@ -714,6 +768,13 @@ router.post('/', async (req, res) => {
             eventoId: checkpoint.evento_id,
           },
         });
+
+        if (zoneResult.accepted) {
+          await broadcastChildCheckpointPassed({
+            checkpointId, crianca, eventoId: checkpoint.evento_id, gameType: 'zone_conquest',
+            teamColor: zoneResult.teamColor, leituraId, uid: normalizedUid, now,
+          });
+        }
 
         return res.json({
           ok: true,
@@ -803,6 +864,10 @@ router.post('/', async (req, res) => {
           timestamp: now.toISOString(),
         },
       });
+      await broadcastChildCheckpointPassed({
+        checkpointId, crianca, eventoId: checkpoint.evento_id, gameType: 'zone_conquest_team',
+        teamColor: crianca.teamColor, leituraId, uid: normalizedUid, now,
+      });
 
       return res.json({
         ok: true,
@@ -869,6 +934,10 @@ router.post('/', async (req, res) => {
           eventoId: checkpoint.evento_id,
           timestamp: now.toISOString(),
         },
+      });
+      await broadcastChildCheckpointPassed({
+        checkpointId, crianca, eventoId: checkpoint.evento_id, gameType: 'zone_conquest_individual',
+        leituraId, uid: normalizedUid, now,
       });
 
       return res.json({
@@ -1109,7 +1178,11 @@ router.post('/', async (req, res) => {
     console.log(`   - Estrutura completa: ${JSON.stringify(zonePayload, null, 2)}`);
     
     broadcast(zonePayload);
-    
+    await broadcastChildCheckpointPassed({
+      checkpointId, crianca, eventoId: crianca.evento_id, gameType: 'zone_conquest',
+      teamColor, leituraId, uid: normalizedUid, now,
+    });
+
     console.log(`✅ [LEITURA] Pontos processados com sucesso!\n`);
     
     res.json({ 
@@ -1245,6 +1318,40 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
           AND (p.empresa_id = @empresaId OR @master = 1)
         ORDER BY p.created_at DESC
       `, { limit, eventoId, empresaId, master });
+
+      // O app dos pais usa este histórico para saber por qual checkpoint cada
+      // criança passou por último. `pontuacoes` só é gravada pelo fluxo de zona
+      // antigo; Tesouro, Monstro e Zone Conquest gravam só em `leituras`.
+      // Opt-in (allGames=1) para não mudar os contadores do web, que também
+      // chama este endpoint sem sessionId.
+      if (req.query.allGames === '1') {
+        const extra = await allQuery(`
+          SELECT TOP (@limit)
+            l.id,
+            c.evento_id,
+            l.crianca_id AS child_id,
+            c.name AS child_name,
+            c.nickname AS child_nickname,
+            l.checkpoint_id,
+            cp.name AS checkpoint_name,
+            l.points_awarded AS points,
+            l.created_at,
+            t.color AS team_color
+          FROM leituras l
+          LEFT JOIN criancas c ON c.id = l.crianca_id
+          LEFT JOIN checkpoints cp ON cp.id = l.checkpoint_id
+          LEFT JOIN times t ON t.id = c.time_id
+          WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+            AND l.authorized = 1
+            AND (l.empresa_id = @empresaId OR @master = 1)
+            AND NOT EXISTS (SELECT 1 FROM pontuacoes p WHERE p.leitura_id = l.id)
+          ORDER BY l.created_at DESC
+        `, { limit, eventoId, empresaId, master });
+
+        history = [...history, ...extra]
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+          .slice(0, limit);
+      }
     }
 
     res.json(history);
