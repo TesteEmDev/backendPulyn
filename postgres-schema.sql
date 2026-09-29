@@ -185,7 +185,12 @@ CREATE TABLE IF NOT EXISTS "eventos" (
   "active_brincadeira_id" varchar(36),
   "floor_plan_data" text,
   "floor_plan_name" varchar(255),
-  "floor_plan_type" varchar(100)
+  "floor_plan_type" varchar(100),
+  "responsible_name" varchar(150),
+  "started_at" timestamptz,
+  "ended_at" timestamptz,
+  "auto_start" integer DEFAULT 0,
+  "auto_end" integer DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS "leituras" (

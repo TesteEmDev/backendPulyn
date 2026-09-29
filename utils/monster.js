@@ -546,16 +546,8 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     gameCompleted = gameCompleted || Boolean(completionUpdate.rowsAffected?.[0]);
   }
 
-  if (gameCompleted) {
-    await query(`
-      UPDATE eventos SET status = 'scheduled'
-      WHERE LOWER(id) = LOWER(@eventoId)
-        AND LOWER(empresa_id) = LOWER(@empresaId)
-        AND status = 'active'`, {
-      eventoId,
-      empresaId: session.empresa_id,
-    });
-  }
+  // Quando o jogo termina, o evento continua ativo (o status é só o ciclo de
+  // vida do evento); o estado do jogo é encerrado por global.finishMonsterGameState.
 
   const teamMonster = progress.find(item => sameId(item.teamId, team.id)) || currentBefore;
   return {

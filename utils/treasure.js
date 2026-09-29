@@ -785,13 +785,8 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     };
   }
 
-  if (raceFinished) {
-    await query(
-      `UPDATE eventos SET status = 'scheduled'
-       WHERE LOWER(id) = LOWER(@eventoId) AND status = 'active'`,
-      { eventoId }
-    );
-  }
+  // Quando a corrida termina, o evento continua ativo (o status é só o ciclo de
+  // vida do evento); o estado do jogo é encerrado por global.finishTreasureGameState.
 
   return {
     handled: true,

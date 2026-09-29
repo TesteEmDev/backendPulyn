@@ -40,6 +40,8 @@ const zoneConquestRoutes = require('./routes/zoneConquest');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
+const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
+const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
 const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
@@ -449,7 +451,7 @@ app.get('/api/debug/game-state/:eventoId', verifyToken, requireRole('admin', 're
 
     const state = await getGameState(evento.id);
     const gameType = state?.game_type || 'none';
-    const active = state?.mode === 'game' && String(evento.status || '').toLowerCase() === 'active';
+    const active = state?.mode === 'game' && !isClosedStatus(evento.status);
     res.json({
       eventoId: evento.id,
       mode: state?.mode || 'idle',
@@ -507,8 +509,12 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const currentState = await getGameState(evento.id);
-    const eventIsRunning = currentState?.mode === 'game'
-      || String(evento.status || '').trim().toLowerCase() === 'active';
+    // "Jogo rodando" vem do estado do jogo; o status do evento (agendado/ativo/
+    // encerrado) é só o ciclo de vida e ficaria sempre 'ativo' durante o evento.
+    if (isClosedStatus(evento.status)) {
+      return res.status(409).json({ error: 'Este evento já foi encerrado.' });
+    }
+    const eventIsRunning = currentState?.mode === 'game';
     if (eventIsRunning) {
       return res.status(409).json({ error: 'Finalize o jogo atual antes de selecionar outro jogo' });
     }
@@ -577,6 +583,9 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     }
     if (!isMaster(req) && String(eventoAntes.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+    if (isClosedStatus(eventoAntes.status)) {
+      return res.status(409).json({ error: 'Este evento já foi encerrado. Não é possível iniciar um jogo nele.' });
     }
 
     const selectedGame = await queryOne(
@@ -796,33 +805,22 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     // ✅ IMPORTANTE: Atualizar o banco de dados
     console.log(`📝 [INICIAR-JOGO] Atualizando evento no banco de dados...`);
+    // O status do evento não é mexido aqui: iniciar um jogo só garante que o
+    // evento (se ainda agendado) passe a ativo; parar o jogo nunca o desativa.
     const updateResult = await query(
-      `UPDATE eventos SET 
-        status = @status, 
+      `UPDATE eventos SET
         active_brincadeira_id = @gameId,
         active_game_type = @gameType
        WHERE LOWER(id) = LOWER(@eventoId)`,
-      { status: 'active', eventoId, gameId, gameType }
+      { eventoId, gameId, gameType }
     );
     console.log(`   Atualização executada`);
-    
-    // ✅ VERIFICAR SE REALMENTE ATUALIZOU
-    console.log(`📋 [INICIAR-JOGO] Verificando status DEPOIS de atualizar...`);
-    const eventoDepois = await queryOne(
-      `SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
-      { eventoId }
-    );
-    console.log(`   Status DEPOIS: ${eventoDepois?.status || 'NÃO ENCONTRADO'}`);
-    
-    if (eventoDepois?.status !== 'active') {
-      console.error(`❌ [INICIAR-JOGO] ⚠️ FALHA NA ATUALIZAÇÃO! Status ainda é: ${eventoDepois?.status}`);
-      return res.status(500).json({ 
-        error: 'Falha ao atualizar status do evento',
-        statusAntes: eventoAntes?.status,
-        statusDepois: eventoDepois?.status
-      });
+    if (!Number(updateResult?.rowsAffected?.[0] || 0)) {
+      console.error(`❌ [INICIAR-JOGO] ⚠️ FALHA NA ATUALIZAÇÃO! Nenhuma linha do evento foi atualizada`);
+      return res.status(500).json({ error: 'Falha ao registrar o jogo ativo do evento' });
     }
-    
+    await ensureEventActive(eventoId);
+
     console.log(`✅ [INICIAR-JOGO] Banco de dados atualizado com SUCESSO!`);
     
     // ✅ Atualizar variável em memória também
@@ -908,14 +906,18 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     console.log(`✅ [INICIAR-JOGO] Processo finalizado com sucesso!\n`);
     
-    res.json({ 
+    const eventoDepois = await queryOne(
+      `SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+      { eventoId }
+    );
+    res.json({
       ok: true,
       sessionId: sessionId,
       status: gameStatus,
       verification: {
         statusAntes: eventoAntes?.status,
         statusDepois: eventoDepois?.status,
-        updated: eventoDepois?.status === 'active'
+        updated: true
       }
     });
   } catch (err) {
@@ -1025,30 +1027,13 @@ async function stopGameForEvento(eventoId) {
       }
     }
     
-    // ✅ IMPORTANTE: Atualizar o banco de dados
-    console.log(`📝 [PARAR-JOGO] Atualizando evento no banco de dados...`);
-    await query(
-      `UPDATE eventos SET status = @status WHERE id = @eventoId`,
-      { status: 'scheduled', eventoId }
-    );
-    console.log(`   Atualização executada`);
-    
-    // ✅ VERIFICAR SE REALMENTE ATUALIZOU
-    console.log(`📋 [PARAR-JOGO] Verificando status DEPOIS de atualizar...`);
+    // Parar o jogo não muda o status do evento (ciclo de vida: agendado/ativo/
+    // encerrado); só o encerramento do evento o fecha. Ver utils/eventLifecycle.js
     const eventoDepois = await queryOne(
       `SELECT id, status FROM eventos WHERE id = @eventoId`,
       { eventoId }
     );
-    console.log(`   Status DEPOIS: ${eventoDepois?.status || 'NÃO ENCONTRADO'}`);
-    
-    if (eventoDepois?.status !== 'scheduled') {
-      console.error(`❌ [PARAR-JOGO] ⚠️ FALHA NA ATUALIZAÇÃO! Status ainda é: ${eventoDepois?.status}`);
-      const error = new Error('Falha ao atualizar status do evento');
-      error.statusCode = 500;
-      throw error;
-    }
-    
-    console.log(`✅ [PARAR-JOGO] Banco de dados atualizado com SUCESSO!`);
+    console.log(`✅ [PARAR-JOGO] Jogo parado. Status do evento (inalterado): ${eventoDepois?.status || 'NÃO ENCONTRADO'}`);
     
     // ✅ Atualizar variável em memória também
     gameStatus = {
@@ -1099,10 +1084,13 @@ async function stopGameForEvento(eventoId) {
       verification: {
         statusAntes: eventoAntes?.status,
         statusDepois: eventoDepois?.status,
-        stopped: eventoDepois?.status === 'scheduled'
+        stopped: true
       }
     };
 }
+
+// Permite que o encerramento do evento (manual ou automático) pare o jogo em andamento.
+global.stopGameForEvento = stopGameForEvento;
 
 app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
@@ -1225,6 +1213,11 @@ async function checkStaleTeamCheckpoints() {
 }
 
 const staleTeamCheckpointsInterval = setInterval(checkStaleTeamCheckpoints, 10000);
+
+// Início e encerramento automáticos dos eventos, pela data/hora e duração
+// cadastradas (só eventos com auto_start/auto_end ligados). Ver utils/eventLifecycle.js
+// Iniciada em startServer(), depois que o schema (colunas auto_start/auto_end) existe.
+let eventLifecycleInterval = null;
 
 // DEBUG: Reset territory lock de um checkpoint
 app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
@@ -1419,7 +1412,7 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
   currentGameType = 'none';
   currentMode = 'idle';
   query(
-    `UPDATE eventos SET status = 'scheduled', active_brincadeira_id = NULL, active_game_type = 'none'
+    `UPDATE eventos SET active_brincadeira_id = NULL, active_game_type = 'none'
      WHERE LOWER(id) = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
@@ -1456,7 +1449,7 @@ global.finishMonsterGameState = (eventoId, finishedAt = new Date().toISOString()
     currentMode = 'idle';
   }
   query(
-    `UPDATE eventos SET status = 'scheduled', active_brincadeira_id = NULL, active_game_type = 'none'
+    `UPDATE eventos SET active_brincadeira_id = NULL, active_game_type = 'none'
      WHERE LOWER(id) = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
@@ -1902,6 +1895,7 @@ async function startServer() {
     await ensureFamilySchema();
     await ensureGameStateSchema();
     await ensureEventControlSchema();
+    await ensureEventLifecycleSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
@@ -1914,6 +1908,7 @@ async function startServer() {
     await ensureZoneConquestIndividualSchema();
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
+    eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
@@ -2168,6 +2163,7 @@ async function shutdown(signal) {
   clearInterval(interval);
   clearInterval(expiredGamesInterval);
   clearInterval(staleTeamCheckpointsInterval);
+  clearInterval(eventLifecycleInterval);
   wss.clients.forEach((client) => client.close(1001, 'Servidor reiniciando'));
 
   server.close(() => {

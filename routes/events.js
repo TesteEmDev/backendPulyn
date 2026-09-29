@@ -4,7 +4,13 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { getAvatarForCreate } = require('../utils/avatar');
-const { saveGameState } = require('../utils/gameState');
+const { saveGameState, getGameState } = require('../utils/gameState');
+const {
+  isClosedStatus,
+  startEvent,
+  ensureEventActive,
+  finishEvent,
+} = require('../utils/eventLifecycle');
 const {
   MONSTER_GAME_TYPE,
   startMonsterGame,
@@ -83,35 +89,63 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
+const MAX_RESPONSIBLE_NAME = 150;
+
 // Criar evento
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation } = req.body;
+    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd } = req.body;
     const empresa_id = req.user.empresa_id;
     const id = uuidv4();
-    
+
     // Validar campos obrigatórios
     if (!name || !date) {
       return res.status(400).json({ error: 'Nome e data são obrigatórios' });
     }
-    
+    const responsible = String(responsibleName || '').trim();
+    if (!responsible) {
+      return res.status(400).json({ error: 'Informe o nome do contratante/responsável pelo evento' });
+    }
+    if (responsible.length > MAX_RESPONSIBLE_NAME) {
+      return res.status(400).json({ error: `O nome do contratante deve ter no máximo ${MAX_RESPONSIBLE_NAME} caracteres` });
+    }
+
+    // Início/encerramento automáticos ficam ligados por padrão; o início
+    // automático precisa de horário para saber quando começar.
+    const wantsAutoStart = autoStart === undefined ? true : Boolean(autoStart);
+    const wantsAutoEnd = autoEnd === undefined ? true : Boolean(autoEnd);
+    if (wantsAutoStart && !time) {
+      return res.status(400).json({ error: 'Informe o horário para o evento iniciar automaticamente' });
+    }
+
     await query(
-      `INSERT INTO eventos (id, empresa_id, name, description, date, time, duration, enable_display, enable_location, status) 
-       VALUES (@id, @empresa_id, @name, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled')`,
-      { 
-        id, 
+      `INSERT INTO eventos (id, empresa_id, name, description, date, time, duration, enable_display, enable_location, status,
+                            responsible_name, auto_start, auto_end)
+       VALUES (@id, @empresa_id, @name, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
+               @responsibleName, @autoStart, @autoEnd)`,
+      {
+        id,
         empresa_id,
-        name, 
-        description, 
-        date, 
-        time, 
-        duration: parseInt(duration) || 60, 
-        enableDisplay: enableDisplay ? 1 : 0, 
-        enableLocation: enableLocation ? 1 : 0 
+        name,
+        description,
+        date,
+        time: time || null,
+        duration: parseInt(duration) || 60,
+        enableDisplay: enableDisplay ? 1 : 0,
+        enableLocation: enableLocation ? 1 : 0,
+        responsibleName: responsible,
+        autoStart: wantsAutoStart ? 1 : 0,
+        autoEnd: wantsAutoEnd ? 1 : 0,
       }
     );
-    
-    res.json({ id, empresa_id, name, description, date, time, duration, enableDisplay, enableLocation, status: 'scheduled' });
+
+    res.json({
+      id, empresa_id, name, description, date, time, duration, enableDisplay, enableLocation,
+      status: 'scheduled',
+      responsible_name: responsible,
+      auto_start: wantsAutoStart ? 1 : 0,
+      auto_end: wantsAutoEnd ? 1 : 0,
+    });
   } catch (err) {
     console.error('❌ Erro ao criar evento:', err);
     res.status(500).json({ error: err.message });
@@ -280,8 +314,11 @@ router.get('/:evento_id/game-status', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
-    res.json({ 
-      gameRunning: evento.status === 'active',
+    // "Jogo em andamento" vem do estado do jogo. eventos.status agora é só o
+    // ciclo de vida do evento (agendado/ativo/encerrado).
+    const gameState = await getGameState(evento.id);
+    res.json({
+      gameRunning: gameState?.mode === 'game' && !isClosedStatus(evento.status),
       status: evento.status
     });
   } catch (err) {
@@ -331,12 +368,15 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     const evento_id = req.params.evento_id;
     
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
       { id: evento_id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    if (isClosedStatus(evento.status)) {
+      return res.status(409).json({ error: 'Este evento já foi encerrado. Não é possível iniciar um jogo nele.' });
     }
 
     // Buscar a brincadeira para pegar o tipo
@@ -473,21 +513,21 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       await stopZoneConquestIndividual(evento_id);
     }
     
-    // Atualizar evento para ativar jogo
+    // Registrar o jogo ativo. O status do evento não é mexido aqui: iniciar um
+    // jogo só garante que o evento (se ainda agendado) passe a ativo.
     await query(
-      `UPDATE eventos 
-       SET status = @status, 
-           active_brincadeira_id = @brincadeiraId,
+      `UPDATE eventos
+       SET active_brincadeira_id = @brincadeiraId,
            active_game_type = @gameType
        WHERE id = @id`,
-      { 
-        status: 'active',
+      {
         brincadeiraId,
         gameType,
         id: evento_id
       }
     );
-    
+    await ensureEventActive(evento_id);
+
     const startedAt = new Date();
     await saveGameState({
       eventoId: evento_id,
@@ -539,16 +579,13 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
     await stopZoneConquestTeam(evento_id);
     await stopZoneConquestIndividual(evento_id);
     
+    // Parar o jogo não desativa o evento: só limpa o jogo ativo.
     await query(
-      `UPDATE eventos 
-       SET status = @status, 
-           active_brincadeira_id = NULL,
+      `UPDATE eventos
+       SET active_brincadeira_id = NULL,
            active_game_type = 'none'
        WHERE id = @id`,
-      { 
-        status: 'scheduled',
-        id: evento_id
-      }
+      { id: evento_id }
     );
     
     const stoppedAt = new Date();
@@ -756,7 +793,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 // Atualizar evento
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation, status } = req.body;
+    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd } = req.body;
     const empresa_id = req.user.empresa_id;
 
     // Verificar que o evento pertence à empresa (ou user é master)
@@ -773,16 +810,107 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
+    let responsible = null;
+    if (responsibleName !== undefined) {
+      responsible = String(responsibleName || '').trim();
+      if (!responsible) {
+        return res.status(400).json({ error: 'Informe o nome do contratante/responsável pelo evento' });
+      }
+      if (responsible.length > MAX_RESPONSIBLE_NAME) {
+        return res.status(400).json({ error: `O nome do contratante deve ter no máximo ${MAX_RESPONSIBLE_NAME} caracteres` });
+      }
+    }
+
+    // O status NÃO é alterado por aqui: o ciclo de vida do evento só muda pelas
+    // ações Iniciar/Encerrar (ou automaticamente pelo horário). Antes, um PUT sem
+    // status gravava NULL na coluna. Campos ausentes mantêm o valor atual.
+    const flag = (value) => (value === undefined ? null : (value ? 1 : 0));
     await query(
-      `UPDATE eventos SET name = @name, description = @description, date = @date, time = @time, 
-       duration = @duration, enable_display = @enableDisplay, enable_location = @enableLocation, status = @status 
+      `UPDATE eventos SET
+         name = COALESCE(@name, name),
+         description = COALESCE(@description, description),
+         date = COALESCE(@date, date),
+         time = COALESCE(@time, time),
+         duration = COALESCE(@duration, duration),
+         enable_display = COALESCE(@enableDisplay, enable_display),
+         enable_location = COALESCE(@enableLocation, enable_location),
+         responsible_name = COALESCE(@responsibleName, responsible_name),
+         auto_start = COALESCE(@autoStart, auto_start),
+         auto_end = COALESCE(@autoEnd, auto_end)
        WHERE id = @id`,
-      { name, description, date, time, duration: parseInt(duration) || 60, enableDisplay: enableDisplay ? 1 : 0, enableLocation: enableLocation ? 1 : 0, status, id: req.params.id }
+      {
+        name: name || null,
+        description: description ?? null,
+        date: date || null,
+        time: time || null,
+        duration: duration === undefined ? null : (parseInt(duration) || 60),
+        enableDisplay: flag(enableDisplay),
+        enableLocation: flag(enableLocation),
+        responsibleName: responsible,
+        autoStart: flag(autoStart),
+        autoEnd: flag(autoEnd),
+        id: req.params.id,
+      }
     );
 
     res.json({ updated: true });
   } catch (err) {
     console.error('❌ Erro ao atualizar evento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Iniciar o evento manualmente (agendado -> ativo)
+router.post('/:id/start', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      { id: req.params.id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    if (isClosedStatus(evento.status)) {
+      return res.status(409).json({ error: 'Este evento já foi encerrado e não pode ser iniciado novamente.' });
+    }
+
+    const changed = await startEvent(evento.id, { source: 'manual' });
+    if (!changed) return res.status(409).json({ error: 'Este evento já está ativo.' });
+
+    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    res.json({ started: true, evento: updated });
+  } catch (err) {
+    console.error('❌ Erro ao iniciar evento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Encerrar o evento manualmente (ativo -> encerrado). Para o jogo em andamento.
+router.post('/:id/finish', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      { id: req.params.id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    if (isClosedStatus(evento.status)) {
+      return res.status(409).json({ error: 'Este evento já foi encerrado.' });
+    }
+    if (String(evento.status || 'scheduled').toLowerCase() !== 'active') {
+      return res.status(409).json({ error: 'Só é possível encerrar um evento ativo. Para descartar um evento agendado, exclua-o.' });
+    }
+
+    const result = await finishEvent(evento.id, { source: 'manual', stopGame: global.stopGameForEvento });
+    if (!result.changed) return res.status(409).json({ error: 'Este evento já foi encerrado.' });
+
+    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    res.json({ finished: true, evento: updated });
+  } catch (err) {
+    console.error('❌ Erro ao encerrar evento:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -831,15 +959,18 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
     // 1️⃣ Validar evento existe e pertence à empresa
     const evento = await queryOne(
       isMaster(req)
-        ? 'SELECT id, empresa_id, name FROM eventos WHERE id = @id'
-        : 'SELECT id, empresa_id, name FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
-      isMaster(req) 
+        ? 'SELECT id, empresa_id, name, status FROM eventos WHERE id = @id'
+        : 'SELECT id, empresa_id, name, status FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
+      isMaster(req)
         ? { id: evento_id }
         : { id: evento_id, empresa_id: req.user.empresa_id }
     );
 
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado ou acesso negado' });
+    }
+    if (isClosedStatus(evento.status)) {
+      return res.status(409).json({ error: 'Este evento já foi encerrado. Não é possível configurar um jogo nele.' });
     }
 
     let finalBrincadeiraId = brincadeiraId;
@@ -882,16 +1013,16 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
     // 4️⃣ Atualizar evento
     await query(`
       UPDATE eventos
-      SET 
+      SET
         active_brincadeira_id = @brincadeiraId,
-        active_game_type = @gameType,
-        status = 'active'
+        active_game_type = @gameType
       WHERE id = @id
     `, {
       id: evento_id,
       brincadeiraId: finalBrincadeiraId,
       gameType: brincadeira.game_type || 'standard'
     });
+    await ensureEventActive(evento_id);
 
     console.log(`   ✅ Evento atualizado com brincadeira: ${brincadeira.name}`);
 
