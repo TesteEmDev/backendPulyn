@@ -87,17 +87,20 @@ router.get('/clients', verifyToken, async (req, res) => {
     }
 
     console.log('📍 [MASTER] Buscando clientes...');
-    
+
+    // A tabela empresas nunca teve colunas latitude/longitude — essa query
+    // sempre falhou em produção (Postgres não aceita SELECT de coluna
+    // inexistente), fazendo o mapa nunca receber nenhum cliente. O
+    // posicionamento real é feito no frontend a partir do "estado" (UF),
+    // que é um dado que a empresa de fato preenche no cadastro.
     const clients = await allQuery(`
-      SELECT 
+      SELECT
         id,
         nome as name,
         cidade as city,
         estado as state,
         status,
-        [plano] as plan,
-        ISNULL([latitude], NULL) as lat,
-        ISNULL([longitude], NULL) as lng
+        [plano] as plan
       FROM empresas
       WHERE nome != 'Master Admin'
       ORDER BY nome
@@ -154,19 +157,36 @@ router.get('/alerts', verifyToken, async (req, res) => {
     }
 
     console.log('⚠️ [MASTER] Buscando alertas...');
-    
-    const alerts = await allQuery(`
+
+    // Antes, a mensagem e o cliente eram textos fixos ('Checkpoint offline'
+    // / 'Sistema') para toda e qualquer linha — nunca dizia QUAL checkpoint
+    // nem DE QUEM. Agora busca os dados reais e monta a mensagem no JS
+    // (evita depender de concatenação de string, que difere entre
+    // SQL Server e Postgres).
+    const offlineCheckpoints = await allQuery(`
       SELECT TOP 5
-        NEWID() as id,
-        'offline' as type,
-        'Checkpoint offline' as message,
-        'Sistema' as client,
-        FORMAT(GETDATE(), 'HH:mm') as time
-      FROM checkpoints
-      WHERE status = 'offline'
-        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+        c.id,
+        c.name,
+        c.zone,
+        c.last_seen,
+        emp.nome as empresa_nome
+      FROM checkpoints c
+      LEFT JOIN empresas emp ON c.empresa_id = emp.id
+      WHERE c.status = 'offline'
+        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
+      ORDER BY c.last_seen DESC
     `);
-    
+
+    const alerts = offlineCheckpoints.map((cp) => ({
+      id: cp.id,
+      type: 'offline',
+      message: `Checkpoint "${cp.name || cp.id}" offline${cp.zone ? ` (${cp.zone})` : ''}`,
+      client: cp.empresa_nome || 'Sem empresa',
+      time: cp.last_seen
+        ? new Date(cp.last_seen).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        : '—',
+    }));
+
     console.log(`✅ ${alerts?.length || 0} alertas carregados`);
     res.json(alerts || []);
   } catch (err) {

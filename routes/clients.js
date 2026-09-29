@@ -13,8 +13,14 @@ router.get('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode listar clientes' });
     }
 
+    // Uma empresa pode ter vários logins (admin, recepção, game master,
+    // display, kiosk...). O JOIN direto com logins multiplicava cada
+    // empresa por cada login que ela tem — 5 empresas com 3 logins cada
+    // apareciam como 15 "clientes". Agrupado por empresa agora, com o
+    // e-mail do login 'admin' como representante (ou qualquer outro, se
+    // não houver admin).
     const clientes = await allQuery(`
-      SELECT 
+      SELECT
         e.id,
         e.nome as name,
         e.cidade as city,
@@ -22,16 +28,32 @@ router.get('/', verifyToken, async (req, res) => {
         e.telefone as phone,
         e.plano as [plan],
         e.status,
-        l.email,
+        COALESCE(MIN(CASE WHEN l.role = 'admin' THEN l.email END), MIN(l.email)) as email,
+        MAX(l.ultimo_acesso) as lastAccess,
+        (
+          SELECT COUNT(*) FROM eventos ev
+          WHERE ev.empresa_id = e.id
+            AND LOWER(COALESCE(ev.status, '')) IN ('finished', 'completed')
+        ) as eventsDone,
         e.data_criacao as createdAt
       FROM empresas e
       LEFT JOIN logins l ON e.id = l.empresa_id
       WHERE e.nome != 'Master Admin'
+      GROUP BY e.id, e.nome, e.cidade, e.estado, e.telefone, e.plano, e.status, e.data_criacao
       ORDER BY e.data_criacao DESC
     `);
-    
-    console.log(`✅ Listar clientes: ${clientes.length} empresas encontradas`);
-    res.json(clientes);
+
+    const formatted = clientes.map((c) => ({
+      ...c,
+      lastAccess: c.lastaccess
+        ? new Date(c.lastaccess).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+        : 'Nunca acessou',
+      eventsDone: Number(c.eventsdone ?? c.eventsDone ?? 0),
+      createdAt: c.createdat ? new Date(c.createdat).toLocaleDateString('pt-BR') : '—',
+    }));
+
+    console.log(`✅ Listar clientes: ${formatted.length} empresas encontradas`);
+    res.json(formatted);
   } catch (err) {
     console.error('❌ Erro ao listar clientes:', err);
     res.status(500).json({ error: err.message });
