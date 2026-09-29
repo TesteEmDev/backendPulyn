@@ -4,6 +4,20 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
+const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
+
+// O mesmo cliente pode existir em `empresas` e em `clientes` com ids diferentes
+// (o cadastro cria os dois). Devolve os ids do registro legado que corresponde
+// (nome + cidade) à empresa, para editar/excluir os dois lados juntos.
+async function legacyClienteIdsFor(empresaId) {
+  const empresa = await queryOne('SELECT nome, cidade FROM empresas WHERE id = @id', { id: empresaId });
+  if (!empresa) return [];
+  const rows = await allQuery('SELECT id, name, city FROM clientes');
+  return rows
+    .filter((c) => normalizeClientText(c.name) === normalizeClientText(empresa.nome) &&
+      normalizeClientText(c.city) === normalizeClientText(empresa.cidade))
+    .map((c) => c.id);
+}
 
 // ✅ APENAS MASTER pode listar clientes
 router.get('/', verifyToken, async (req, res) => {
@@ -13,25 +27,27 @@ router.get('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode listar clientes' });
     }
 
-    const clientes = await allQuery(`
-      SELECT 
-        e.id,
-        e.nome as name,
-        e.cidade as city,
-        e.estado as state,
-        e.telefone as phone,
-        e.plano as [plan],
-        e.status,
-        l.email,
-        e.data_criacao as createdAt
-      FROM empresas e
-      LEFT JOIN logins l ON e.id = l.empresa_id
-      WHERE e.nome != 'Master Admin'
-      ORDER BY e.data_criacao DESC
-    `);
-    
-    console.log(`✅ Listar clientes: ${clientes.length} empresas encontradas`);
-    res.json(clientes);
+    // Une `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
+    const clientes = await listPlatformClients();
+
+    const formatted = clientes.map((c) => ({
+      id: c.id,
+      name: c.name,
+      city: c.city,
+      state: c.state,
+      phone: c.phone,
+      plan: c.plan,
+      status: c.status,
+      email: c.email,
+      lastAccess: c.lastAccess
+        ? new Date(c.lastAccess).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })
+        : 'Nunca acessou',
+      eventsDone: c.eventsDone,
+      createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('pt-BR') : '—',
+    }));
+
+    console.log(`✅ Listar clientes: ${formatted.length} empresas encontradas`);
+    res.json(formatted);
   } catch (err) {
     console.error('❌ Erro ao listar clientes:', err);
     res.status(500).json({ error: err.message });
@@ -147,6 +163,10 @@ router.put('/:id', verifyToken, async (req, res) => {
     const { name, city, state, email, phone, plan, status } = req.body;
     
     try {
+      // Registro legado em `clientes`: o próprio id (cliente sem empresa) e/ou o
+      // espelho da empresa. Resolvido antes do UPDATE, pois casa por nome+cidade antigos.
+      const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
+
       // Atualizar EMPRESA
       await query(
         `UPDATE empresas SET nome = @nome, cidade = @cidade, estado = @estado, 
@@ -163,14 +183,28 @@ router.put('/:id', verifyToken, async (req, res) => {
         }
       );
 
-      // Atualizar EMAIL no LOGIN se foi fornecido
+      // Atualizar EMAIL do LOGIN admin se foi fornecido (sem o filtro de role, o
+      // e-mail era gravado em todos os logins da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
           `UPDATE logins SET email = @email, data_atualizacao = GETDATE()
-           WHERE empresa_id = @empresa_id`,
+           WHERE empresa_id = @empresa_id AND role = 'admin'`,
           {
             email: email,
             empresa_id: req.params.id
+          }
+        );
+      }
+
+      for (const legacyId of legacyIds) {
+        await query(
+          `UPDATE clientes SET name = COALESCE(@name, name), city = COALESCE(@city, city),
+           state = COALESCE(@state, state), email = COALESCE(@email, email),
+           phone = COALESCE(@phone, phone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
+           WHERE id = @id`,
+          {
+            name: name ?? null, city: city ?? null, state: state ?? null, email: email || null,
+            phone: phone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
           }
         );
       }
@@ -195,7 +229,12 @@ router.put('/:id/status', verifyToken, async (req, res) => {
     }
 
     const { status } = req.body;
-    
+
+    const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
+    for (const legacyId of legacyIds) {
+      await query('UPDATE clientes SET status = @status WHERE id = @id', { status, id: legacyId });
+    }
+
     // Atualizar status na EMPRESA
     await query(
       'UPDATE empresas SET status = @status, data_atualizacao = GETDATE() WHERE id = @id',
@@ -224,6 +263,10 @@ router.delete('/:id', verifyToken, async (req, res) => {
     }
 
     try {
+      // O registro legado tem outro id que o da empresa; sem apagá-lo aqui o
+      // cliente reapareceria na lista logo depois de excluído.
+      const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
+
       // 1. Deletar LOGIN
       await query(
         'DELETE FROM logins WHERE empresa_id = @id',
@@ -239,10 +282,9 @@ router.delete('/:id', verifyToken, async (req, res) => {
       console.log(`✅ Empresa deletada`);
 
       // 3. Deletar CLIENTE (compatibilidade)
-      await query(
-        'DELETE FROM clientes WHERE id = @id',
-        { id: req.params.id }
-      );
+      for (const legacyId of legacyIds) {
+        await query('DELETE FROM clientes WHERE id = @id', { id: legacyId });
+      }
       console.log(`✅ Cliente deletado`);
 
       res.json({ deleted: true, message: 'Cliente removido com sucesso!' });
