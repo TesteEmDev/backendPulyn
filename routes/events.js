@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { query, queryOne, allQuery } = require('../database');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { saveGameState, getGameState } = require('../utils/gameState');
@@ -93,10 +93,70 @@ router.get('/', verifyToken, async (req, res) => {
 
 const MAX_RESPONSIBLE_NAME = 150;
 
+// Jogos do evento: um jogo pertence a um evento pelo vínculo direto (brincadeiras.evento_id, do
+// evento em que foi criado) ou por um vínculo extra em evento_brincadeiras. Deixa o evento com
+// exatamente os jogos informados: vincula os novos, tira os desmarcados e, se um jogo criado
+// neste evento for desmarcado, solta o vínculo direto dele. Deve rodar dentro de uma transação.
+async function syncEventGames(eventoId, empresaId, gameIds) {
+  const wanted = Array.from(new Set((Array.isArray(gameIds) ? gameIds : []).map((id) => String(id).trim()).filter(Boolean)));
+  const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
+  for (const gameId of wanted) {
+    const game = await queryOne(
+      "SELECT id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
+      { id: gameId }
+    );
+    if (!game) {
+      const error = new Error('Um dos jogos selecionados não foi encontrado');
+      error.statusCode = 400;
+      throw error;
+    }
+    if (!same(game.empresa_id, empresaId)) {
+      const error = new Error('Um dos jogos selecionados pertence a outra empresa');
+      error.statusCode = 403;
+      throw error;
+    }
+  }
+
+  const owned = await allQuery(
+    "SELECT id FROM brincadeiras WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
+    { eventoId }
+  );
+  const links = await allQuery(
+    'SELECT brincadeira_id FROM evento_brincadeiras WHERE LOWER(evento_id) = LOWER(@eventoId)',
+    { eventoId }
+  );
+  const isWanted = (id) => wanted.some((w) => same(w, id));
+  const isOwned = (id) => owned.some((o) => same(o.id, id));
+  const isLinked = (id) => links.some((l) => same(l.brincadeira_id, id));
+
+  for (const [order, gameId] of wanted.entries()) {
+    if (!isOwned(gameId) && !isLinked(gameId)) {
+      await query(
+        'INSERT INTO evento_brincadeiras (evento_id, brincadeira_id, ordem) VALUES (@eventoId, @gameId, @order)',
+        { eventoId, gameId, order }
+      );
+    }
+  }
+  for (const link of links) {
+    if (!isWanted(link.brincadeira_id)) {
+      await query(
+        'DELETE FROM evento_brincadeiras WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(brincadeira_id) = LOWER(@gameId)',
+        { eventoId, gameId: link.brincadeira_id }
+      );
+    }
+  }
+  for (const game of owned) {
+    if (!isWanted(game.id)) {
+      await query('UPDATE brincadeiras SET evento_id = NULL WHERE LOWER(id) = LOWER(@gameId)', { gameId: game.id });
+    }
+  }
+}
+
 // Criar evento
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd } = req.body;
+    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd, games } = req.body;
     const empresa_id = req.user.empresa_id;
     const id = uuidv4();
 
@@ -120,26 +180,30 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Informe o horário para o evento iniciar automaticamente' });
     }
 
-    await query(
-      `INSERT INTO eventos (id, empresa_id, name, description, date, time, duration, enable_display, enable_location, status,
-                            responsible_name, auto_start, auto_end)
-       VALUES (@id, @empresa_id, @name, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
-               @responsibleName, @autoStart, @autoEnd)`,
-      {
-        id,
-        empresa_id,
-        name,
-        description,
-        date,
-        time: time || null,
-        duration: parseInt(duration) || 60,
-        enableDisplay: enableDisplay ? 1 : 0,
-        enableLocation: enableLocation ? 1 : 0,
-        responsibleName: responsible,
-        autoStart: wantsAutoStart ? 1 : 0,
-        autoEnd: wantsAutoEnd ? 1 : 0,
-      }
-    );
+    // O evento e os jogos dele são gravados juntos: jogo inválido cancela a criação do evento.
+    await withTransaction(async () => {
+      await query(
+        `INSERT INTO eventos (id, empresa_id, name, description, date, time, duration, enable_display, enable_location, status,
+                              responsible_name, auto_start, auto_end)
+         VALUES (@id, @empresa_id, @name, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
+                 @responsibleName, @autoStart, @autoEnd)`,
+        {
+          id,
+          empresa_id,
+          name,
+          description,
+          date,
+          time: time || null,
+          duration: parseInt(duration) || 60,
+          enableDisplay: enableDisplay ? 1 : 0,
+          enableLocation: enableLocation ? 1 : 0,
+          responsibleName: responsible,
+          autoStart: wantsAutoStart ? 1 : 0,
+          autoEnd: wantsAutoEnd ? 1 : 0,
+        }
+      );
+      if (Array.isArray(games)) await syncEventGames(id, empresa_id, games);
+    });
 
     res.json({
       id, empresa_id, name, description, date, time, duration, enableDisplay, enableLocation,
@@ -150,7 +214,7 @@ router.post('/', verifyToken, async (req, res) => {
     });
   } catch (err) {
     console.error('❌ Erro ao criar evento:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -795,7 +859,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 // Atualizar evento
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd } = req.body;
+    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd, games } = req.body;
     const empresa_id = req.user.empresa_id;
 
     // Verificar que o evento pertence à empresa (ou user é master)
@@ -827,38 +891,42 @@ router.put('/:id', verifyToken, async (req, res) => {
     // ações Iniciar/Encerrar (ou automaticamente pelo horário). Antes, um PUT sem
     // status gravava NULL na coluna. Campos ausentes mantêm o valor atual.
     const flag = (value) => (value === undefined ? null : (value ? 1 : 0));
-    await query(
-      `UPDATE eventos SET
-         name = COALESCE(@name, name),
-         description = COALESCE(@description, description),
-         date = COALESCE(@date, date),
-         time = COALESCE(@time, time),
-         duration = COALESCE(@duration, duration),
-         enable_display = COALESCE(@enableDisplay, enable_display),
-         enable_location = COALESCE(@enableLocation, enable_location),
-         responsible_name = COALESCE(@responsibleName, responsible_name),
-         auto_start = COALESCE(@autoStart, auto_start),
-         auto_end = COALESCE(@autoEnd, auto_end)
-       WHERE id = @id`,
-      {
-        name: name || null,
-        description: description ?? null,
-        date: date || null,
-        time: time || null,
-        duration: duration === undefined ? null : (parseInt(duration) || 60),
-        enableDisplay: flag(enableDisplay),
-        enableLocation: flag(enableLocation),
-        responsibleName: responsible,
-        autoStart: flag(autoStart),
-        autoEnd: flag(autoEnd),
-        id: req.params.id,
-      }
-    );
+    await withTransaction(async () => {
+      await query(
+        `UPDATE eventos SET
+           name = COALESCE(@name, name),
+           description = COALESCE(@description, description),
+           date = COALESCE(@date, date),
+           time = COALESCE(@time, time),
+           duration = COALESCE(@duration, duration),
+           enable_display = COALESCE(@enableDisplay, enable_display),
+           enable_location = COALESCE(@enableLocation, enable_location),
+           responsible_name = COALESCE(@responsibleName, responsible_name),
+           auto_start = COALESCE(@autoStart, auto_start),
+           auto_end = COALESCE(@autoEnd, auto_end)
+         WHERE id = @id`,
+        {
+          name: name || null,
+          description: description ?? null,
+          date: date || null,
+          time: time || null,
+          duration: duration === undefined ? null : (parseInt(duration) || 60),
+          enableDisplay: flag(enableDisplay),
+          enableLocation: flag(enableLocation),
+          responsibleName: responsible,
+          autoStart: flag(autoStart),
+          autoEnd: flag(autoEnd),
+          id: req.params.id,
+        }
+      );
+      // Sem `games` no corpo, os jogos do evento ficam como estão (quem não conhece o campo não apaga nada).
+      if (Array.isArray(games)) await syncEventGames(req.params.id, evento.empresa_id, games);
+    });
 
     res.json({ updated: true });
   } catch (err) {
     console.error('❌ Erro ao atualizar evento:', err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
