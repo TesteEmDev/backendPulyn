@@ -10,6 +10,8 @@ const {
   startEvent,
   ensureEventActive,
   finishEvent,
+  wallClockNow,
+  wallClockOf,
 } = require('../utils/eventLifecycle');
 const {
   MONSTER_GAME_TYPE,
@@ -911,6 +913,72 @@ router.post('/:id/finish', verifyToken, requireRole('admin', 'master'), async (r
     res.json({ finished: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao encerrar evento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Valida data (YYYY-MM-DD), horário (HH:MM) e duração opcional (5 a 1440 min).
+function parseSchedule({ date, time, duration }) {
+  const dateText = String(date || '').trim();
+  const timeText = String(time || '').trim();
+  const realDate = /^\d{4}-\d{2}-\d{2}$/.test(dateText)
+    && new Date(`${dateText}T00:00:00Z`).toISOString().slice(0, 10) === dateText;
+  if (!realDate) return { error: 'Informe uma data válida.' };
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(timeText)) return { error: 'Informe um horário válido (HH:MM).' };
+
+  let minutes = null;
+  if (duration !== undefined && duration !== null && String(duration).trim() !== '') {
+    minutes = Number(duration);
+    if (!Number.isInteger(minutes) || minutes < 5 || minutes > 1440) {
+      return { error: 'A duração deve ser de 5 a 1440 minutos.' };
+    }
+  }
+  return { date: dateText, time: timeText, duration: minutes };
+}
+
+// Reagendar o evento (só enquanto está agendado): nova data, horário e, se quiser, duração.
+// Com início automático ligado, o evento passa a iniciar sozinho no novo horário.
+router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      { id: req.params.id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    if (isClosedStatus(evento.status)) {
+      return res.status(409).json({ error: 'Este evento já foi encerrado e não pode ser reagendado.' });
+    }
+    if (String(evento.status || 'scheduled').toLowerCase() !== 'scheduled') {
+      return res.status(409).json({ error: 'Este evento está em andamento. Encerre-o antes de reagendar.' });
+    }
+
+    const schedule = parseSchedule(req.body || {});
+    if (schedule.error) return res.status(400).json({ error: schedule.error });
+
+    // A nova data/hora é lida no relógio do buffet (mesmo fuso do início automático).
+    const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
+    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
+      return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
+    }
+
+    const result = await query(
+      `UPDATE eventos
+       SET date = @date, time = @time, duration = COALESCE(@duration, duration)
+       WHERE id = @id AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
+      { date: schedule.date, time: schedule.time, duration: schedule.duration, id: evento.id }
+    );
+    if (!Number(result?.rowsAffected?.[0] || 0)) {
+      return res.status(409).json({ error: 'O evento mudou de situação e não pode mais ser reagendado.' });
+    }
+
+    console.log(`📅 [EVENTO] ${evento.id} reagendado para ${schedule.date} ${schedule.time}`);
+    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    res.json({ rescheduled: true, evento: updated });
+  } catch (err) {
+    console.error('❌ Erro ao reagendar evento:', err);
     res.status(500).json({ error: err.message });
   }
 });
