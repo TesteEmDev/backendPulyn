@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { getAvatarForCreate } = require('../utils/avatar');
+const { checkGameStartRequirements } = require('../utils/gameRequirements');
 const { saveGameState, getGameState } = require('../utils/gameState');
 const {
   isClosedStatus,
@@ -460,7 +461,13 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     if (!isMaster(req) && brincadeira.empresa_id && brincadeira.empresa_id !== req.user.empresa_id) {
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
-    
+
+    // O jogo só começa se o evento tiver o mínimo de checkpoints online para ele (antes de apagar/resetar qualquer dado)
+    const requirement = await checkGameStartRequirements(evento_id, brincadeira);
+    if (!requirement.ok) {
+      return res.status(409).json({ error: requirement.message, requirement });
+    }
+
     const rawGameType = brincadeira.type || brincadeira.game_type || 'standard';
     const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE, 'zone_conquest_team', 'zone_conquest_individual'].includes(rawGameType)
       ? rawGameType

@@ -58,6 +58,7 @@ const { addTerritoryOwnerCriancaIdColumn } = require('./migrations/addTerritoryO
 const { addColorToParticipantStates } = require('./migrations/addColorToParticipantStates');
 const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
+const { checkGameStartRequirements } = require('./utils/gameRequirements');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
 const WS_JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 const {
@@ -616,6 +617,13 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       );
     if (!directEventMatch && !linkedEvent) {
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
+    }
+
+    // O jogo só começa se o evento tiver o mínimo de checkpoints online para ele (confere antes de mexer em qualquer dado)
+    const requirement = await checkGameStartRequirements(eventoId, selectedGame);
+    if (!requirement.ok) {
+      console.warn(`⛔ [INICIAR-JOGO] ${requirement.message}`);
+      return res.status(409).json({ error: requirement.message, requirement });
     }
 
     const gameType = selectedGame.type === TREASURE_GAME_TYPE
