@@ -202,22 +202,27 @@ router.post('/reception', async (req, res) => {
     // balcão), não de um evento específico: a leitura vai para a recepção/kiosk
     // de qualquer evento ABERTO da mesma empresa. Nenhuma regra de jogo é
     // executada nesta rota.
+    // Checkpoint e pulseira vêm em UMA consulta (antes eram duas, em sequência):
+    // cada ida ao banco remoto soma na demora entre passar a pulseira e a luz acender.
     const checkpoint = await queryOne(
-      'SELECT id, empresa_id, evento_id, checkpoint_purpose FROM checkpoints WHERE id = @id AND LOWER(COALESCE(checkpoint_purpose, \'game\')) = \'reception\'',
-      { id: checkpointId }
+      `SELECT c.id, c.empresa_id, c.evento_id, c.checkpoint_purpose,
+              p.code AS pulseira_code, p.status AS pulseira_status
+       FROM checkpoints c
+       LEFT JOIN pulseiras p
+         ON LOWER(p.empresa_id) = LOWER(c.empresa_id)
+        AND ${uidSqlExpression('p.code')} = @uid
+       WHERE c.id = @id
+         AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) = 'reception'`,
+      { id: checkpointId, uid: normalizedUid }
     );
 
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint de recepção não encontrado' });
     }
 
-    const pulseira = await queryOne(
-      `SELECT code, status, crianca_id
-       FROM pulseiras
-       WHERE ${uidSqlExpression('code')} = @uid
-         AND LOWER(empresa_id) = LOWER(@empresaId)`,
-      { uid: normalizedUid, empresaId: checkpoint.empresa_id }
-    );
+    const pulseira = checkpoint.pulseira_code
+      ? { code: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
+      : null;
 
     const registered = Boolean(pulseira);
     // Eventos que podem estar cadastrando pulseiras agora. O evento do próprio
