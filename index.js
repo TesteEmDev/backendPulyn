@@ -48,6 +48,7 @@ const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpos
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
 const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
+const { ensureGameWinnerBonusesSchema } = require('./migrations/gameWinnerBonuses');
 const { ensureAvatarSchema } = require('./migrations/avatar');
 const { ensureEventZonesSchema } = require('./migrations/eventZones');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
@@ -66,11 +67,13 @@ const {
   getGameForEvent,
   startTreasureGame,
   stopTreasureGame,
+  awardTreasureBonusOnStop,
 } = require('./utils/treasure');
 const {
   MONSTER_GAME_TYPE,
   startMonsterGame,
   stopMonsterGame,
+  awardMonsterBonusOnStop,
 } = require('./utils/monster');
 const {
   startZoneConquestIndividual,
@@ -957,6 +960,16 @@ async function stopGameForEvento(eventoId) {
       const error = new Error('Evento não encontrado');
       error.statusCode = 404;
       throw error;
+    }
+
+    // Parar com Caça ao Tesouro/Monstro em andamento: se já existe uma equipe
+    // vencedora (a mais rápida / a primeira a derrotar o monstro), ela leva o
+    // bônus antes de a partida ser encerrada. Uma falha aqui não impede a parada.
+    try {
+      await awardTreasureBonusOnStop(eventoId);
+      await awardMonsterBonusOnStop(eventoId);
+    } catch (bonusError) {
+      console.error('❌ [PARAR-JOGO] Erro ao pagar bônus da equipe vencedora:', bonusError.message);
     }
 
     await stopTreasureGame(eventoId);
@@ -1914,6 +1927,7 @@ async function startServer() {
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
     await ensureMonsterHuntSchema();
+    await ensureGameWinnerBonusesSchema();
     await ensureAvatarSchema();
     await ensureEventZonesSchema();
     await ensureZoneConquestSchema();

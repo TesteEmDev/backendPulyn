@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { awardWinnerBonus } = require('./winnerBonus');
 
 const MONSTER_GAME_TYPE = 'monster_hunt';
 const MONSTER_DEFAULTS = Object.freeze({
@@ -227,6 +228,35 @@ async function startMonsterGame(eventoId, brincadeiraId) {
     startedAt: now.toISOString(),
     status: 'active',
   };
+}
+
+// Equipe vencedora = a primeira a derrotar o monstro (menor defeated_at).
+// Partidas antigas (sem estado por equipe) guardam o vencedor na própria partida.
+async function getMonsterWinnerTeamId(session) {
+  const first = await queryOne(`
+    SELECT TOP 1 time_id FROM monster_hunt_team_states
+    WHERE LOWER(partida_id) = LOWER(@partidaId) AND defeated_at IS NOT NULL
+    ORDER BY defeated_at ASC, victory_at ASC`, { partidaId: session.id });
+  return first?.time_id || session.winner_time_id || null;
+}
+
+async function awardMonsterWinnerBonus(session) {
+  const teamId = await getMonsterWinnerTeamId(session);
+  if (!teamId) return null;
+  return awardWinnerBonus({
+    eventoId: session.evento_id,
+    partidaId: session.id,
+    gameType: MONSTER_GAME_TYPE,
+    teamId,
+  });
+}
+
+// Parada manual (ou por tempo) com a partida em andamento: se alguma equipe já
+// derrotou o monstro, a primeira a conseguir vence e recebe o bônus.
+async function awardMonsterBonusOnStop(eventoId) {
+  const session = await getActiveMonsterGame(eventoId);
+  if (!session) return null;
+  return awardMonsterWinnerBonus(session);
 }
 
 async function stopMonsterGame(eventoId) {
@@ -546,6 +576,13 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     gameCompleted = gameCompleted || Boolean(completionUpdate.rowsAffected?.[0]);
   }
 
+  // Caça ao Monstro não pontua durante a partida: quando todos os monstros caem,
+  // a equipe que derrotou o seu primeiro leva o bônus de vitória (cada membro).
+  let winnerBonus = null;
+  if (gameCompleted) {
+    winnerBonus = await awardMonsterWinnerBonus(session);
+  }
+
   // Quando o jogo termina, o evento continua ativo (o status é só o ciclo de
   // vida do evento); o estado do jogo é encerrado por global.finishMonsterGameState.
 
@@ -565,6 +602,7 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     teamMonsterDefeated: teamMonster.monsterDefeated,
     teamVictory: teamMonster.victory,
     gameCompleted,
+    winnerBonus,
     monsters: progress,
     progress,
     teamsProgress: progress,
@@ -591,5 +629,6 @@ module.exports = {
   getMonsterEventStatus,
   startMonsterGame,
   stopMonsterGame,
+  awardMonsterBonusOnStop,
   processMonsterScan,
 };
