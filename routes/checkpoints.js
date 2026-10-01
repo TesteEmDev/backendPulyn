@@ -74,6 +74,46 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
   }
 });
 
+// Resumo dos checkpoints de jogo de TODOS os eventos da empresa: quantos estão
+// cadastrados e quantos online, por evento. Os checkpoints de recepção ficam de fora.
+// "Indisponíveis" = cadastrados - online (offline ou sem status).
+router.get('/resumo', verifyToken, async (req, res) => {
+  try {
+    const rows = await allQuery(`
+      SELECT
+        c.evento_id,
+        e.name AS evento_name,
+        e.status AS evento_status,
+        e.date AS evento_date,
+        COUNT(*) AS total,
+        SUM(CASE WHEN c.status = 'online' THEN 1 ELSE 0 END) AS online
+      FROM checkpoints c
+      INNER JOIN eventos e ON e.id = c.evento_id
+      WHERE e.empresa_id = @empresa_id
+        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
+      GROUP BY c.evento_id, e.name, e.status, e.date
+      ORDER BY e.date DESC
+    `, { empresa_id: req.user.empresa_id });
+
+    res.json(rows.map((row) => {
+      const total = Number(row.total) || 0;
+      const online = Number(row.online) || 0;
+      return {
+        eventoId: row.evento_id,
+        eventoName: row.evento_name,
+        eventoStatus: row.evento_status,
+        eventoDate: row.evento_date,
+        total,
+        online,
+        offline: total - online,
+      };
+    }));
+  } catch (err) {
+    console.error('❌ Erro ao resumir checkpoints:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/evento/:evento_id', verifyToken, async (req, res) => {
   try {
     const { evento_id } = req.params;

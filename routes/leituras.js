@@ -198,8 +198,10 @@ router.post('/reception', async (req, res) => {
       return res.status(400).json({ error: 'checkpointId e uid são obrigatórios' });
     }
 
-    // O checkpoint fornece o evento para que somente a recepção daquele evento
-    // receba o broadcast. Nenhuma regra de jogo é executada nesta rota.
+    // O checkpoint de recepção é um equipamento físico da empresa (o leitor do
+    // balcão), não de um evento específico: a leitura vai para a recepção/kiosk
+    // de qualquer evento ABERTO da mesma empresa. Nenhuma regra de jogo é
+    // executada nesta rota.
     const checkpoint = await queryOne(
       'SELECT id, empresa_id, evento_id, checkpoint_purpose FROM checkpoints WHERE id = @id AND LOWER(COALESCE(checkpoint_purpose, \'game\')) = \'reception\'',
       { id: checkpointId }
@@ -218,22 +220,38 @@ router.post('/reception', async (req, res) => {
     );
 
     const registered = Boolean(pulseira);
-    const receptionReading = {
-      readingId: uuidv4(),
-      braceletCode: normalizedUid,
-      timestamp: now.toISOString(),
-      receivedAt: now.getTime(),
-      checkpointId: checkpoint.id,
-      eventoId: checkpoint.evento_id,
-      source: 'reception',
-    };
+    // Eventos que podem estar cadastrando pulseiras agora. O evento do próprio
+    // checkpoint só entra se ainda estiver aberto; se não houver nenhum aberto,
+    // mantém o comportamento antigo (evento do checkpoint).
+    const openEvents = await allQuery(
+      `SELECT id FROM eventos
+       WHERE LOWER(empresa_id) = LOWER(@empresaId)
+         AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
+      { empresaId: checkpoint.empresa_id }
+    );
+    const targetEventIds = openEvents.length
+      ? openEvents.map(event => event.id)
+      : [checkpoint.evento_id].filter(Boolean);
 
-    // Guarda a leitura por alguns segundos para kiosks que perderem o broadcast.
-    rememberReceptionReading(receptionReading);
-    broadcast({
-      type: 'NFC_READING_DETECTED',
-      payload: receptionReading,
-    });
+    const readingId = uuidv4();
+    for (const targetEventId of targetEventIds) {
+      const receptionReading = {
+        readingId,
+        braceletCode: normalizedUid,
+        timestamp: now.toISOString(),
+        receivedAt: now.getTime(),
+        checkpointId: checkpoint.id,
+        eventoId: targetEventId,
+        source: 'reception',
+      };
+
+      // Guarda a leitura por alguns segundos para kiosks que perderem o broadcast.
+      rememberReceptionReading(receptionReading);
+      broadcast({
+        type: 'NFC_READING_DETECTED',
+        payload: receptionReading,
+      });
+    }
 
     return res.json({
       ok: true,

@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
+const { awardWinnerBonus } = require('./winnerBonus');
 
 const TREASURE_GAME_TYPE = 'treasure_hunt';
 const TREASURE_TURN_DELAY_MS = 10 * 1000;
@@ -171,6 +172,22 @@ async function getParticipatingTeams(eventoId) {
 function chooseRandom(values) {
   if (!values.length) return null;
   return values[Math.floor(Math.random() * values.length)];
+}
+
+// Parada manual (ou por tempo) com a partida em andamento: se alguma equipe já
+// concluiu a corrida, a mais rápida é a vencedora e recebe o bônus. Sem nenhuma
+// equipe concluída, ninguém ganha.
+async function awardTreasureBonusOnStop(eventoId) {
+  const session = await getActiveSession(eventoId);
+  if (!session) return null;
+  const winner = getFastestCompletedTeam(await getTeamRaceTimes(eventoId, session));
+  if (!winner) return null;
+  return awardWinnerBonus({
+    eventoId,
+    partidaId: session.id,
+    gameType: TREASURE_GAME_TYPE,
+    teamId: winner.teamId,
+  });
 }
 
 async function stopTreasureGame(eventoId) {
@@ -785,13 +802,20 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     };
   }
 
-  if (raceFinished) {
-    await query(
-      `UPDATE eventos SET status = 'scheduled'
-       WHERE LOWER(id) = LOWER(@eventoId) AND status = 'active'`,
-      { eventoId }
-    );
+  // Caça ao Tesouro não pontua durante a partida: a equipe mais rápida leva o
+  // bônus de vitória (para cada membro) quando a corrida termina.
+  let winnerBonus = null;
+  if (raceFinished && winningTeam) {
+    winnerBonus = await awardWinnerBonus({
+      eventoId,
+      partidaId: session.id,
+      gameType: TREASURE_GAME_TYPE,
+      teamId: winningTeam.teamId,
+    });
   }
+
+  // Quando a corrida termina, o evento continua ativo (o status é só o ciclo de
+  // vida do evento); o estado do jogo é encerrado por global.finishTreasureGameState.
 
   return {
     handled: true,
@@ -808,6 +832,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     teamCompletedAllCheckpoints: ownership.won,
     winningTeamId: winningTeam?.teamId || null,
     winningTeamName: winningTeam?.teamName || null,
+    winnerBonus,
     ownedCheckpoints: switchingTeam ? 0 : ownership.owned,
     totalCheckpoints: ownership.total,
     turnTeamId: raceFinished ? null : nextTurnTeam?.teamId || null,
@@ -832,6 +857,7 @@ module.exports = {
   getActiveSession,
   startTreasureGame,
   stopTreasureGame,
+  awardTreasureBonusOnStop,
   getCheckpointTreasureStatus,
   getTreasureEventStatus,
   processTreasureScan,
