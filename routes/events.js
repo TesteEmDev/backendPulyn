@@ -10,6 +10,7 @@ const {
   startEvent,
   ensureEventActive,
   finishEvent,
+  reopenEvent,
   wallClockNow,
   wallClockOf,
 } = require('../utils/eventLifecycle');
@@ -1047,6 +1048,42 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
     res.json({ rescheduled: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao reagendar evento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reabrir um evento encerrado: ele volta a "agendado" numa nova data e horário (no futuro).
+router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      { id: req.params.id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    if (!isClosedStatus(evento.status)) {
+      return res.status(409).json({ error: 'Só eventos encerrados podem ser reabertos.' });
+    }
+
+    const schedule = parseSchedule(req.body || {});
+    if (schedule.error) return res.status(400).json({ error: schedule.error });
+
+    const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
+    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
+      return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
+    }
+
+    const result = await reopenEvent(evento.id, schedule);
+    if (!result.changed) {
+      return res.status(409).json({ error: 'O evento mudou de situação e não pode ser reaberto agora.' });
+    }
+
+    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    res.json({ reopened: true, evento: updated });
+  } catch (err) {
+    console.error('❌ Erro ao reabrir evento:', err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -156,6 +156,41 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
   return { changed: true };
 }
 
+// Reabre um evento encerrado: volta para "agendado" na nova data/horário (e duração, se informada),
+// sem início nem fim registrados. Participantes, times, checkpoints e jogos continuam como estavam.
+// O início/encerramento automáticos seguem as opções que o evento já tinha.
+async function reopenEvent(eventoId, { date, time, duration } = {}) {
+  const evento = await queryOne(
+    'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+    { eventoId }
+  );
+  if (!evento) return { changed: false, reason: 'not_found' };
+  if (!isClosedStatus(evento.status)) return { changed: false, reason: 'not_finished' };
+
+  const result = await query(
+    `UPDATE eventos
+     SET status = 'scheduled',
+         date = @date,
+         time = @time,
+         duration = COALESCE(@duration, duration),
+         started_at = NULL,
+         ended_at = NULL,
+         active_brincadeira_id = NULL,
+         active_game_type = 'none'
+     WHERE LOWER(id) = LOWER(@eventoId)
+       AND LOWER(COALESCE(status, 'scheduled')) IN ('finished', 'completed', 'cancelled', 'canceled')`,
+    { eventoId: evento.id, date, time, duration: duration ?? null }
+  );
+  if (!(Number(result?.rowsAffected?.[0] || 0) > 0)) return { changed: false, reason: 'not_finished' };
+
+  console.log(`🔓 [EVENTO] ${evento.id} reaberto para ${date} ${time}`);
+  broadcastCompany(evento.empresa_id, {
+    type: 'EVENT_STATUS_CHANGED',
+    payload: { eventoId: evento.id, status: 'scheduled', source: 'reopen' },
+  });
+  return { changed: true };
+}
+
 // Uma varredura: inicia e encerra os eventos que chegaram na hora.
 async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
   const rows = await allQuery(`
@@ -208,6 +243,7 @@ module.exports = {
   startEvent,
   ensureEventActive,
   finishEvent,
+  reopenEvent,
   runLifecycleTick,
   startLifecycleScheduler,
 };
