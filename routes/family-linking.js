@@ -2,7 +2,6 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../utils/middleware');
 const { queryOne, query, withTransaction } = require('../database');
-const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 
 /**
  * MOBILE: POST /api/family/qrcode/validate
@@ -176,126 +175,6 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     console.error('❌ ERRO na validação de QR code:', error.message);
     console.error('   Stack:', error.stack);
     res.status(500).json({ error: 'Erro ao validar QR code', details: error.message });
-  }
-});
-
-/**
- * MOBILE: POST /api/family/bracelet/validate
- * Vincula o pais/responsável à criança lendo o UID da pulseira NFC pelo celular.
- * Mesma lógica do /qrcode/validate, mas localizando a criança pelo bracelet_code
- * em vez de um código de vinculação.
- */
-router.post('/bracelet/validate', verifyToken, async (req, res) => {
-  console.log('📞 [FAMILY-LINKING] POST /bracelet/validate chamado');
-  console.log(`   Usuario: ${req.user?.email || 'ANÔNIMO'}`);
-  console.log(`   Role: ${req.user?.role || 'NENHUMA'}`);
-
-  try {
-    const { uid } = req.body;
-    console.log(`   UID recebido (raw): ${uid}`);
-
-    if (req.user.role !== 'family') {
-      console.log(`   ❌ Acesso negado: role é ${req.user.role}, esperado 'family'`);
-      return res.status(403).json({ error: 'Apenas usuários com perfil familiar podem vincular crianças' });
-    }
-
-    const normalizedUid = normalizeUid(uid);
-    if (!normalizedUid) {
-      console.log(`   ❌ UID vazio ou inválido`);
-      return res.status(400).json({ error: 'uid é obrigatório' });
-    }
-
-    console.log(`   🔍 Buscando criança pela pulseira: "${normalizedUid}"`);
-    const crianca = await queryOne(
-      `SELECT c.id as crianca_id, c.name, c.nickname, c.age, c.empresa_id, e.name as evento_nome, e.id as evento_id
-       FROM criancas c
-       JOIN eventos e ON e.id = c.evento_id
-       WHERE ${uidSqlExpression('c.bracelet_code')} = @normalizedUid
-         AND c.empresa_id = @empresaId`,
-      { normalizedUid, empresaId: req.user.empresa_id }
-    );
-
-    console.log(`   ✅ Query executada. Resultado:`, crianca ? 'Encontrado' : 'Não encontrado');
-
-    if (!crianca) {
-      console.log(`   ❌ Pulseira não vinculada a nenhuma criança`);
-      return res.status(404).json({
-        error: 'Pulseira não encontrada ou ainda não vinculada a uma criança',
-        code: 'BRACELET_NOT_FOUND'
-      });
-    }
-
-    console.log(`   ✅ Criança encontrada: ${crianca.nickname}`);
-
-    console.log(`   🔗 Criando vinculação em transação...`);
-    const { v4: uuidv4 } = require('uuid');
-
-    await withTransaction(async (tx) => {
-      const vinculacaoExistente = await tx.queryOne(
-        `SELECT id, status FROM family_child_links
-         WHERE login_id = @loginId
-           AND crianca_id = @criancaId
-         FOR UPDATE`,
-        { loginId: req.user.id, criancaId: crianca.crianca_id }
-      );
-
-      if (vinculacaoExistente) {
-        if (vinculacaoExistente.status === 'inactive') {
-          console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.id}`);
-          await tx.query(
-            `UPDATE family_child_links
-             SET status = 'pending'
-             WHERE id = @linkId`,
-            { linkId: vinculacaoExistente.id }
-          );
-        } else {
-          throw new Error('ALREADY_LINKED');
-        }
-      } else {
-        const linkId = uuidv4();
-        console.log(`   📝 Link ID gerado: ${linkId}`);
-        console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${crianca.crianca_id}, empresaId=${crianca.empresa_id}`);
-
-        await tx.query(
-          `INSERT INTO family_child_links (id, login_id, crianca_id, empresa_id, status, relationship)
-           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
-          {
-            linkId: linkId,
-            loginId: req.user.id,
-            criancaId: crianca.crianca_id,
-            empresaId: crianca.empresa_id
-          }
-        );
-        console.log(`   ✅ Link criado com sucesso`);
-      }
-    });
-
-    console.log(`✅ Pais/Responsável ${req.user.email} vinculado à criança ${crianca.nickname} pela pulseira`);
-
-    res.json({
-      success: true,
-      message: 'Criança vinculada com sucesso!',
-      linkedChild: {
-        id: crianca.crianca_id,
-        name: crianca.name,
-        nickname: crianca.nickname,
-        age: crianca.age,
-        evento: crianca.evento_nome
-      }
-    });
-
-  } catch (error) {
-    if (error.message === 'ALREADY_LINKED') {
-      console.log(`   ❌ Já vinculado (status ativo)`);
-      return res.status(400).json({
-        error: 'Você já está vinculado a esta criança',
-        code: 'ALREADY_LINKED'
-      });
-    }
-
-    console.error('❌ ERRO na validação da pulseira:', error.message);
-    console.error('   Stack:', error.stack);
-    res.status(500).json({ error: 'Erro ao validar pulseira', details: error.message });
   }
 });
 
