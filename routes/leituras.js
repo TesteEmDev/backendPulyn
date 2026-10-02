@@ -198,42 +198,65 @@ router.post('/reception', async (req, res) => {
       return res.status(400).json({ error: 'checkpointId e uid são obrigatórios' });
     }
 
-    // O checkpoint fornece o evento para que somente a recepção daquele evento
-    // receba o broadcast. Nenhuma regra de jogo é executada nesta rota.
+    // O checkpoint de recepção é um equipamento físico da empresa (o leitor do
+    // balcão), não de um evento específico: a leitura vai para a recepção/kiosk
+    // de qualquer evento ABERTO da mesma empresa. Nenhuma regra de jogo é
+    // executada nesta rota.
+    // Checkpoint e pulseira vêm em UMA consulta (antes eram duas, em sequência):
+    // cada ida ao banco remoto soma na demora entre passar a pulseira e a luz acender.
     const checkpoint = await queryOne(
-      'SELECT id, empresa_id, evento_id, checkpoint_purpose FROM checkpoints WHERE id = @id AND LOWER(COALESCE(checkpoint_purpose, \'game\')) = \'reception\'',
-      { id: checkpointId }
+      `SELECT c.id, c.empresa_id, c.evento_id, c.checkpoint_purpose,
+              p.code AS pulseira_code, p.status AS pulseira_status
+       FROM checkpoints c
+       LEFT JOIN pulseiras p
+         ON LOWER(p.empresa_id) = LOWER(c.empresa_id)
+        AND ${uidSqlExpression('p.code')} = @uid
+       WHERE c.id = @id
+         AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) = 'reception'`,
+      { id: checkpointId, uid: normalizedUid }
     );
 
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint de recepção não encontrado' });
     }
 
-    const pulseira = await queryOne(
-      `SELECT code, status, crianca_id
-       FROM pulseiras
-       WHERE ${uidSqlExpression('code')} = @uid
-         AND LOWER(empresa_id) = LOWER(@empresaId)`,
-      { uid: normalizedUid, empresaId: checkpoint.empresa_id }
-    );
+    const pulseira = checkpoint.pulseira_code
+      ? { code: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
+      : null;
 
     const registered = Boolean(pulseira);
-    const receptionReading = {
-      readingId: uuidv4(),
-      braceletCode: normalizedUid,
-      timestamp: now.toISOString(),
-      receivedAt: now.getTime(),
-      checkpointId: checkpoint.id,
-      eventoId: checkpoint.evento_id,
-      source: 'reception',
-    };
+    // Eventos que podem estar cadastrando pulseiras agora. O evento do próprio
+    // checkpoint só entra se ainda estiver aberto; se não houver nenhum aberto,
+    // mantém o comportamento antigo (evento do checkpoint).
+    const openEvents = await allQuery(
+      `SELECT id FROM eventos
+       WHERE LOWER(empresa_id) = LOWER(@empresaId)
+         AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
+      { empresaId: checkpoint.empresa_id }
+    );
+    const targetEventIds = openEvents.length
+      ? openEvents.map(event => event.id)
+      : [checkpoint.evento_id].filter(Boolean);
 
-    // Guarda a leitura por alguns segundos para kiosks que perderem o broadcast.
-    rememberReceptionReading(receptionReading);
-    broadcast({
-      type: 'NFC_READING_DETECTED',
-      payload: receptionReading,
-    });
+    const readingId = uuidv4();
+    for (const targetEventId of targetEventIds) {
+      const receptionReading = {
+        readingId,
+        braceletCode: normalizedUid,
+        timestamp: now.toISOString(),
+        receivedAt: now.getTime(),
+        checkpointId: checkpoint.id,
+        eventoId: targetEventId,
+        source: 'reception',
+      };
+
+      // Guarda a leitura por alguns segundos para kiosks que perderem o broadcast.
+      rememberReceptionReading(receptionReading);
+      broadcast({
+        type: 'NFC_READING_DETECTED',
+        payload: receptionReading,
+      });
+    }
 
     return res.json({
       ok: true,

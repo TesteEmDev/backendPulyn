@@ -3,21 +3,9 @@ const express = require('express');
 const router = express.Router();
 const { allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
+const { listPlatformClients } = require('../utils/platformClients');
 
-const PLAN_DEFINITIONS = {
-  starter: {
-    name: 'Starter', price: 500, color: '#F59E0B', checkpointLimit: 3, eventsPerMonth: 4,
-    features: ['Até 3 checkpoints simultâneos', 'Até 4 eventos por mês', 'Dashboard básico'],
-  },
-  professional: {
-    name: 'Professional', price: 1000, color: '#29B6F6', checkpointLimit: 8, eventsPerMonth: 12,
-    features: ['Até 8 checkpoints simultâneos', 'Até 12 eventos por mês', 'Dashboard completo'],
-  },
-  enterprise: {
-    name: 'Enterprise', price: 2000, color: '#1E9BD7', checkpointLimit: -1, eventsPerMonth: -1,
-    features: ['Checkpoints ilimitados', 'Eventos ilimitados', 'Dashboard completo + analytics'],
-  },
-};
+const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
 
 function requireMaster(req, res, next) {
   if (!isMaster(req)) {
@@ -37,13 +25,15 @@ function formatSince(value) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
+// Empresas + cadastro legado `clientes`; o plano 'family' das contas de família continua contado.
 async function loadCompanies() {
-  return allQuery(`
-    SELECT id, nome, cidade, estado, plano, status, data_criacao
-    FROM empresas
-    WHERE nome <> @masterName
-    ORDER BY nome
-  `, { masterName: 'Master Admin' });
+  const list = await listPlatformClients({ includeFamily: true });
+  return list
+    .map((c) => ({
+      id: c.id, nome: c.name, cidade: c.city, estado: c.state,
+      plano: c.plan, status: c.status, data_criacao: c.createdAt,
+    }))
+    .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
 }
 
 router.get('/', verifyToken, requireMaster, async (req, res) => {
