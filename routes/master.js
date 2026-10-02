@@ -3,7 +3,6 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
-const { listPlatformClients } = require('../utils/platformClients');
 
 // ✅ Dados para o dashboard master - APENAS master
 router.get('/dashboard', verifyToken, async (req, res) => {
@@ -15,8 +14,10 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     console.log('📊 [MASTER] Buscando dados do dashboard...');
     
-    // Clientes = empresas + cadastro legado `clientes` (sem contas de família)
-    const platformClients = await listPlatformClients();
+    // Clientes ativos (excluindo Master Admin)
+    const activeClients = await queryOne(`
+      SELECT COUNT(*) as count FROM empresas WHERE status = 'active' AND nome != 'Master Admin'
+    `);
     
     // Eventos em andamento (com empresa_id e não da Master)
     const activeEvents = await queryOne(`
@@ -56,14 +57,19 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         AND emp.nome != 'Master Admin'
     `);
     
+    // Total de clientes (excluindo Master Admin)
+    const totalClients = await queryOne(`
+      SELECT COUNT(*) as count FROM empresas WHERE nome != 'Master Admin'
+    `);
+    
     console.log('✅ Dashboard data loaded successfully');
     res.json({
-      activeClients: platformClients.filter((c) => String(c.status).toLowerCase() === 'active').length,
+      activeClients: activeClients?.count || 0,
       activeEvents: activeEvents?.count || 0,
       onlineCheckpoints: onlineCheckpoints?.count || 0,
       activeChildren: activeChildren?.count || 0,
       offlineCheckpoints: offlineCheckpoints?.count || 0,
-      totalClients: platformClients.length,
+      totalClients: totalClients?.count || 0,
     });
   } catch (err) {
     console.error('❌ Erro ao buscar dados do dashboard:', err.message);
@@ -81,18 +87,22 @@ router.get('/clients', verifyToken, async (req, res) => {
     }
 
     console.log('📍 [MASTER] Buscando clientes...');
-
-    // Sem coordenadas no cadastro: o mapa posiciona pelo estado/cidade. Une
-    // `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
-    const clients = (await listPlatformClients()).map((c) => ({
-      id: c.id,
-      name: c.name,
-      city: c.city,
-      state: c.state,
-      status: c.status,
-      plan: c.plan,
-    }));
-
+    
+    const clients = await allQuery(`
+      SELECT 
+        id,
+        nome as name,
+        cidade as city,
+        estado as state,
+        status,
+        [plano] as plan,
+        ISNULL([latitude], NULL) as lat,
+        ISNULL([longitude], NULL) as lng
+      FROM empresas
+      WHERE nome != 'Master Admin'
+      ORDER BY nome
+    `);
+    
     console.log(`✅ ${clients?.length || 0} clientes carregados`);
     res.json(clients || []);
   } catch (err) {
@@ -111,21 +121,14 @@ router.get('/active-events', verifyToken, async (req, res) => {
 
     console.log('⚡ [MASTER] Buscando eventos ativos...');
     
-    // O DATEDIFF com ISNULL aninhado vira SQL inválido no Postgres (o regex de
-    // tradução corta os argumentos na vírgula do ISNULL), o que derrubava a
-    // rota inteira e deixava "Eventos em Andamento" sempre vazio. O tempo
-    // decorrido e o camelCase agora são montados em JS (alias sem aspas volta
-    // minúsculo do Postgres, então childrenCount chegava undefined).
-    const rows = await allQuery(`
+    const events = await allQuery(`
       SELECT TOP 10
         e.id,
         e.name,
-        e.empresa_id,
         e2.nome as client,
-        (SELECT COUNT(*) FROM criancas WHERE evento_id = e.id) as children_count,
+        (SELECT COUNT(*) FROM criancas WHERE evento_id = e.id) as childrenCount,
         e.status,
-        e.date as event_date,
-        e.created_at
+        DATEDIFF(MINUTE, ISNULL(e.created_at, e.date), GETDATE()) as elapsed
       FROM eventos e
       LEFT JOIN empresas e2 ON e.empresa_id = e2.id
       WHERE e.status IN ('active', 'scheduled')
@@ -133,24 +136,9 @@ router.get('/active-events', verifyToken, async (req, res) => {
         AND e2.nome != 'Master Admin'
       ORDER BY e.date DESC
     `);
-
-    const now = Date.now();
-    const events = rows.map((e) => {
-      const startedAt = new Date(e.created_at || e.event_date).getTime();
-      return {
-        id: e.id,
-        name: e.name,
-        clientId: e.empresa_id,
-        client: e.client,
-        childrenCount: Number(e.children_count) || 0,
-        status: e.status,
-        date: e.event_date,
-        elapsed: Number.isFinite(startedAt) ? Math.max(0, Math.round((now - startedAt) / 60000)) : 0,
-      };
-    });
-
-    console.log(`✅ ${events.length} eventos carregados`);
-    res.json(events);
+    
+    console.log(`✅ ${events?.length || 0} eventos carregados`);
+    res.json(events || []);
   } catch (err) {
     console.error('❌ Erro ao buscar eventos ativos:', err.message);
     res.status(500).json({ error: err.message });
@@ -166,36 +154,19 @@ router.get('/alerts', verifyToken, async (req, res) => {
     }
 
     console.log('⚠️ [MASTER] Buscando alertas...');
-
-    // Antes, a mensagem e o cliente eram textos fixos ('Checkpoint offline'
-    // / 'Sistema') para toda e qualquer linha — nunca dizia QUAL checkpoint
-    // nem DE QUEM. Agora busca os dados reais e monta a mensagem no JS
-    // (evita depender de concatenação de string, que difere entre
-    // SQL Server e Postgres).
-    const offlineCheckpoints = await allQuery(`
+    
+    const alerts = await allQuery(`
       SELECT TOP 5
-        c.id,
-        c.name,
-        c.zone,
-        c.last_seen,
-        emp.nome as empresa_nome
-      FROM checkpoints c
-      LEFT JOIN empresas emp ON c.empresa_id = emp.id
-      WHERE c.status = 'offline'
-        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
-      ORDER BY c.last_seen DESC
+        NEWID() as id,
+        'offline' as type,
+        'Checkpoint offline' as message,
+        'Sistema' as client,
+        FORMAT(GETDATE(), 'HH:mm') as time
+      FROM checkpoints
+      WHERE status = 'offline'
+        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
     `);
-
-    const alerts = offlineCheckpoints.map((cp) => ({
-      id: cp.id,
-      type: 'offline',
-      message: `Checkpoint "${cp.name || cp.id}" offline${cp.zone ? ` (${cp.zone})` : ''}`,
-      client: cp.empresa_nome || 'Sem empresa',
-      time: cp.last_seen
-        ? new Date(cp.last_seen).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        : '—',
-    }));
-
+    
     console.log(`✅ ${alerts?.length || 0} alertas carregados`);
     res.json(alerts || []);
   } catch (err) {

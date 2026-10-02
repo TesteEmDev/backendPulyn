@@ -12,31 +12,6 @@ router.use(verifyToken, (req, res, next) => {
   next();
 });
 
-// Listar as crianças de TODOS os eventos do buffet (com nome do evento e do time).
-// Escopo sempre pela empresa do token.
-router.get('/', verifyToken, async (req, res) => {
-  try {
-    const criancas = await allQuery(`
-      SELECT TOP 5000
-        c.*,
-        t.name AS time_name,
-        t.color AS time_color,
-        e.name AS evento_name,
-        e.status AS evento_status,
-        e.date AS evento_date
-      FROM criancas c
-      LEFT JOIN times t ON c.time_id = t.id
-      LEFT JOIN eventos e ON c.evento_id = e.id
-      WHERE c.empresa_id = @empresa_id
-      ORDER BY e.date DESC, c.scores DESC
-    `, { empresa_id: req.user?.empresa_id });
-    res.json(criancas);
-  } catch (err) {
-    console.error('❌ Erro ao listar crianças de todos os eventos:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Listar crianças de um evento
 router.get('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
   try {

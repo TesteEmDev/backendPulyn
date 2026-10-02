@@ -144,8 +144,7 @@ CREATE TABLE IF NOT EXISTS "empresas" (
   "plano" varchar(50) DEFAULT 'starter',
   "status" varchar(50) DEFAULT 'active',
   "data_criacao" timestamptz DEFAULT CURRENT_TIMESTAMP,
-  "data_atualizacao" timestamptz DEFAULT CURRENT_TIMESTAMP,
-  "cnpj" varchar(14)
+  "data_atualizacao" timestamptz DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS "evento_brincadeiras" (
@@ -186,12 +185,7 @@ CREATE TABLE IF NOT EXISTS "eventos" (
   "active_brincadeira_id" varchar(36),
   "floor_plan_data" text,
   "floor_plan_name" varchar(255),
-  "floor_plan_type" varchar(100),
-  "responsible_name" varchar(150),
-  "started_at" timestamptz,
-  "ended_at" timestamptz,
-  "auto_start" integer DEFAULT 0,
-  "auto_end" integer DEFAULT 0
+  "floor_plan_type" varchar(100)
 );
 
 CREATE TABLE IF NOT EXISTS "leituras" (

@@ -247,40 +247,6 @@ router.put('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Ativar/desativar um jogo (só o status; o resto do jogo não é alterado)
-router.patch('/:id/status', verifyToken, requireRole('admin', 'master'), async (req, res) => {
-  try {
-    const status = String(req.body?.status || '').trim().toLowerCase();
-    if (status !== 'active' && status !== 'inactive') {
-      return res.status(400).json({ error: "Status inválido. Use 'active' ou 'inactive'." });
-    }
-
-    const brincadeira = await queryOne(
-      'SELECT id, empresa_id, status FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
-      { id: req.params.id }
-    );
-    if (!brincadeira || String(brincadeira.status || '').trim().toLowerCase() === 'archived') {
-      return res.status(404).json({ error: 'Jogo não encontrado' });
-    }
-    if (!isMaster(req)
-      && String(brincadeira.empresa_id || '').trim().toLowerCase()
-        !== String(req.user.empresa_id || '').trim().toLowerCase()) {
-      return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
-    }
-
-    await query(
-      "UPDATE brincadeiras SET status = @status WHERE LOWER(id) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
-      { status, id: brincadeira.id }
-    );
-
-    console.log(`🎮 Jogo ${brincadeira.id} -> ${status}`);
-    res.json({ updated: true, status });
-  } catch (err) {
-    console.error('❌ Erro ao alterar status do jogo:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // Arquivar brincadeira sem apagar o histórico
 router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
