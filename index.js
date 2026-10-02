@@ -38,6 +38,7 @@ const familiasRoutes = require('./routes/familias');
 const qrcodeRoutes = require('./routes/qrcode');
 const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
+const companyMapRoutes = require('./routes/companyMap');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -46,11 +47,10 @@ const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
-const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureGameWinnerBonusesSchema } = require('./migrations/gameWinnerBonuses');
 const { ensureAvatarSchema } = require('./migrations/avatar');
-const { ensureEventZonesSchema } = require('./migrations/eventZones');
+const { ensureCompanyMapSchema, migrateExistingEventMapDataToCompanies } = require('./migrations/companyMap');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
 const { ensureGameSessionsSchema } = require('./migrations/gameSessions');
 const { addSessionIdToLeituras } = require('./migrations/leiturasSessionId');
@@ -1820,6 +1820,7 @@ app.use('/api/clientes', clientRoutes);
 
 // Eventos
 app.use('/api/eventos', eventRoutes);
+app.use('/api/company-map', companyMapRoutes);
 
 // Brincadeiras
 app.use('/api/brincadeiras', brincadeirasRoutes);
@@ -1925,11 +1926,11 @@ async function startServer() {
     await ensureEmpresaCnpjSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
-    await ensureEventFloorPlanSchema();
     await ensureMonsterHuntSchema();
     await ensureGameWinnerBonusesSchema();
     await ensureAvatarSchema();
-    await ensureEventZonesSchema();
+    await ensureCompanyMapSchema();
+    await migrateExistingEventMapDataToCompanies();
     await ensureZoneConquestSchema();
     await ensureGameSessionsSchema();
     await addSessionIdToLeituras();
