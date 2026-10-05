@@ -44,8 +44,10 @@ function parseConfiguredIds(rawCheckpoints) {
 /**
  * Confere se o evento tem checkpoints online suficientes para o jogo começar.
  * `game` pode ser a linha da brincadeira (com `type` e `checkpoints`) ou só o id dela.
- * Nos jogos que têm lista própria de checkpoints (Monstro e Tesouro) só contam os checkpoints
- * configurados no jogo; nos de Zona, todos os checkpoints de jogo do evento.
+ * Só o Caça ao Tesouro restringe pela lista de checkpoints do jogo (é assim que a partida começa
+ * de verdade: o alvo sai dessa lista). No Monstro a lista só escolhe o checkpoint especial e todos
+ * os checkpoints do evento participam, como nos jogos de Zona; assim uma lista antiga, com
+ * checkpoints de outro evento, não impede o Monstro de começar.
  * @returns {Promise<{ ok: boolean, kind: string, required: number, available: number, message: string|null }>}
  */
 async function checkGameStartRequirements(eventoId, game) {
@@ -68,9 +70,7 @@ async function checkGameStartRequirements(eventoId, game) {
   );
 
   let ids = online.map((checkpoint) => String(checkpoint.id).trim().toLowerCase());
-  const configured = kind === 'monster_hunt' || kind === 'treasure_hunt'
-    ? parseConfiguredIds(row?.checkpoints)
-    : [];
+  const configured = kind === 'treasure_hunt' ? parseConfiguredIds(row?.checkpoints) : [];
   const scopedToGame = configured.length > 0;
   if (scopedToGame) {
     const allowed = new Set(configured);
@@ -82,7 +82,7 @@ async function checkGameStartRequirements(eventoId, game) {
 
   const name = row?.name ? `"${row.name}"` : GAME_LABELS[kind];
   const plural = (n) => (n === 1 ? 'checkpoint' : 'checkpoints');
-  const where = scopedToGame ? 'configurados neste jogo e online' : 'online neste evento';
+  const where = scopedToGame ? 'configurados neste jogo e online neste evento' : 'online neste evento';
   return {
     ok: false,
     kind,

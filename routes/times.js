@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { query, queryOne, allQuery } = require('../database');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
+const { planRandomDistribution, DISTRIBUTION_MODES } = require('../utils/teamDistribution');
 
 // Listar times/equipes da empresa
 router.get('/', verifyToken, async (req, res) => {
@@ -157,5 +158,80 @@ router.delete('/:id', verifyToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Distribuir aleatoriamente as crianças do evento entre os times do evento.
+// mode 'unassigned' (padrão): só quem está sem time. mode 'all': sorteia todos de novo.
+router.post(
+  '/eventos/:evento_id/distribuir-aleatorio',
+  verifyToken,
+  requireRole('admin', 'reception', 'game_master', 'master'),
+  async (req, res) => {
+    try {
+      const mode = String(req.body?.mode || 'unassigned');
+      if (!DISTRIBUTION_MODES.has(mode)) return res.status(400).json({ error: 'Modo de distribuição inválido' });
+
+      const evento = await queryOne(
+        'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+        { evento_id: req.params.evento_id }
+      );
+      if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+      if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+        return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+      }
+
+      const result = await withTransaction(async (tx) => {
+        const teams = await tx.allQuery(
+          'SELECT id, name FROM times WHERE evento_id = @eventoId AND empresa_id = @empresaId ORDER BY name',
+          { eventoId: evento.id, empresaId: evento.empresa_id }
+        );
+        if (teams.length < 2) {
+          return { error: 'Crie pelo menos 2 times neste evento antes de distribuir os participantes.' };
+        }
+
+        const children = await tx.allQuery(
+          'SELECT id, time_id FROM criancas WHERE evento_id = @eventoId AND empresa_id = @empresaId',
+          { eventoId: evento.id, empresaId: evento.empresa_id }
+        );
+        const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.id), mode });
+
+        for (const { criancaId, timeId } of assignments) {
+          await tx.query(
+            'UPDATE criancas SET time_id = @timeId WHERE id = @criancaId AND evento_id = @eventoId',
+            { timeId, criancaId, eventoId: evento.id }
+          );
+        }
+
+        // A pontuação do time é a soma das crianças; recalcula para refletir a nova composição.
+        for (const team of teams) {
+          await tx.query(
+            `UPDATE times
+             SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
+             WHERE id = @timeId`,
+            { timeId: team.id }
+          );
+        }
+
+        const sizes = await tx.allQuery(
+          'SELECT time_id, COUNT(*) AS total FROM criancas WHERE evento_id = @eventoId AND time_id IS NOT NULL GROUP BY time_id',
+          { eventoId: evento.id }
+        );
+        const totalByTeam = new Map(sizes.map(row => [row.time_id, Number(row.total)]));
+        return {
+          mode,
+          distributed: assignments.length,
+          totalChildren: children.length,
+          teams: teams.map(team => ({ id: team.id, name: team.name, members: totalByTeam.get(team.id) || 0 })),
+        };
+      });
+
+      if (result.error) return res.status(400).json({ error: result.error });
+      console.log(`🎲 Distribuição aleatória (${mode}): ${result.distributed} criança(s) no evento ${evento.id}`);
+      return res.json(result);
+    } catch (err) {
+      console.error('❌ Erro ao distribuir participantes:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+);
 
 module.exports = router;
