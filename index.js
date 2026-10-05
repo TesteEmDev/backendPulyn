@@ -44,6 +44,7 @@ const { ensureEventControlSchema } = require('./migrations/eventControl');
 const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
+const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
@@ -1925,6 +1926,7 @@ async function startServer() {
     await ensureEventLifecycleSchema();
     await ensureEmpresaCnpjSchema();
     await ensureSettingsPerCompanySchema();
+    await ensureClienteUnidadeSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
