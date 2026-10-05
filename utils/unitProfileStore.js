@@ -93,4 +93,26 @@ async function saveUnitProfile(db, empresaId, values, { cnpj, fallbackEmail } = 
   return loadUnitProfile(db, empresa.id);
 }
 
-module.exports = { findCliente, loadUnitProfile, saveUnitProfile };
+// Logo da unidade: fica em clientes (logo_data/logo_name/logo_type), fora do perfil porque é pesada.
+async function loadLogo(db, empresaId) {
+  const row = await db.queryOne(
+    'SELECT logo_data, logo_name, logo_type FROM clientes WHERE empresa_id = @empresaId',
+    { empresaId }
+  );
+  if (!row?.logo_data) return null;
+  return { dataUrl: row.logo_data, name: row.logo_name || '', type: row.logo_type || '' };
+}
+
+// Grava a logo (ou remove, com logo = null). Garante o cadastro em clientes e o vínculo
+// com a empresa, como no salvamento do perfil.
+async function saveLogo(db, empresaId, logo, { fallbackEmail } = {}) {
+  const profile = await saveUnitProfile(db, empresaId, {}, { fallbackEmail });
+  if (!profile) return false;
+  await db.query(
+    `UPDATE clientes SET logo_data = @data, logo_name = @name, logo_type = @type WHERE empresa_id = @empresaId`,
+    { data: logo?.dataUrl ?? null, name: logo?.name ?? null, type: logo?.type ?? null, empresaId }
+  );
+  return true;
+}
+
+module.exports = { findCliente, loadUnitProfile, saveUnitProfile, loadLogo, saveLogo };

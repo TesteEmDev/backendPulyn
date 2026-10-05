@@ -8,7 +8,8 @@ const database = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeCnpj, isValidCnpj } = require('../utils/cnpj');
 const { parseUnitProfile } = require('../utils/unitProfile');
-const { loadUnitProfile, saveUnitProfile } = require('../utils/unitProfileStore');
+const { parseLogoPayload } = require('../utils/logoImage');
+const { loadUnitProfile, saveUnitProfile, loadLogo, saveLogo } = require('../utils/unitProfileStore');
 
 router.use(verifyToken, requireRole('admin'));
 
@@ -57,6 +58,45 @@ router.put('/me', async (req, res) => {
     res.json({ updated: true, ...profile });
   } catch (err) {
     console.error('❌ Erro ao atualizar dados da empresa:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Logo/foto da unidade (separada do perfil por ser pesada).
+router.get('/me/logo', async (req, res) => {
+  try {
+    res.json({ logo: await loadLogo(database, req.user.empresa_id) });
+  } catch (err) {
+    console.error('❌ Erro ao buscar logo da unidade:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/me/logo', async (req, res) => {
+  try {
+    const parsed = parseLogoPayload(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
+
+    const saved = await database.withTransaction(() =>
+      saveLogo(database, req.user.empresa_id, parsed.value, { fallbackEmail: req.user.email })
+    );
+    if (!saved) return res.status(404).json({ error: 'Empresa não encontrada' });
+    res.json({ success: true, logo: parsed.value });
+  } catch (err) {
+    console.error('❌ Erro ao salvar logo da unidade:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/me/logo', async (req, res) => {
+  try {
+    const removed = await database.withTransaction(() =>
+      saveLogo(database, req.user.empresa_id, null, { fallbackEmail: req.user.email })
+    );
+    if (!removed) return res.status(404).json({ error: 'Empresa não encontrada' });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ Erro ao remover logo da unidade:', err);
     res.status(500).json({ error: err.message });
   }
 });
