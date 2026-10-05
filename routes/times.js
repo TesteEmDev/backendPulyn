@@ -79,8 +79,9 @@ router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_
       const toCreate = planDefaultTeams({ templates, existingTeams: existing });
       for (const team of toCreate) {
         await tx.query(
-          `INSERT INTO times (id, evento_id, empresa_id, name, color)
-           VALUES (@id, @eventoId, @empresaId, @name, @color)`,
+          // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
+          `INSERT INTO times (id, evento_id, empresa_id, name, color, points)
+           VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
           { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresa_id, name: team.name, color: team.color }
         );
       }
@@ -144,8 +145,9 @@ router.post('/', verifyToken, async (req, res) => {
     const id = uuidv4();
 
     await query(
-      `INSERT INTO times (id, evento_id, empresa_id, name, color) 
-       VALUES (@id, @evento_id, @empresa_id, @name, @color)`,
+      // A pontuação nunca vem do cliente: todo time novo começa com 0 ponto.
+      `INSERT INTO times (id, evento_id, empresa_id, name, color, points) 
+       VALUES (@id, @evento_id, @empresa_id, @name, @color, 0)`,
       { id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color }
     );
 
