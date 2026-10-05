@@ -2,6 +2,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { normalizeClientText } = require('./platformClients');
 const { formatCnpj } = require('./cnpj');
+const { unitEmailDomain } = require('./unitEmail');
 
 // `db` expõe queryOne/allQuery/query (o módulo database ou o executor de uma transação).
 // O cadastro do buffet em `clientes` não tinha vínculo com a empresa: casa por empresa_id e,
@@ -16,9 +17,12 @@ async function findCliente(db, empresa) {
 }
 
 function toProfile(empresa, cliente) {
+  const name = cliente?.name || empresa.nome || '';
   return {
     id: empresa.id,
-    name: cliente?.name || empresa.nome || '',
+    name,
+    // Domínio dos e-mails dos usuários do buffet (ex.: "buffetadv.com"); null se o nome não gera um.
+    emailDomain: unitEmailDomain(name),
     email: cliente?.email || '',
     phone: cliente?.phone ?? empresa.telefone ?? '',
     address: cliente?.address || '',

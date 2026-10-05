@@ -3,6 +3,9 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { checkUnitEmail } = require('../utils/unitEmail');
+const { loadUnitProfile } = require('../utils/unitProfileStore');
+const database = require('../database');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -41,7 +44,8 @@ router.get('/empresa/:empresa_id', requireRole('admin', 'master'), async (req, r
 // POST /api/logins
 router.post('/', requireRole('admin', 'master'), async (req, res) => {
   try {
-    const { email, password, role } = req.body;
+    const { password, role } = req.body;
+    let email = typeof req.body.email === 'string' ? req.body.email.trim() : req.body.email;
     const empresa_id = req.user.empresa_id;
     const user_role = req.user.role;
 
@@ -59,9 +63,18 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas admin pode criar usuários' });
     }
 
-    // Verificar se email já existe
+    // O e-mail dos usuários de um buffet segue o nome da unidade: usuario@nomedaunidade.com.
+    // (O master cria usuários da própria conta e não segue essa regra.)
+    if (!isMaster(req)) {
+      const profile = await loadUnitProfile(database, empresa_id);
+      const checked = checkUnitEmail(email, profile?.name);
+      if (checked.error) return res.status(400).json({ error: checked.error });
+      email = checked.email;
+    }
+
+    // Verificar se email já existe (o login ignora maiúsculas/minúsculas)
     const existing = await queryOne(
-      'SELECT id FROM logins WHERE email = @email',
+      'SELECT id FROM logins WHERE LOWER(email) = LOWER(@email)',
       { email }
     );
 
