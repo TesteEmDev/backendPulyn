@@ -20,6 +20,7 @@ const timesRoutes = require('./routes/times');
 const criancasRoutes = require('./routes/criancas');
 const pulseiraRoutes = require('./routes/pulseiras');
 const analyticsRoutes = require('./routes/analytics');
+const reportsRoutes = require('./routes/reports');
 const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
 const leiturasRoutes = require('./routes/leituras');
@@ -44,6 +45,8 @@ const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
 const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
+const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
+const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
@@ -1842,6 +1845,7 @@ app.use('/api/leituras', leiturasRoutes);
 
 // Analytics
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/reports', reportsRoutes);
 
 // Master Dashboard
 app.use('/api/master', masterRoutes);
@@ -1924,6 +1928,8 @@ async function startServer() {
     await ensureEventControlSchema();
     await ensureEventLifecycleSchema();
     await ensureEmpresaCnpjSchema();
+    await ensureSettingsPerCompanySchema();
+    await ensureClienteUnidadeSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureMonsterHuntSchema();

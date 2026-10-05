@@ -1,19 +1,47 @@
-// routes/settings.js - Configurações
+// routes/settings.js - Configurações por empresa (buffet)
+//
+// Cada buffet guarda as próprias configurações em linhas (empresa_id, setting_key).
+// As linhas antigas sem empresa_id (seed original) não são lidas nem alteradas aqui.
 const express = require('express');
 const router = express.Router();
-const { query, queryOne, allQuery } = require('../database');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { allQuery, withTransaction } = require('../database');
+const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
+const { parseSettingsPayload, KEY_PATTERN } = require('../utils/settingsRules');
+
+const WRITE_ROLES = ['admin', 'master'];
+
+// Empresa alvo: a do token; o master pode consultar/alterar outra com ?empresa_id=.
+function resolveEmpresaId(req) {
+  const requested = req.query?.empresa_id;
+  return isMaster(req) && requested ? String(requested) : req.user.empresa_id;
+}
+
+// Atualiza a linha da empresa e cria se ainda não existir.
+async function upsertSettings(tx, empresaId, entries) {
+  for (const [key, value] of entries) {
+    const updated = await tx.query(
+      `UPDATE settings SET setting_value = @value, updated_at = CURRENT_TIMESTAMP
+       WHERE setting_key = @key AND empresa_id = @empresaId`,
+      { value, key, empresaId }
+    );
+    if ((updated.rowsAffected?.[0] || 0) === 0) {
+      await tx.query(
+        `INSERT INTO settings (setting_key, setting_value, empresa_id)
+         VALUES (@key, @value, @empresaId)`,
+        { key, value, empresaId }
+      );
+    }
+  }
+}
 
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    
-    // ✅ Master pode ver configs de qualquer empresa, usuário regular vê apenas a sua
+    const empresaId = resolveEmpresaId(req);
+    if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
     const settings = await allQuery(
-      'SELECT setting_key, setting_value, empresa_id FROM settings WHERE empresa_id = @empresa_id OR @is_master = 1',
-      { empresa_id, is_master: isMaster(req) ? 1 : 0 }
+      'SELECT setting_key, setting_value, empresa_id FROM settings WHERE empresa_id = @empresaId ORDER BY setting_key',
+      { empresaId }
     );
-    
     res.json(settings || []);
   } catch (err) {
     console.error('❌ Erro ao buscar configurações:', err);
@@ -23,49 +51,30 @@ router.get('/', verifyToken, async (req, res) => {
 
 router.get('/:key', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    
-    const setting = await queryOne(
-      'SELECT * FROM settings WHERE setting_key = @key AND (empresa_id = @empresa_id OR @is_master = 1)',
-      { key: req.params.key, empresa_id, is_master: isMaster(req) ? 1 : 0 }
+    const empresaId = resolveEmpresaId(req);
+    if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
+    const rows = await allQuery(
+      'SELECT setting_key, setting_value, empresa_id FROM settings WHERE setting_key = @key AND empresa_id = @empresaId',
+      { key: req.params.key, empresaId }
     );
-
-    if (!setting) {
-      return res.status(404).json({ error: 'Configuração não encontrada' });
-    }
-
-    res.json(setting);
+    if (rows.length === 0) return res.status(404).json({ error: 'Configuração não encontrada' });
+    res.json(rows[0]);
   } catch (err) {
     console.error('❌ Erro ao buscar configuração:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-router.put('/:key', verifyToken, async (req, res) => {
+router.put('/:key', verifyToken, requireRole(WRITE_ROLES), async (req, res) => {
   try {
-    const { value } = req.body;
-    const { key } = req.params;
-    const empresa_id = req.user.empresa_id;
+    const empresaId = resolveEmpresaId(req);
+    if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
+    if (!KEY_PATTERN.test(req.params.key)) return res.status(400).json({ error: 'Nome de configuração inválido' });
 
-    // ✅ Validar permissão
-    const setting = await queryOne(
-      'SELECT empresa_id FROM settings WHERE setting_key = @key',
-      { key }
-    );
+    const parsed = parseSettingsPayload({ [req.params.key]: req.body?.value ?? '' });
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
 
-    if (!setting) {
-      return res.status(404).json({ error: 'Configuração não encontrada' });
-    }
-
-    if (!isMaster(req) && setting.empresa_id !== empresa_id) {
-      return res.status(403).json({ error: 'Acesso negado: configuração não pertence a esta empresa' });
-    }
-
-    await query(
-      'UPDATE settings SET setting_value = @value WHERE setting_key = @key AND empresa_id = @empresa_id',
-      { value, key, empresa_id: setting.empresa_id }
-    );
-
+    await withTransaction(tx => upsertSettings(tx, empresaId, parsed.entries));
     res.json({ success: true, message: 'Configuração atualizada com sucesso' });
   } catch (err) {
     console.error('❌ Erro ao atualizar configuração:', err);
@@ -73,28 +82,16 @@ router.put('/:key', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/', verifyToken, async (req, res) => {
+// Salva várias configurações de uma vez, tudo ou nada.
+router.post('/', verifyToken, requireRole(WRITE_ROLES), async (req, res) => {
   try {
-    const settings = req.body;
-    const empresa_id = req.user.empresa_id;
+    const empresaId = resolveEmpresaId(req);
+    if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
 
-    for (const [key, value] of Object.entries(settings)) {
-      // ✅ Validar permissão para cada configuração
-      const setting = await queryOne(
-        'SELECT empresa_id FROM settings WHERE setting_key = @key',
-        { key }
-      );
+    const parsed = parseSettingsPayload(req.body);
+    if (parsed.error) return res.status(400).json({ error: parsed.error });
 
-      if (setting && !isMaster(req) && setting.empresa_id !== empresa_id) {
-        return res.status(403).json({ error: `Acesso negado: configuração ${key} não pertence a esta empresa` });
-      }
-
-      await query(
-        'UPDATE settings SET setting_value = @value WHERE setting_key = @key',
-        { value, key }
-      );
-    }
-
+    await withTransaction(tx => upsertSettings(tx, empresaId, parsed.entries));
     res.json({ success: true, message: 'Configurações atualizadas com sucesso' });
   } catch (err) {
     console.error('❌ Erro ao atualizar configurações:', err);

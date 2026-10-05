@@ -250,10 +250,11 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO clientes (id, name, city, state, email, phone, plano, status) 
-         VALUES (@id, @name, @city, @state, @email, @phone, @plano, @status)`,
+        `INSERT INTO clientes (id, name, city, state, email, phone, plano, status, empresa_id) 
+         VALUES (@id, @name, @city, @state, @email, @phone, @plano, @status, @empresa_id)`,
         {
           id: clienteId,
+          empresa_id: empresaId,
           name: name,
           city: city,
           state: state,

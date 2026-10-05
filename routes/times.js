@@ -4,6 +4,9 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 const { planRandomDistribution, DISTRIBUTION_MODES } = require('../utils/teamDistribution');
+const { planDefaultTeams } = require('../utils/defaultTeams');
+
+const TEAM_MANAGER_ROLES = ['admin', 'reception', 'game_master', 'master'];
 
 // Listar times/equipes da empresa
 router.get('/', verifyToken, async (req, res) => {
@@ -15,7 +18,8 @@ router.get('/', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master vê todos os times (exceto os da Master Admin)
       times = await allQuery(`
-        SELECT t.* FROM times t
+        SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
+        FROM times t
         LEFT JOIN empresas e ON t.empresa_id = e.id
         WHERE e.nome != 'Master Admin'
         ORDER BY t.name
@@ -23,7 +27,8 @@ router.get('/', verifyToken, async (req, res) => {
       console.log(`✅ ${times.length} times (master - TODAS as empresas, exceto Master Admin)`);
     } else {
       times = await allQuery(
-        'SELECT * FROM times WHERE empresa_id = @empresa_id ORDER BY name',
+        `SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
+         FROM times t WHERE t.empresa_id = @empresa_id ORDER BY t.name`,
         { empresa_id }
       );
       console.log(`✅ ${times.length} times da empresa ${empresa_id}`);
@@ -32,6 +37,64 @@ router.get('/', verifyToken, async (req, res) => {
     res.json(times);
   } catch (err) {
     console.error('❌ Erro ao listar times:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Times padrão: modelos da empresa, guardados como times sem evento.
+router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
+  try {
+    const templates = await allQuery(
+      'SELECT id, name, color, created_at FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
+      { empresaId: req.user.empresa_id }
+    );
+    res.json(templates);
+  } catch (err) {
+    console.error('❌ Erro ao listar times padrão:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Copia os times padrão para o evento (sem duplicar os que já existem pelo nome).
+router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+      { evento_id: req.params.evento_id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    const result = await withTransaction(async (tx) => {
+      const templates = await tx.allQuery(
+        'SELECT name, color FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
+        { empresaId: evento.empresa_id }
+      );
+      if (templates.length === 0) return { error: 'Cadastre os times padrão antes de aplicá-los a um evento.' };
+
+      const existing = await tx.allQuery(
+        'SELECT name FROM times WHERE evento_id = @eventoId AND empresa_id = @empresaId',
+        { eventoId: evento.id, empresaId: evento.empresa_id }
+      );
+      const toCreate = planDefaultTeams({ templates, existingTeams: existing });
+      for (const team of toCreate) {
+        await tx.query(
+          // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
+          `INSERT INTO times (id, evento_id, empresa_id, name, color, points)
+           VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
+          { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresa_id, name: team.name, color: team.color }
+        );
+      }
+      return { created: toCreate.length, skipped: templates.length - toCreate.length };
+    });
+
+    if (result.error) return res.status(400).json({ error: result.error });
+    console.log(`✅ Times padrão aplicados ao evento ${evento.id}: ${result.created} criado(s), ${result.skipped} já existia(m)`);
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Erro ao aplicar times padrão:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -84,8 +147,9 @@ router.post('/', verifyToken, async (req, res) => {
     const id = uuidv4();
 
     await query(
-      `INSERT INTO times (id, evento_id, empresa_id, name, color) 
-       VALUES (@id, @evento_id, @empresa_id, @name, @color)`,
+      // A pontuação nunca vem do cliente: todo time novo começa com 0 ponto.
+      `INSERT INTO times (id, evento_id, empresa_id, name, color, points) 
+       VALUES (@id, @evento_id, @empresa_id, @name, @color, 0)`,
       { id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color }
     );
 
@@ -164,7 +228,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 router.post(
   '/eventos/:evento_id/distribuir-aleatorio',
   verifyToken,
-  requireRole('admin', 'reception', 'game_master', 'master'),
+  requireRole(TEAM_MANAGER_ROLES),
   async (req, res) => {
     try {
       const mode = String(req.body?.mode || 'unassigned');
