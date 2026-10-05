@@ -18,7 +18,8 @@ router.get('/', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master vê todos os times (exceto os da Master Admin)
       times = await allQuery(`
-        SELECT t.* FROM times t
+        SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
+        FROM times t
         LEFT JOIN empresas e ON t.empresa_id = e.id
         WHERE e.nome != 'Master Admin'
         ORDER BY t.name
@@ -26,7 +27,8 @@ router.get('/', verifyToken, async (req, res) => {
       console.log(`✅ ${times.length} times (master - TODAS as empresas, exceto Master Admin)`);
     } else {
       times = await allQuery(
-        'SELECT * FROM times WHERE empresa_id = @empresa_id ORDER BY name',
+        `SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
+         FROM times t WHERE t.empresa_id = @empresa_id ORDER BY t.name`,
         { empresa_id }
       );
       console.log(`✅ ${times.length} times da empresa ${empresa_id}`);
