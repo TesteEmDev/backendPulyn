@@ -43,6 +43,7 @@ const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
 const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
+const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
@@ -1923,6 +1924,7 @@ async function startServer() {
     await ensureEventControlSchema();
     await ensureEventLifecycleSchema();
     await ensureEmpresaCnpjSchema();
+    await ensureSettingsPerCompanySchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
