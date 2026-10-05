@@ -140,8 +140,9 @@ router.post('/participants', async (req, res) => {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
 
-    if (!eventId || !cleanName || !code || !timeId) {
-      return res.status(400).json({ error: 'Evento, nome, time e pulseira são obrigatórios' });
+    // O time é opcional: o recreacionista define (ou sorteia) os times depois do cadastro.
+    if (!eventId || !cleanName || !code) {
+      return res.status(400).json({ error: 'Evento, nome e pulseira são obrigatórios' });
     }
     if (cleanName.length > 100 || String(nickname || '').trim().length > 100) {
       return res.status(400).json({ error: 'Nome ou apelido excede o limite permitido' });
@@ -156,12 +157,15 @@ router.post('/participants', async (req, res) => {
       if (!event) throw httpError('Evento não encontrado', 404);
       if (!isOpenEvent(event)) throw httpError('Este evento não está aberto para cadastro', 409);
 
-      const team = await tx.queryOne(
-        `SELECT id, name FROM times
-         WHERE id = @timeId AND evento_id = @eventId AND empresa_id = @empresaId`,
-        { timeId, eventId, empresaId: event.empresa_id }
-      );
-      if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
+      let team = null;
+      if (timeId) {
+        team = await tx.queryOne(
+          `SELECT id, name FROM times
+           WHERE id = @timeId AND evento_id = @eventId AND empresa_id = @empresaId`,
+          { timeId, eventId, empresaId: event.empresa_id }
+        );
+        if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
+      }
 
       let bracelet = await tx.queryOne(
         `SELECT code, status, crianca_id, empresa_id
@@ -195,7 +199,7 @@ router.post('/participants', async (req, res) => {
           id: childId,
           eventId: event.id,
           empresaId: event.empresa_id,
-          timeId,
+          timeId: team ? team.id : null,
           name: cleanName,
           nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
           age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
@@ -224,8 +228,8 @@ router.post('/participants', async (req, res) => {
         age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
         avatar: avatarValue,
         braceletCode: code,
-        timeId: team.id,
-        teamName: team.name,
+        timeId: team ? team.id : null,
+        teamName: team ? team.name : null,
         scores: 0,
       };
     });
