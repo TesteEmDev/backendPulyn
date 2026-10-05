@@ -20,6 +20,7 @@ const timesRoutes = require('./routes/times');
 const criancasRoutes = require('./routes/criancas');
 const pulseiraRoutes = require('./routes/pulseiras');
 const analyticsRoutes = require('./routes/analytics');
+const reportsRoutes = require('./routes/reports');
 const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
 const leiturasRoutes = require('./routes/leituras');
@@ -1843,6 +1844,7 @@ app.use('/api/leituras', leiturasRoutes);
 
 // Analytics
 app.use('/api/analytics', analyticsRoutes);
+app.use('/api/reports', reportsRoutes);
 
 // Master Dashboard
 app.use('/api/master', masterRoutes);
