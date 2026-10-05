@@ -4,6 +4,9 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 const { planRandomDistribution, DISTRIBUTION_MODES } = require('../utils/teamDistribution');
+const { planDefaultTeams } = require('../utils/defaultTeams');
+
+const TEAM_MANAGER_ROLES = ['admin', 'reception', 'game_master', 'master'];
 
 // Listar times/equipes da empresa
 router.get('/', verifyToken, async (req, res) => {
@@ -32,6 +35,63 @@ router.get('/', verifyToken, async (req, res) => {
     res.json(times);
   } catch (err) {
     console.error('❌ Erro ao listar times:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Times padrão: modelos da empresa, guardados como times sem evento.
+router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
+  try {
+    const templates = await allQuery(
+      'SELECT id, name, color, created_at FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
+      { empresaId: req.user.empresa_id }
+    );
+    res.json(templates);
+  } catch (err) {
+    console.error('❌ Erro ao listar times padrão:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Copia os times padrão para o evento (sem duplicar os que já existem pelo nome).
+router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
+  try {
+    const evento = await queryOne(
+      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+      { evento_id: req.params.evento_id }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    const result = await withTransaction(async (tx) => {
+      const templates = await tx.allQuery(
+        'SELECT name, color FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
+        { empresaId: evento.empresa_id }
+      );
+      if (templates.length === 0) return { error: 'Cadastre os times padrão antes de aplicá-los a um evento.' };
+
+      const existing = await tx.allQuery(
+        'SELECT name FROM times WHERE evento_id = @eventoId AND empresa_id = @empresaId',
+        { eventoId: evento.id, empresaId: evento.empresa_id }
+      );
+      const toCreate = planDefaultTeams({ templates, existingTeams: existing });
+      for (const team of toCreate) {
+        await tx.query(
+          `INSERT INTO times (id, evento_id, empresa_id, name, color)
+           VALUES (@id, @eventoId, @empresaId, @name, @color)`,
+          { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresa_id, name: team.name, color: team.color }
+        );
+      }
+      return { created: toCreate.length, skipped: templates.length - toCreate.length };
+    });
+
+    if (result.error) return res.status(400).json({ error: result.error });
+    console.log(`✅ Times padrão aplicados ao evento ${evento.id}: ${result.created} criado(s), ${result.skipped} já existia(m)`);
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Erro ao aplicar times padrão:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -164,7 +224,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 router.post(
   '/eventos/:evento_id/distribuir-aleatorio',
   verifyToken,
-  requireRole('admin', 'reception', 'game_master', 'master'),
+  requireRole(TEAM_MANAGER_ROLES),
   async (req, res) => {
     try {
       const mode = String(req.body?.mode || 'unassigned');
