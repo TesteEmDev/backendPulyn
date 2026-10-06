@@ -7,7 +7,7 @@ async function addTerritoryOwnerCriancaIdColumn() {
 
     // PostgreSQL - Adicionar coluna se não existir
     await query(`
-      ALTER TABLE "checkpoints"
+      ALTER TABLE "pontoVerificacao"
       ADD COLUMN IF NOT EXISTS "territory_owner_crianca_id" varchar(36)
     `);
 
@@ -15,12 +15,12 @@ async function addTerritoryOwnerCriancaIdColumn() {
 
     // Adicionar foreign key constraint se não existir
     await query(`
-      DO $$ BEGIN 
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__checkpoin__owner_crianca') THEN
-          ALTER TABLE "checkpoints" 
-          ADD CONSTRAINT "FK__checkpoin__owner_crianca" 
-          FOREIGN KEY ("territory_owner_crianca_id") REFERENCES "criancas" ("id");
-        END IF; 
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__pontoverif__owner_crianca') THEN
+          ALTER TABLE "pontoVerificacao"
+          ADD CONSTRAINT "FK__pontoverif__owner_crianca"
+          FOREIGN KEY ("territory_owner_crianca_id") REFERENCES "crianca" ("criancaId");
+        END IF;
       END $$
     `);
 
