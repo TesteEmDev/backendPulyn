@@ -15,13 +15,13 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     console.log('📊 [MASTER] Buscando dados do dashboard...');
     
-    // Clientes = empresas + cadastro legado `clientes` (sem contas de família)
+    // Clientes = empresa + cadastro legado `cliente` (sem contas de família)
     const platformClients = await listPlatformClients();
     
     // Eventos em andamento (com empresaId e não da Master)
     const activeEvents = await queryOne(`
-      SELECT COUNT(*) as count FROM eventos e
-      LEFT JOIN empresas emp ON e.empresaId = emp.id
+      SELECT COUNT(*) as count FROM evento e
+      LEFT JOIN empresa emp ON e.empresaId = emp.id
       WHERE (e.status = 'active' OR e.status = 'scheduled')
         AND e.empresaId IS NOT NULL
         AND emp.nome != 'Master Admin'
@@ -31,7 +31,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const onlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
       FROM pontoVerificacao c
-      LEFT JOIN empresas emp ON c.empresaId = emp.id
+      LEFT JOIN empresa emp ON c.empresaId = emp.id
       WHERE c.status = 'online'
         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
         AND emp.nome != 'Master Admin'
@@ -40,8 +40,8 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // Crianças ativas hoje
     const activeChildren = await queryOne(`
       SELECT COUNT(*) as count
-      FROM criancas c
-      LEFT JOIN empresas emp ON c.empresaId = emp.id
+      FROM crianca c
+      LEFT JOIN empresa emp ON c.empresaId = emp.id
       WHERE CAST(GETDATE() AS DATE) = CAST(c.criadoEm AS DATE)
         AND emp.nome != 'Master Admin'
     `);
@@ -50,7 +50,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const offlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
       FROM pontoVerificacao c
-      LEFT JOIN empresas emp ON c.empresaId = emp.id
+      LEFT JOIN empresa emp ON c.empresaId = emp.id
       WHERE (c.status = 'offline' OR c.status IS NULL)
         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
         AND emp.nome != 'Master Admin'
@@ -72,18 +72,18 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Listar clientes para o mapa - APENAS master
+// ✅ Listar cliente para o mapa - APENAS master
 router.get('/clients', verifyToken, async (req, res) => {
   try {
-    // ✅ Apenas master pode listar todos os clientes
+    // ✅ Apenas master pode listar todos os cliente
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar cliente' });
     }
 
-    console.log('📍 [MASTER] Buscando clientes...');
+    console.log('📍 [MASTER] Buscando cliente...');
 
     // Sem coordenadas no cadastro: o mapa posiciona pelo estado/cidade. Une
-    // `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
+    // `empresa` e o cadastro legado `cliente` (ver utils/platformClients.js).
     const clients = (await listPlatformClients()).map((c) => ({
       id: c.id,
       name: c.nome,
@@ -93,23 +93,23 @@ router.get('/clients', verifyToken, async (req, res) => {
       plan: c.plan,
     }));
 
-    console.log(`✅ ${clients?.length || 0} clientes carregados`);
+    console.log(`✅ ${clients?.length || 0} cliente carregados`);
     res.json(clients || []);
   } catch (err) {
-    console.error('❌ Erro ao buscar clientes:', err.message);
+    console.error('❌ Erro ao buscar cliente:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ Listar eventos em andamento - APENAS master
+// ✅ Listar evento em andamento - APENAS master
 router.get('/active-events', verifyToken, async (req, res) => {
   try {
-    // ✅ Apenas master pode listar todos os eventos
+    // ✅ Apenas master pode listar todos os evento
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar todos os eventos' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar todos os evento' });
     }
 
-    console.log('⚡ [MASTER] Buscando eventos ativos...');
+    console.log('⚡ [MASTER] Buscando evento ativos...');
     
     // O DATEDIFF com ISNULL aninhado vira SQL inválido no Postgres (o regex de
     // tradução corta os argumentos na vírgula do ISNULL), o que derrubava a
@@ -122,12 +122,12 @@ router.get('/active-events', verifyToken, async (req, res) => {
         e.nome,
         e.empresaId,
         e2.nome as cliente,
-        (SELECT COUNT(*) FROM criancas WHERE eventoId = e.id) as children_count,
+        (SELECT COUNT(*) FROM crianca WHERE eventoId = e.id) as children_count,
         e.status,
         e.data as event_date,
         e.criadoEm
-      FROM eventos e
-      LEFT JOIN empresas e2 ON e.empresaId = e2.id
+      FROM evento e
+      LEFT JOIN empresa e2 ON e.empresaId = e2.id
       WHERE e.status IN ('active', 'scheduled')
         AND e.empresaId IS NOT NULL
         AND e2.nome != 'Master Admin'
@@ -149,10 +149,10 @@ router.get('/active-events', verifyToken, async (req, res) => {
       };
     });
 
-    console.log(`✅ ${events.length} eventos carregados`);
+    console.log(`✅ ${events.length} evento carregados`);
     res.json(events);
   } catch (err) {
-    console.error('❌ Erro ao buscar eventos ativos:', err.message);
+    console.error('❌ Erro ao buscar evento ativos:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -180,7 +180,7 @@ router.get('/alerts', verifyToken, async (req, res) => {
         c.ultimoVisto,
         emp.nome as empresa_nome
       FROM pontoVerificacao c
-      LEFT JOIN empresas emp ON c.empresaId = emp.id
+      LEFT JOIN empresa emp ON c.empresaId = emp.id
       WHERE c.status = 'offline'
         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
       ORDER BY c.ultimoVisto DESC

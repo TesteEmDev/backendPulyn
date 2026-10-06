@@ -1,17 +1,17 @@
-// routes/logs.js - Sistema de Logs
+// routes/log.js - Sistema de Logs
 const express = require('express');
 const router = express.Router();
 const { query, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients } = require('../utils/platformClients');
 
-// A tabela `logs` existe mas nada no sistema nunca escreveu nela de verdade
-// (nenhuma rota chama POST /api/logs em produção) — por isso a tela de Logs
+// A tabela `log` existe mas nada no sistema nunca escreveu nela de verdade
+// (nenhuma rota chama POST /api/log em produção) — por isso a tela de Logs
 // sempre aparecia vazia. Em vez de exigir instrumentar o app inteiro antes
 // de ter qualquer log, este endpoint sintetiza um feed real a partir de
-// eventos que já acontecem e já são reais: clientes cadastrados, tickets de
+// evento que já acontecem e já são reais: cliente cadastrados, tickets de
 // suporte e pontoVerificacao que caíram offline. O POST abaixo continua
-// disponível para quem quiser registrar logs próprios no futuro.
+// disponível para quem quiser registrar log próprios no futuro.
 router.get('/', verifyToken, async (req, res) => {
   try {
     const master = isMaster(req);
@@ -24,25 +24,25 @@ router.get('/', verifyToken, async (req, res) => {
             list.map((c) => ({ id: c.id, empresa_nome: c.nome, dataCriacao: c.createdAt })))
         : allQuery(`
             SELECT id, nome as empresa_nome, dataCriacao
-            FROM empresas
+            FROM empresa
             WHERE nome <> 'Master Admin' AND id = @empresaId
           `, { empresaId }),
       allQuery(`
         SELECT id, cliente as empresa_nome, subject, status, criadoEm
-        FROM chamadosSuport
+        FROM chamadoSuport
         WHERE 1=1 ${master ? '' : 'AND empresaId = @empresaId'}
       `, { empresaId }),
       allQuery(`
         SELECT c.id, c.nome, c.zone, c.ultimoVisto, emp.nome as empresa_nome
         FROM pontoVerificacao c
-        LEFT JOIN empresas emp ON c.empresaId = emp.id
+        LEFT JOIN empresa emp ON c.empresaId = emp.id
         WHERE c.status = 'offline'
           AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
           ${master ? '' : 'AND c.empresaId = @empresaId'}
       `, { empresaId }),
     ]);
 
-    const logs = [
+    const log = [
       ...clientRows.map((c) => ({
         id: `cliente-${c.id}`,
         timestamp: c.dataCriacao,
@@ -72,10 +72,10 @@ router.get('/', verifyToken, async (req, res) => {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, limit);
 
-    console.log(`✅ ${logs.length} logs carregados${master ? ' (master)' : ` para empresa ${empresaId}`}`);
-    res.json(logs);
+    console.log(`✅ ${log.length} log carregados${master ? ' (master)' : ` para empresa ${empresaId}`}`);
+    res.json(log);
   } catch (err) {
-    console.error('❌ Erro ao montar logs:', err);
+    console.error('❌ Erro ao montar log:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -86,7 +86,7 @@ router.post('/', verifyToken, async (req, res) => {
     const empresaId = req.user.empresaId;
     
     await query(
-      `INSERT INTO logs (tipo, clienteId, eventoId, message, details, empresaId) 
+      `INSERT INTO log (tipo, clienteId, eventoId, message, details, empresaId) 
        VALUES (@tipo, @clienteId, @eventoId, @message, @details, @empresaId)`,
       { tipo, clienteId, eventoId, message, details, empresaId }
     );

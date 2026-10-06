@@ -1,4 +1,4 @@
-// routes/planos.js - Visão de planos e clientes para o dashboard master
+// routes/planos.js - Visão de planos e cliente para o dashboard master
 const express = require('express');
 const router = express.Router();
 const { allQuery } = require('../database');
@@ -25,7 +25,7 @@ function formatSince(value) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-// Empresas + cadastro legado `clientes`; o plano 'family' das contas de família continua contado.
+// Empresas + cadastro legado `cliente`; o plano 'family' das contas de família continua contado.
 async function loadCompanies() {
   const list = await listPlatformClients({ includeFamily: true });
   return list
@@ -80,7 +80,7 @@ router.get('/:plano/clients', verifyToken, requireMaster, async (req, res) => {
 
     return res.json(clients);
   } catch (err) {
-    console.error('❌ Erro ao consultar clientes por plano:', err);
+    console.error('❌ Erro ao consultar cliente por plano:', err);
     return res.status(500).json({ error: err.message });
   }
 });

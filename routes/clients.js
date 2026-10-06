@@ -7,31 +7,31 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
 const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
 
-// O mesmo cliente pode existir em `empresas` e em `clientes` com ids diferentes
+// O mesmo cliente pode existir em `empresa` e em `cliente` com ids diferentes
 // (o cadastro cria os dois). Devolve os ids do registro legado que corresponde
 // (nome + cidade) à empresa, para editar/excluir os dois lados juntos.
 async function legacyClienteIdsFor(empresaId) {
-  const empresa = await queryOne('SELECT nome, cidade FROM empresas WHERE id = @id', { id: empresaId });
+  const empresa = await queryOne('SELECT nome, cidade FROM empresa WHERE id = @id', { id: empresaId });
   if (!empresa) return [];
-  const rows = await allQuery('SELECT id, nome, cidade FROM clientes');
+  const rows = await allQuery('SELECT id, nome, cidade FROM cliente');
   return rows
     .filter((c) => normalizeClientText(c.name) === normalizeClientText(empresa.nome) &&
       normalizeClientText(c.cidade) === normalizeClientText(empresa.cidade))
     .map((c) => c.id);
 }
 
-// ✅ APENAS MASTER pode listar clientes
+// ✅ APENAS MASTER pode listar cliente
 router.get('/', verifyToken, async (req, res) => {
   try {
     // ✅ Adicionar validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar cliente' });
     }
 
-    // Une `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
-    const clientes = await listPlatformClients();
+    // Une `empresa` e o cadastro legado `cliente` (ver utils/platformClients.js).
+    const cliente = await listPlatformClients();
 
-    const formatted = clientes.map((c) => ({
+    const formatted = cliente.map((c) => ({
       id: c.id,
       name: c.nome,
       cidade: c.cidade,
@@ -47,10 +47,10 @@ router.get('/', verifyToken, async (req, res) => {
       createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('pt-BR') : '—',
     }));
 
-    console.log(`✅ Listar clientes: ${formatted.length} empresas encontradas`);
+    console.log(`✅ Listar cliente: ${formatted.length} empresa encontradas`);
     res.json(formatted);
   } catch (err) {
-    console.error('❌ Erro ao listar clientes:', err);
+    console.error('❌ Erro ao listar cliente:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -67,12 +67,12 @@ const EVENT_STATUS_GROUPS = {
 };
 
 // ✅ APENAS MASTER: detalhes completos de um cliente (cadastro, plano e uso, usuários de
-// acesso, eventos e suporte). Cliente do cadastro legado (`clientes`) não tem empresa, então
+// acesso, evento e suporte). Cliente do cadastro legado (`cliente`) não tem empresa, então
 // só traz os dados do cadastro.
 router.get('/:id/detalhes', verifyToken, async (req, res) => {
   try {
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode ver detalhes de clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode ver detalhes de cliente' });
     }
 
     const platformClients = await listPlatformClients({ includeFamily: true });
@@ -111,7 +111,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     if (cliente.empresaId) {
       const empresaId = cliente.empresaId;
       const [empresa, users, events, tickets] = await Promise.all([
-        queryOne('SELECT cnpj, dataAtualizacao FROM empresas WHERE id = @id', { id: empresaId }),
+        queryOne('SELECT cnpj, dataAtualizacao FROM empresa WHERE id = @id', { id: empresaId }),
         allQuery(
           `SELECT id, email, perfil, status, ultimoAcesso, dataCriacao
            FROM logins WHERE empresaId = @id ORDER BY perfil, email`,
@@ -120,17 +120,17 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
         allQuery(
           `SELECT e.id, e.nome, TO_CHAR(e.data, 'YYYY-MM-DD') AS date_str, e.hora, e.duracao, e.status,
                   e.nomeResponsavel, e.iniciadoEm, e.finalizadoEm,
-                  (SELECT COUNT(*) FROM criancas c WHERE c.eventoId = e.id) AS children_count,
+                  (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.id) AS children_count,
                   (SELECT COUNT(*) FROM pontoVerificacao k
                     WHERE k.eventoId = e.id
                       AND LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception') AS checkpoints_count
-           FROM eventos e
+           FROM evento e
            WHERE e.empresaId = @id
            ORDER BY e.data DESC, e.hora DESC`,
           { id: empresaId }
         ),
         allQuery(
-          'SELECT status, COUNT(*) AS total FROM chamadosSuport WHERE empresaId = @id GROUP BY status',
+          'SELECT status, COUNT(*) AS total FROM chamadoSuport WHERE empresaId = @id GROUP BY status',
           { id: empresaId }
         ),
       ]);
@@ -197,7 +197,7 @@ router.post('/', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode criar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode criar cliente' });
     }
 
     const { nome, cidade, estado, email, senha, telefone, plan } = req.body;
@@ -220,7 +220,7 @@ router.post('/', verifyToken, async (req, res) => {
     try {
       // 1️⃣ Criar EMPRESA
       await query(
-        `INSERT INTO empresas (id, nome, cidade, estado, telefone, plano, status) 
+        `INSERT INTO empresa (id, nome, cidade, estado, telefone, plano, status) 
          VALUES (@id, @nome, @cidade, @estado, @telefone, @plano, @status)`,
         {
           id: empresaId,
@@ -250,7 +250,7 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO clientes (id, nome, cidade, estado, email, telefone, plano, status, empresaId) 
+        `INSERT INTO cliente (id, nome, cidade, estado, email, telefone, plano, status, empresaId) 
          VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId)`,
         {
           id: clienteId,
@@ -296,19 +296,19 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar cliente' });
     }
 
     const { nome, cidade, estado, email, telefone, plan, status } = req.body;
     
     try {
-      // Registro legado em `clientes`: o próprio id (cliente sem empresa) e/ou o
+      // Registro legado em `cliente`: o próprio id (cliente sem empresa) e/ou o
       // espelho da empresa. Resolvido antes do UPDATE, pois casa por nome+cidade antigos.
       const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
 
       // Atualizar EMPRESA
       await query(
-        `UPDATE empresas SET nome = @nome, cidade = @cidade, estado = @estado, 
+        `UPDATE empresa SET nome = @nome, cidade = @cidade, estado = @estado, 
          telefone = @telefone, plano = @plano, status = @status, dataAtualizacao = GETDATE()
          WHERE id = @id`,
         {
@@ -337,7 +337,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
       for (const legacyId of legacyIds) {
         await query(
-          `UPDATE clientes SET nome = COALESCE(@nome, name), cidade = COALESCE(@cidade, cidade),
+          `UPDATE cliente SET nome = COALESCE(@nome, name), cidade = COALESCE(@cidade, cidade),
            estado = COALESCE(@estado, estado), email = COALESCE(@email, email),
            telefone = COALESCE(@telefone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
            WHERE id = @id`,
@@ -364,19 +364,19 @@ router.put('/:id/status', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar status de clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar status de cliente' });
     }
 
     const { status } = req.body;
 
     const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
     for (const legacyId of legacyIds) {
-      await query('UPDATE clientes SET status = @status WHERE id = @id', { status, id: legacyId });
+      await query('UPDATE cliente SET status = @status WHERE id = @id', { status, id: legacyId });
     }
 
     // Atualizar status na EMPRESA
     await query(
-      'UPDATE empresas SET status = @status, dataAtualizacao = GETDATE() WHERE id = @id',
+      'UPDATE empresa SET status = @status, dataAtualizacao = GETDATE() WHERE id = @id',
       { status, id: req.params.id }
     );
 
@@ -398,7 +398,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode deletar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode deletar cliente' });
     }
 
     try {
@@ -415,14 +415,14 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
       // 2. Deletar EMPRESA
       await query(
-        'DELETE FROM empresas WHERE id = @id',
+        'DELETE FROM empresa WHERE id = @id',
         { id: req.params.id }
       );
       console.log(`✅ Empresa deletada`);
 
       // 3. Deletar CLIENTE (compatibilidade)
       for (const legacyId of legacyIds) {
-        await query('DELETE FROM clientes WHERE id = @id', { id: legacyId });
+        await query('DELETE FROM cliente WHERE id = @id', { id: legacyId });
       }
       console.log(`✅ Cliente deletado`);
 

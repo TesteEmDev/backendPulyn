@@ -18,7 +18,7 @@ router.get('/floor-plan', verifyToken, async (req, res) => {
   try {
     const empresaId = resolveEmpresaId(req);
     const empresa = await queryOne(
-      'SELECT id, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM empresas WHERE id = @id',
+      'SELECT id, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM empresa WHERE id = @id',
       { id: empresaId }
     );
 
@@ -54,7 +54,7 @@ router.post('/floor-plan', verifyToken, requireRole('admin', 'master'), async (r
 
     const empresaId = resolveEmpresaId(req);
     await query(
-      `UPDATE empresas
+      `UPDATE empresa
        SET dadosPlanoPiso = @dataUrl,
            nomePlanoPiso = @nome,
            tipoPlanoPiso = @type
@@ -78,7 +78,7 @@ router.delete('/floor-plan', verifyToken, requireRole('admin', 'master'), async 
   try {
     const empresaId = resolveEmpresaId(req);
     await query(
-      `UPDATE empresas
+      `UPDATE empresa
        SET dadosPlanoPiso = NULL,
            nomePlanoPiso = NULL,
            tipoPlanoPiso = NULL
@@ -95,7 +95,7 @@ router.delete('/floor-plan', verifyToken, requireRole('admin', 'master'), async 
 router.get('/zones', verifyToken, async (req, res) => {
   try {
     const empresaId = resolveEmpresaId(req);
-    const empresa = await queryOne('SELECT zones_data FROM empresas WHERE id = @id', { id: empresaId });
+    const empresa = await queryOne('SELECT zones_data FROM empresa WHERE id = @id', { id: empresaId });
 
     if (!empresa || !empresa.zones_data) {
       return res.json([]);
@@ -121,7 +121,7 @@ router.post('/zones', verifyToken, requireRole('admin', 'master'), async (req, r
     }
 
     const empresaId = resolveEmpresaId(req);
-    await query('UPDATE empresas SET zones_data = @zones_data WHERE id = @id', {
+    await query('UPDATE empresa SET zones_data = @zones_data WHERE id = @id', {
       zones_data: JSON.stringify(zones),
       id: empresaId,
     });

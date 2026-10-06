@@ -21,7 +21,7 @@ async function ensureSupportTable() {
   supportTableReady = (async () => {
     if (DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql') {
       await query(`
-        CREATE TABLE IF NOT EXISTS chamadosSuport (
+        CREATE TABLE IF NOT EXISTS chamadoSuport (
           id varchar(36) PRIMARY KEY,
           empresaId varchar(36),
           cliente varchar(255) NOT NULL,
@@ -36,9 +36,9 @@ async function ensureSupportTable() {
       `);
     } else {
       await query(`
-        IF OBJECT_ID('dbo.chamadosSuport', 'U') IS NULL
+        IF OBJECT_ID('dbo.chamadoSuport', 'U') IS NULL
         BEGIN
-          CREATE TABLE chamadosSuport (
+          CREATE TABLE chamadoSuport (
             id varchar(36) NOT NULL PRIMARY KEY,
             empresaId varchar(36) NULL,
             cliente varchar(255) NOT NULL,
@@ -92,7 +92,7 @@ router.get('/stats', verifyToken, requireMaster, async (req, res) => {
         SUM(CASE WHEN status = 'aberto' THEN 1 ELSE 0 END) as open_count,
         SUM(CASE WHEN status = 'em_andamento' THEN 1 ELSE 0 END) as in_progress_count,
         SUM(CASE WHEN status = 'resolvido' THEN 1 ELSE 0 END) as resolved_count
-      FROM chamadosSuport
+      FROM chamadoSuport
     `);
     const open = Number(stats?.open_count || 0);
     const inProgress = Number(stats?.in_progress_count || 0);
@@ -119,7 +119,7 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
       SELECT TOP (@limit)
         id, empresaId, cliente, subject, status, priority, description,
         atribuidoPara, criadoEm, atualizadoEm
-      FROM chamadosSuport
+      FROM chamadoSuport
       ORDER BY criadoEm DESC
     `, { limit: parseLimit(req.query.limit) });
     return res.json(tickets.map(serializeTicket));
@@ -143,7 +143,7 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
 
     const id = uuidv4();
     await query(`
-      INSERT INTO chamadosSuport
+      INSERT INTO chamadoSuport
         (id, empresaId, cliente, subject, status, priority, description, atribuidoPara)
       VALUES
         (@id, @empresaId, @cliente, @subject, @status, @priority, @description, @atribuidoPara)
@@ -158,7 +158,7 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
       atribuidoPara: atribuidoPara ? String(atribuidoPara) : 'Atribuir',
     });
 
-    const ticket = await queryOne('SELECT * FROM chamadosSuport WHERE id = @id', { id });
+    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE id = @id', { id });
     return res.status(201).json(serializeTicket(ticket));
   } catch (err) {
     console.error('❌ Erro ao criar ticket:', err);
@@ -174,15 +174,15 @@ router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
       return res.status(400).json({ error: 'status inválido' });
     }
 
-    const existing = await queryOne('SELECT id FROM chamadosSuport WHERE id = @id', { id: req.params.id });
+    const existing = await queryOne('SELECT id FROM chamadoSuport WHERE id = @id', { id: req.params.id });
     if (!existing) return res.status(404).json({ error: 'Ticket não encontrado' });
 
     await query(`
-      UPDATE chamadosSuport
+      UPDATE chamadoSuport
       SET status = @status, atualizadoEm = CURRENT_TIMESTAMP
       WHERE id = @id
     `, { id: req.params.id, status });
-    const ticket = await queryOne('SELECT * FROM chamadosSuport WHERE id = @id', { id: req.params.id });
+    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE id = @id', { id: req.params.id });
     return res.json(serializeTicket(ticket));
   } catch (err) {
     console.error('❌ Erro ao atualizar status do ticket:', err);

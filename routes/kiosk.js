@@ -36,7 +36,7 @@ router.get('/events', async (req, res) => {
                 WHERE c.eventoId = e.id
                   AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) = 'reception'
               ) THEN 1 ELSE 0 END AS has_reception_checkpoint
-       FROM eventos e
+       FROM evento e
        WHERE e.empresaId = @empresaId
          AND LOWER(COALESCE(e.status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
        ORDER BY e.data DESC`,
@@ -44,18 +44,18 @@ router.get('/events', async (req, res) => {
     );
     res.json(events || []);
   } catch (error) {
-    console.error('❌ Kiosk: erro ao carregar eventos:', error.message);
-    res.status(500).json({ error: 'Não foi possível carregar os eventos' });
+    console.error('❌ Kiosk: erro ao carregar evento:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os evento' });
   }
 });
 
-// Recupera leituras recentes caso o navegador perca o broadcast WebSocket.
-// A fila é somente do processo atual e fica limitada às leituras recentes.
+// Recupera leitura recentes caso o navegador perca o broadcast WebSocket.
+// A fila é somente do processo atual e fica limitada às leitura recentes.
 router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const { queryOne } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresaId, status FROM eventos
+      `SELECT id, empresaId, status FROM evento
        WHERE id = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
@@ -78,7 +78,7 @@ router.get('/events/:eventId/teams', async (req, res) => {
   try {
     const { queryOne, allQuery } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresaId, status FROM eventos
+      `SELECT id, empresaId, status FROM evento
        WHERE id = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
@@ -87,15 +87,15 @@ router.get('/events/:eventId/teams', async (req, res) => {
 
     const teams = await allQuery(
       `SELECT id, nome, color, points
-       FROM times
+       FROM time
        WHERE eventoId = @eventId AND empresaId = @empresaId
        ORDER BY name`,
       { eventId: event.id, empresaId: req.user.empresaId }
     );
     res.json(teams || []);
   } catch (error) {
-    console.error('❌ Kiosk: erro ao carregar times:', error.message);
-    res.status(500).json({ error: 'Não foi possível carregar os times' });
+    console.error('❌ Kiosk: erro ao carregar time:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os time' });
   }
 });
 
@@ -108,7 +108,7 @@ router.get('/bracelets/:codigo', async (req, res) => {
     const { queryOne } = require('../database');
     const bracelet = await queryOne(
       `SELECT codigo, status, criancaId, empresaId
-       FROM pulseiras
+       FROM pulseira
        WHERE ${uidSqlExpression('codigo')} = @codigo`,
       { codigo }
     );
@@ -140,7 +140,7 @@ router.post('/participants', async (req, res) => {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
 
-    // O time é opcional: o recreacionista define (ou sorteia) os times depois do cadastro.
+    // O time é opcional: o recreacionista define (ou sorteia) os time depois do cadastro.
     if (!eventId || !cleanName || !codigo) {
       return res.status(400).json({ error: 'Evento, nome e pulseira são obrigatórios' });
     }
@@ -150,7 +150,7 @@ router.post('/participants', async (req, res) => {
 
     const participant = await withTransaction(async (tx) => {
       const event = await tx.queryOne(
-        `SELECT id, empresaId, status FROM eventos
+        `SELECT id, empresaId, status FROM evento
          WHERE id = @eventId AND empresaId = @empresaId`,
         { eventId, empresaId: req.user.empresaId }
       );
@@ -160,7 +160,7 @@ router.post('/participants', async (req, res) => {
       let team = null;
       if (timeId) {
         team = await tx.queryOne(
-          `SELECT id, name FROM times
+          `SELECT id, name FROM time
            WHERE id = @timeId AND eventoId = @eventId AND empresaId = @empresaId`,
           { timeId, eventId, empresaId: event.empresaId }
         );
@@ -169,7 +169,7 @@ router.post('/participants', async (req, res) => {
 
       let bracelet = await tx.queryOne(
         `SELECT codigo, status, criancaId, empresaId
-         FROM pulseiras
+         FROM pulseira
          WHERE ${uidSqlExpression('codigo')} = @codigo`,
         { codigo }
       );
@@ -179,7 +179,7 @@ router.post('/participants', async (req, res) => {
       }
       if (!bracelet) {
         await tx.query(
-          `INSERT INTO pulseiras (codigo, status, empresaId, criadoEm)
+          `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
            VALUES (@codigo, 'disponivel', @empresaId, GETDATE())`,
           { codigo, empresaId: event.empresaId }
         );
@@ -192,7 +192,7 @@ router.post('/participants', async (req, res) => {
 
       const childId = uuidv4();
       await tx.query(
-        `INSERT INTO criancas
+        `INSERT INTO crianca
           (id, eventoId, empresaId, timeId, nome, nicknome, age, avatar, codigoPulseira, scores)
          VALUES (@id, @eventId, @empresaId, @timeId, @nome, @nicknome, @age, @avatar, @codigo, 0)`,
         {
@@ -209,7 +209,7 @@ router.post('/participants', async (req, res) => {
       );
 
       const braceletUpdate = await tx.query(
-        `UPDATE pulseiras
+        `UPDATE pulseira
          SET status = 'em_uso', criancaId = @childId
          WHERE ${uidSqlExpression('codigo')} = @codigo
            AND empresaId = @empresaId

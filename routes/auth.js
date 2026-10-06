@@ -22,7 +22,7 @@ router.post('/login', async (req, res) => {
       `SELECT l.id, l.email, l.senha, l.status, l.perfil, l.nomeFamilia,
               e.id as empresaId, e.nome as empresa_nome, e.[plano]
        FROM logins l
-       JOIN empresas e ON l.empresaId = e.id
+       JOIN empresa e ON l.empresaId = e.id
        WHERE LOWER(l.email) = LOWER(@email)`,
       { email: String(email).trim() }
     );
@@ -102,7 +102,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Logout (opcional - apenas para logs)
+// Logout (opcional - apenas para log)
 router.post('/logout', async (req, res) => {
   try {
     console.log('👋 Logout realizado');
@@ -206,7 +206,7 @@ router.post('/register', async (req, res) => {
     const empresaId = crypto.randomUUID();
     
     await query(
-      `INSERT INTO empresas (id, nome, plano, status, dataCriacao)
+      `INSERT INTO empresa (id, nome, plano, status, dataCriacao)
        VALUES (@id, @nome, 'family', 'active', GETDATE())`,
       { 
         id: empresaId, 

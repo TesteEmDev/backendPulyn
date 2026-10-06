@@ -8,58 +8,58 @@ const { planDefaultTeams } = require('../utils/defaultTeams');
 
 const TEAM_MANAGER_ROLES = ['admin', 'reception', 'game_master', 'master'];
 
-// Listar times/equipes da empresa
+// Listar time/equipes da empresa
 router.get('/', verifyToken, async (req, res) => {
   try {
     const empresaId = req.user.empresaId;
     const role = req.user.role;
 
-    let times;
+    let time;
     if (isMaster(req)) {
-      // Master vê todos os times (exceto os da Master Admin)
-      times = await allQuery(`
-        SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.timeId = t.id) AS members_count
-        FROM times t
-        LEFT JOIN empresas e ON t.empresaId = e.id
+      // Master vê todos os time (exceto os da Master Admin)
+      time = await allQuery(`
+        SELECT t.*, (SELECT COUNT(*) FROM crianca c WHERE c.timeId = t.id) AS members_count
+        FROM time t
+        LEFT JOIN empresa e ON t.empresaId = e.id
         WHERE e.nome != 'Master Admin'
         ORDER BY t.nome
       `);
-      console.log(`✅ ${times.length} times (master - TODAS as empresas, exceto Master Admin)`);
+      console.log(`✅ ${time.length} time (master - TODAS as empresa, exceto Master Admin)`);
     } else {
-      times = await allQuery(
-        `SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.timeId = t.id) AS members_count
-         FROM times t WHERE t.empresaId = @empresaId ORDER BY t.nome`,
+      time = await allQuery(
+        `SELECT t.*, (SELECT COUNT(*) FROM crianca c WHERE c.timeId = t.id) AS members_count
+         FROM time t WHERE t.empresaId = @empresaId ORDER BY t.nome`,
         { empresaId }
       );
-      console.log(`✅ ${times.length} times da empresa ${empresaId}`);
+      console.log(`✅ ${time.length} time da empresa ${empresaId}`);
     }
 
-    res.json(times);
+    res.json(time);
   } catch (err) {
-    console.error('❌ Erro ao listar times:', err);
+    console.error('❌ Erro ao listar time:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Times padrão: modelos da empresa, guardados como times sem evento.
+// Times padrão: modelos da empresa, guardados como time sem evento.
 router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const templates = await allQuery(
-      'SELECT id, nome, color, criadoEm FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
+      'SELECT id, nome, color, criadoEm FROM time WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
       { empresaId: req.user.empresaId }
     );
     res.json(templates);
   } catch (err) {
-    console.error('❌ Erro ao listar times padrão:', err);
+    console.error('❌ Erro ao listar time padrão:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Copia os times padrão para o evento (sem duplicar os que já existem pelo nome).
-router.post('/eventos/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
+// Copia os time padrão para o evento (sem duplicar os que já existem pelo nome).
+router.post('/evento/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresaId FROM eventos WHERE id = @eventoId',
+      'SELECT id, empresaId FROM evento WHERE id = @eventoId',
       { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -69,20 +69,20 @@ router.post('/eventos/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_M
 
     const result = await withTransaction(async (tx) => {
       const templates = await tx.allQuery(
-        'SELECT nome, color FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
+        'SELECT nome, color FROM time WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
         { empresaId: evento.empresaId }
       );
-      if (templates.length === 0) return { error: 'Cadastre os times padrão antes de aplicá-los a um evento.' };
+      if (templates.length === 0) return { error: 'Cadastre os time padrão antes de aplicá-los a um evento.' };
 
       const existing = await tx.allQuery(
-        'SELECT name FROM times WHERE eventoId = @eventoId AND empresaId = @empresaId',
+        'SELECT name FROM time WHERE eventoId = @eventoId AND empresaId = @empresaId',
         { eventoId: evento.id, empresaId: evento.empresaId }
       );
       const toCreate = planDefaultTeams({ templates, existingTeams: existing });
       for (const team of toCreate) {
         await tx.query(
           // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
-          `INSERT INTO times (id, eventoId, empresaId, nome, color, points)
+          `INSERT INTO time (id, eventoId, empresaId, nome, color, points)
            VALUES (@id, @eventoId, @empresaId, @nome, @color, 0)`,
           { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresaId, name: team.nome, color: team.color }
         );
@@ -94,29 +94,29 @@ router.post('/eventos/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_M
     console.log(`✅ Times padrão aplicados ao evento ${evento.id}: ${result.created} criado(s), ${result.skipped} já existia(m)`);
     res.json(result);
   } catch (err) {
-    console.error('❌ Erro ao aplicar times padrão:', err);
+    console.error('❌ Erro ao aplicar time padrão:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Listar times de um evento específico
-router.get('/eventos/:eventoId/times', verifyToken, async (req, res) => {
+// Listar time de um evento específico
+router.get('/evento/:eventoId/time', verifyToken, async (req, res) => {
   try {
     const empresaId = req.user.empresaId;
-    const evento = await queryOne('SELECT id, empresaId FROM eventos WHERE id = @eventoId', { eventoId: req.params.eventoId });
+    const evento = await queryOne('SELECT id, empresaId FROM evento WHERE id = @eventoId', { eventoId: req.params.eventoId });
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    const times = await allQuery(
-      `SELECT * FROM times 
+    const time = await allQuery(
+      `SELECT * FROM time 
        WHERE eventoId = @eventoId AND (empresaId = @empresaId OR @isMaster = 1)
        ORDER BY points DESC`,
       { eventoId: req.params.eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
 
-    res.json(times);
+    res.json(time);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -133,14 +133,14 @@ router.post('/', verifyToken, async (req, res) => {
     }
 
     const evento = eventoId
-      ? await queryOne('SELECT id, empresaId FROM eventos WHERE id = @eventoId', { eventoId })
+      ? await queryOne('SELECT id, empresaId FROM evento WHERE id = @eventoId', { eventoId })
       : null;
     if (eventoId && !evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (evento && !isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     const targetEmpresaId = evento?.empresaId || empresaId;
-    const empresa = await queryOne('SELECT id FROM empresas WHERE id = @id', { id: targetEmpresaId });
+    const empresa = await queryOne('SELECT id FROM empresa WHERE id = @id', { id: targetEmpresaId });
     if (!empresa) return res.status(403).json({ error: 'Empresa não encontrada' });
 
     // ✅ CRIAR
@@ -148,7 +148,7 @@ router.post('/', verifyToken, async (req, res) => {
 
     await query(
       // A pontuação nunca vem do cliente: todo time novo começa com 0 ponto.
-      `INSERT INTO times (id, eventoId, empresaId, nome, color, points) 
+      `INSERT INTO time (id, eventoId, empresaId, nome, color, points) 
        VALUES (@id, @eventoId, @empresaId, @nome, @color, 0)`,
       { id, eventoId: eventoId || null, empresaId: targetEmpresaId, nome, color }
     );
@@ -169,7 +169,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresaId FROM times WHERE id = @id',
+      'SELECT empresaId FROM time WHERE id = @id',
       { id: req.params.id }
     );
 
@@ -183,7 +183,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // ✅ ATUALIZAR
     await query(
-      'UPDATE times SET name = @nome, color = @color WHERE id = @id',
+      'UPDATE time SET name = @nome, color = @color WHERE id = @id',
       { nome, color, id: req.params.id }
     );
 
@@ -201,7 +201,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresaId FROM times WHERE id = @id',
+      'SELECT empresaId FROM time WHERE id = @id',
       { id: req.params.id }
     );
 
@@ -214,7 +214,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
     }
 
     // ✅ DELETAR
-    await query('DELETE FROM times WHERE id = @id', { id: req.params.id });
+    await query('DELETE FROM time WHERE id = @id', { id: req.params.id });
 
     console.log(`✅ Time deletado: ${req.params.id}`);
     res.json({ deleted: true });
@@ -223,10 +223,10 @@ router.delete('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Distribuir aleatoriamente as crianças do evento entre os times do evento.
+// Distribuir aleatoriamente as crianças do evento entre os time do evento.
 // mode 'unassigned' (padrão): só quem está sem time. mode 'all': sorteia todos de novo.
 router.post(
-  '/eventos/:eventoId/distribuir-aleatorio',
+  '/evento/:eventoId/distribuir-aleatorio',
   verifyToken,
   requireRole(TEAM_MANAGER_ROLES),
   async (req, res) => {
@@ -235,7 +235,7 @@ router.post(
       if (!DISTRIBUTION_MODES.has(mode)) return res.status(400).json({ error: 'Modo de distribuição inválido' });
 
       const evento = await queryOne(
-        'SELECT id, empresaId FROM eventos WHERE id = @eventoId',
+        'SELECT id, empresaId FROM evento WHERE id = @eventoId',
         { eventoId: req.params.eventoId }
       );
       if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -245,22 +245,22 @@ router.post(
 
       const result = await withTransaction(async (tx) => {
         const teams = await tx.allQuery(
-          'SELECT id, name FROM times WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY name',
+          'SELECT id, name FROM time WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY name',
           { eventoId: evento.id, empresaId: evento.empresaId }
         );
         if (teams.length < 2) {
-          return { error: 'Crie pelo menos 2 times neste evento antes de distribuir os participantes.' };
+          return { error: 'Crie pelo menos 2 time neste evento antes de distribuir os participantes.' };
         }
 
         const children = await tx.allQuery(
-          'SELECT id, timeId FROM criancas WHERE eventoId = @eventoId AND empresaId = @empresaId',
+          'SELECT id, timeId FROM crianca WHERE eventoId = @eventoId AND empresaId = @empresaId',
           { eventoId: evento.id, empresaId: evento.empresaId }
         );
         const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.id), mode });
 
         for (const { criancaId, timeId } of assignments) {
           await tx.query(
-            'UPDATE criancas SET timeId = @timeId WHERE id = @criancaId AND eventoId = @eventoId',
+            'UPDATE crianca SET timeId = @timeId WHERE id = @criancaId AND eventoId = @eventoId',
             { timeId, criancaId, eventoId: evento.id }
           );
         }
@@ -268,15 +268,15 @@ router.post(
         // A pontuação do time é a soma das crianças; recalcula para refletir a nova composição.
         for (const team of teams) {
           await tx.query(
-            `UPDATE times
-             SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE timeId = @timeId)
+            `UPDATE time
+             SET points = (SELECT ISNULL(SUM(scores), 0) FROM crianca WHERE timeId = @timeId)
              WHERE id = @timeId`,
             { timeId: team.id }
           );
         }
 
         const sizes = await tx.allQuery(
-          'SELECT timeId, COUNT(*) AS total FROM criancas WHERE eventoId = @eventoId AND timeId IS NOT NULL GROUP BY timeId',
+          'SELECT timeId, COUNT(*) AS total FROM crianca WHERE eventoId = @eventoId AND timeId IS NOT NULL GROUP BY timeId',
           { eventoId: evento.id }
         );
         const totalByTeam = new Map(sizes.map(row => [row.timeId, Number(row.total)]));

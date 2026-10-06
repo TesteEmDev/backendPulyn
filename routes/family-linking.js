@@ -79,9 +79,9 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     // Buscar código QR ativo
     const codigoVinculacao = await queryOne(
       `SELECT flc.*, c.nome, c.nicknome, c.age, e.nome as evento_nome, e.id as eventoId, c.empresaId
-       FROM ""codigosVinculoFamiliar"" flc
-       JOIN criancas c ON flc.criancaId = c.id
-       JOIN eventos e ON flc.eventoId = e.id
+       FROM ""codigoVinculoFamiliar"" flc
+       JOIN crianca c ON flc.criancaId = c.id
+       JOIN evento e ON flc.eventoId = e.id
        WHERE flc.qr_code_value = @codigoQR 
          AND flc.status = 'active'
          AND flc.expiramEm > CURRENT_TIMESTAMP`,
@@ -148,7 +148,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
 
       // ✅ Marcar QR codigo como usado
       const updateResult = await tx.query(
-        `UPDATE ""codigosVinculoFamiliar""
+        `UPDATE ""codigoVinculoFamiliar""
          SET status = 'used', used_by_login_id = @loginId
          WHERE id = @codeId`,
         { codeId: codigoVinculacao.id, loginId: req.user.id }
@@ -223,9 +223,9 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       `SELECT p.codigo, p.status, p.criancaId, p.empresaId,
               c.nome, c.nicknome, c.age, c.eventoId,
               e.nome AS evento_nome, e.status AS evento_status
-       FROM pulseiras p
-       JOIN criancas c ON c.id = p.criancaId
-       LEFT JOIN eventos e ON e.id = c.eventoId
+       FROM pulseira p
+       JOIN crianca c ON c.id = p.criancaId
+       LEFT JOIN evento e ON e.id = c.eventoId
        WHERE ${uidSqlExpression('p.codigo')} = @uid
          AND LOWER(p.empresaId) = LOWER(@empresaId)`,
       { uid: parsed.uid, empresaId: req.user.empresaId }

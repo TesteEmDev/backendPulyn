@@ -22,8 +22,8 @@ async function getInvite(token) {
     SELECT i.*, e.nome as evento_nome, e.data as evento_data,
            c.id as linked_child_id, c.name as linked_child_name
     FROM conviteFamilia i
-    JOIN eventos e ON e.id = i.eventoId
-    LEFT JOIN criancas c ON c.id = i.criancaId
+    JOIN evento e ON e.id = i.eventoId
+    LEFT JOIN crianca c ON c.id = i.criancaId
     WHERE i.hashToken = @tokenHash
   `, { tokenHash: hashToken(token) });
   if (!invite) return null;
@@ -36,7 +36,7 @@ async function getInvite(token) {
 
 async function getEventForUser(eventoId, req) {
   const evento = await queryOne(
-    'SELECT id, empresaId, nome, date FROM eventos WHERE id = @eventoId',
+    'SELECT id, empresaId, nome, date FROM evento WHERE id = @eventoId',
     { eventoId }
   );
   if (!evento) return { error: 'Evento não encontrado', status: 404 };
@@ -84,7 +84,7 @@ router.post('/invites', verifyToken, async (req, res) => {
 
     if (criancaId) {
       const child = await queryOne(
-        `SELECT id FROM criancas WHERE id = @criancaId AND eventoId = @eventoId AND empresaId = @empresaId`,
+        `SELECT id FROM crianca WHERE id = @criancaId AND eventoId = @eventoId AND empresaId = @empresaId`,
         { criancaId, eventoId, empresaId: evento.empresaId }
       );
       if (!child) return res.status(404).json({ error: 'Criança não encontrada neste evento' });
@@ -198,7 +198,7 @@ router.post('/invites/:token/register', async (req, res) => {
         for (const childData of childrenPayload) {
           const childId = crypto.randomUUID();
           await query(`
-            INSERT INTO criancas
+            INSERT INTO crianca
               (id, eventoId, empresaId, timeId, nome, nicknome, age, avatar, scores, status)
             VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @nicknome, @age, '👤', 0, 'pending')
           `, {
@@ -267,9 +267,9 @@ async function listFamilyLinks(status, eventoId, req) {
            t.id as timeId, t.nome as time_nome, t.cor as time_color
     FROM vinculoFamiliar l
     JOIN logins u ON u.id = l.loginId
-    JOIN criancas c ON c.id = l.criancaId
-    JOIN eventos e ON e.id = c.eventoId
-    LEFT JOIN times t ON t.id = c.timeId
+    JOIN crianca c ON c.id = l.criancaId
+    JOIN evento e ON e.id = c.eventoId
+    LEFT JOIN time t ON t.id = c.timeId
     WHERE l.status = @status
       AND (CAST(@eventoId AS VARCHAR(36)) IS NULL OR e.id = CAST(@eventoId AS VARCHAR(36)))
       AND (@isMaster = 1 OR l.empresaId = @empresaId)
@@ -308,7 +308,7 @@ async function getLinkForStaff(linkId, req) {
   const link = await queryOne(
     `SELECT l.*, c.name as crianca_nome, c.status as crianca_status
      FROM vinculoFamiliar l
-     JOIN criancas c ON c.id = l.criancaId
+     JOIN crianca c ON c.id = l.criancaId
      WHERE l.id = @linkId`,
     { linkId }
   );
@@ -334,7 +334,7 @@ router.post('/links/:linkId/approve', verifyToken, async (req, res) => {
       WHERE id = @linkId AND status = 'pending'
     `, { linkId: link.id, approvedBy: req.user.id });
     await query(`UPDATE logins SET status = 'active', dataAtualizacao = GETDATE() WHERE id = @loginId`, { loginId: link.loginId });
-    await query(`UPDATE criancas SET status = 'active' WHERE id = @childId AND status = 'pending'`, { childId: link.criancaId });
+    await query(`UPDATE crianca SET status = 'active' WHERE id = @childId AND status = 'pending'`, { childId: link.criancaId });
 
     res.json({ ok: true, status: 'approved', message: 'Família aprovada com sucesso' });
   } catch (err) {
@@ -362,7 +362,7 @@ router.post('/links/:linkId/reject', verifyToken, async (req, res) => {
       WHERE criancaId = @childId AND status = 'approved'
     `, { childId: link.criancaId });
     if (!approvedLink) {
-      await query(`UPDATE criancas SET status = 'inactive' WHERE id = @childId AND status = 'pending'`, { childId: link.criancaId });
+      await query(`UPDATE crianca SET status = 'inactive' WHERE id = @childId AND status = 'pending'`, { childId: link.criancaId });
     }
     const approvedSibling = await queryOne(`
       SELECT id FROM vinculoFamiliar WHERE loginId = @loginId AND status = 'approved'
@@ -405,8 +405,8 @@ router.get('/children', verifyToken, async (req, res) => {
              l.relacionamento, l.status as link_status,
              t.id as "teamId", t.nome as "teamName", t.cor as "teamColor", t.points as team_points
       FROM vinculoFamiliar l
-      JOIN criancas c ON c.id = l.criancaId
-      LEFT JOIN times t ON t.id = c.timeId
+      JOIN crianca c ON c.id = l.criancaId
+      LEFT JOIN time t ON t.id = c.timeId
       WHERE l.loginId = @loginId AND (l.status = 'approved' OR l.status = 'pending')
       ORDER BY c.name ASC
     `, { loginId: req.user.id });
@@ -455,8 +455,8 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
       SELECT c.id, c.eventoId, c.nome, c.nicknome, c.scores, c.status,
              e.nome as evento_name
       FROM vinculoFamiliar l
-      JOIN criancas c ON c.id = l.criancaId
-      JOIN eventos e ON e.id = c.eventoId
+      JOIN crianca c ON c.id = l.criancaId
+      JOIN evento e ON e.id = c.eventoId
       WHERE l.loginId = @loginId AND l.criancaId = @childId AND l.status = 'approved'
     `, { loginId: req.user.id, childId: req.params.id });
     if (!child) return res.status(404).json({ error: 'Criança não encontrada na sua família' });
@@ -464,7 +464,7 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
     const scores = await allQuery(`
       SELECT p.id, p.points, p.criadoEm, p.checkpointId, cp.name as checkpoint_nome,
              p.brincadeiraId
-      FROM pontuacoes p
+      FROM pontuacao p
       LEFT JOIN pontoVerificacao cp ON cp.id = p.checkpointId
       WHERE p.criancaId = @childId AND p.eventoId = @eventoId
       ORDER BY p.criadoEm DESC
@@ -492,7 +492,7 @@ router.get('/active-event', verifyToken, async (req, res) => {
     const firstChild = await queryOne(`
       SELECT c.id, c.eventoId, c.name
       FROM vinculoFamiliar l
-      JOIN criancas c ON c.id = l.criancaId
+      JOIN crianca c ON c.id = l.criancaId
       WHERE l.loginId = @loginId AND (l.status = 'approved' OR l.status = 'pending')
       ORDER BY c.name ASC
       LIMIT 1
@@ -511,10 +511,10 @@ router.get('/active-event', verifyToken, async (req, res) => {
              COUNT(DISTINCT c.id) as child_count,
              COUNT(DISTINCT t.id) as team_count,
              COUNT(DISTINCT cp.id) as checkpoint_count
-      FROM eventos e
-      LEFT JOIN brincadeiras b ON b.id = e.brincadeiraAtivaId
-      LEFT JOIN criancas c ON c.eventoId = e.id
-      LEFT JOIN times t ON t.eventoId = e.id
+      FROM evento e
+      LEFT JOIN brincadeira b ON b.id = e.brincadeiraAtivaId
+      LEFT JOIN crianca c ON c.eventoId = e.id
+      LEFT JOIN time t ON t.eventoId = e.id
       LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.id AND cp.propositoCheckpoint != 'reception'
       WHERE e.id = @eventoId
       GROUP BY e.id, e.nome, e.data, e.status, e.empresaId,
@@ -571,7 +571,7 @@ router.get('/notifications', verifyToken, async (req, res) => {
     }
 
     // ✅ Por enquanto retorna lista vazia
-    // TODO: Implementar tabela de notificações com eventos de criança
+    // TODO: Implementar tabela de notificações com evento de criança
     res.json({
       success: true,
       notifications: []
@@ -584,7 +584,7 @@ router.get('/notifications', verifyToken, async (req, res) => {
 
 /**
  * ✅ GET /api/familias/children/:id/achievements
- * Lista conquistas de uma criança
+ * Lista conquista de uma criança
  * Implementação básica: por enquanto retorna lista vazia
  * TODO: Implementar sistema de achievements/badges completo
  */
@@ -608,14 +608,14 @@ router.get('/children/:id/achievements', verifyToken, async (req, res) => {
     }
 
     // ✅ Por enquanto retorna lista vazia
-    // TODO: Implementar tabela de conquistas/badges com eventos
+    // TODO: Implementar tabela de conquista/badges com evento
     res.json({
       success: true,
       achievements: []
     });
   } catch (error) {
-    console.error('❌ Erro ao buscar conquistas:', error);
-    res.status(500).json({ error: 'Erro ao buscar conquistas', details: error.message });
+    console.error('❌ Erro ao buscar conquista:', error);
+    res.status(500).json({ error: 'Erro ao buscar conquista', details: error.message });
   }
 });
 

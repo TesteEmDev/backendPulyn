@@ -40,7 +40,7 @@ router.post('/readings', async (req, res) => {
 
     const event = await queryOne(
       `SELECT id, empresaId, status
-       FROM eventos
+       FROM evento
        WHERE id = @eventId AND empresaId = @empresaId`,
       { eventId, empresaId: req.user.empresaId }
     );
@@ -70,7 +70,7 @@ router.post('/readings', async (req, res) => {
 router.get('/events/:eventId/score-readings', async (req, res) => {
   try {
     const event = await queryOne(
-      `SELECT id, status FROM eventos
+      `SELECT id, status FROM evento
        WHERE id = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
@@ -91,7 +91,7 @@ router.get('/events', async (req, res) => {
   try {
     const events = await allQuery(
       `SELECT id, nome, date, time, duration, status
-       FROM eventos
+       FROM evento
        WHERE empresaId = @empresaId
          AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
        ORDER BY date DESC`,
@@ -99,15 +99,15 @@ router.get('/events', async (req, res) => {
     );
     res.json(events || []);
   } catch (error) {
-    console.error('❌ Score kiosk: erro ao carregar eventos:', error.message);
-    res.status(500).json({ error: 'Não foi possível carregar os eventos' });
+    console.error('❌ Score kiosk: erro ao carregar evento:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os evento' });
   }
 });
 
 router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const event = await queryOne(
-      `SELECT id, status FROM eventos
+      `SELECT id, status FROM evento
        WHERE id = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
@@ -131,7 +131,7 @@ router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
 
     const event = await queryOne(
       `SELECT id, empresaId, nome, status
-       FROM eventos
+       FROM evento
        WHERE id = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
@@ -141,12 +141,12 @@ router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
     const child = await queryOne(
       `SELECT c.id, c.nome, c.nicknome, c.avatar, c.scores, c.eventoId,
               t.nome AS team_nome, t.cor AS team_color
-       FROM pulseiras p
-       JOIN criancas c ON c.id = p.criancaId
+       FROM pulseira p
+       JOIN crianca c ON c.id = p.criancaId
          AND c.empresaId = p.empresaId
          AND c.eventoId = @eventId
          AND ${uidSqlExpression('c.codigoPulseira')} = @codigo
-       LEFT JOIN times t ON t.id = c.timeId
+       LEFT JOIN time t ON t.id = c.timeId
          AND t.eventoId = c.eventoId
          AND t.empresaId = c.empresaId
        WHERE ${uidSqlExpression('p.codigo')} = @codigo
@@ -160,7 +160,7 @@ router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
     const scores = await allQuery(
       `SELECT TOP 5 p.id, p.points, p.criadoEm,
               cp.name AS checkpoint_name
-       FROM pontuacoes p
+       FROM pontuacao p
        LEFT JOIN pontoVerificacao cp ON cp.id = p.checkpointId
        WHERE p.criancaId = @childId
          AND p.eventoId = @eventId

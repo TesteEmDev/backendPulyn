@@ -29,7 +29,7 @@ async function loadMonitoringData() {
   const [companies, pontoVerificacao, events] = await Promise.all([
     allQuery(`
       SELECT id, nome, cidade, estado, status
-      FROM empresas
+      FROM empresa
       WHERE nome <> @masterName
       ORDER BY nome
     `, { masterName: 'Master Admin' }),
@@ -40,7 +40,7 @@ async function loadMonitoringData() {
     `),
     allQuery(`
       SELECT id, empresaId, nome, [date] AS event_date, [time] AS event_time, criadoEm
-      FROM eventos
+      FROM evento
       WHERE empresaId IS NOT NULL
     `),
   ]);

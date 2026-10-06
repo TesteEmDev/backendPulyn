@@ -1,8 +1,8 @@
 // routes/analytics.js - métricas da plataforma (visão master)
 //
-// Tudo aqui vem do banco: clientes = empresas + cadastro legado (utils/platformClients.js),
-// receita = valor do plano (utils/planDefinitions.js) dos clientes ativos, e os números
-// de eventos, crianças e pontoVerificacao consideram só o que pertence a clientes (empresa).
+// Tudo aqui vem do banco: cliente = empresa + cadastro legado (utils/platformClients.js),
+// receita = valor do plano (utils/planDefinitions.js) dos cliente ativos, e os números
+// de evento, crianças e pontoVerificacao consideram só o que pertence a cliente (empresa).
 const express = require('express');
 const router = express.Router();
 const { allQuery, queryOne } = require('../database');
@@ -53,12 +53,12 @@ const isActive = (cliente) => String(cliente.status || '').toLowerCase() === 'ac
 const planPrice = (cliente) => PLAN_DEFINITIONS[String(cliente.plan || '').trim().toLowerCase()]?.price || 0;
 const round1 = (value) => Math.round(value * 10) / 10;
 
-// Receita mensal recorrente: só clientes ativos pagam (trial e bloqueado não entram).
+// Receita mensal recorrente: só cliente ativos pagam (trial e bloqueado não entram).
 const sumMrr = (clients) => clients.filter(isActive).reduce((sum, c) => sum + planPrice(c), 0);
 
-// Escopo "de clientes": eventos de empresas (não os de teste sem empresa nem da conta Master).
+// Escopo "de cliente": evento de empresa (não os de teste sem empresa nem da conta Master).
 const CUSTOMER_EVENTS = `e.empresaId IS NOT NULL
-  AND e.empresaId NOT IN (SELECT id FROM empresas WHERE nome = 'Master Admin')`;
+  AND e.empresaId NOT IN (SELECT id FROM empresa WHERE nome = 'Master Admin')`;
 
 // ✅ Indicadores gerais
 router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master pode ver métricas globais'), async (req, res) => {
@@ -71,7 +71,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           SUM(CASE WHEN LOWER(COALESCE(e.status, '')) IN ('active', 'ongoing') THEN 1 ELSE 0 END) AS active,
           SUM(CASE WHEN LOWER(COALESCE(e.status, '')) = 'scheduled' THEN 1 ELSE 0 END) AS scheduled,
           SUM(CASE WHEN LOWER(COALESCE(e.status, '')) IN ('finished', 'completed') THEN 1 ELSE 0 END) AS finished
-        FROM eventos e
+        FROM evento e
         WHERE ${CUSTOMER_EVENTS}
       `),
       queryOne(`
@@ -79,7 +79,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(k.status, '')) = 'online' THEN 1 ELSE 0 END) AS online
         FROM pontoVerificacao k
-        JOIN eventos e ON e.id = k.eventoId
+        JOIN evento e ON e.id = k.eventoId
         WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
           AND ${CUSTOMER_EVENTS}
       `),
@@ -87,8 +87,8 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(c.status, 'active')) = 'active' THEN 1 ELSE 0 END) AS active
-        FROM criancas c
-        JOIN eventos e ON e.id = c.eventoId
+        FROM crianca c
+        JOIN evento e ON e.id = c.eventoId
         WHERE ${CUSTOMER_EVENTS}
       `),
     ]);
@@ -97,7 +97,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
     const activeClients = clients.filter(isActive).length;
     const mrr = sumMrr(clients);
 
-    // Crescimento em 12 meses: clientes hoje contra os que já existiam há 12 meses.
+    // Crescimento em 12 meses: cliente hoje contra os que já existiam há 12 meses.
     // Sem nenhum cliente com 12 meses de casa não há base de comparação (null, não zero).
     const now = Date.now();
     const timeOf = (c) => (c.createdAt ? new Date(c.createdAt).getTime() : NaN);
@@ -130,8 +130,8 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
   }
 });
 
-// ✅ Crescimento de clientes: novos no mês e total acumulado, sem meses faltando
-router.get('/cliente-growth', verifyToken, requireMaster('Acesso negado: apenas master pode ver crescimento de clientes'), async (req, res) => {
+// ✅ Crescimento de cliente: novos no mês e total acumulado, sem meses faltando
+router.get('/cliente-growth', verifyToken, requireMaster('Acesso negado: apenas master pode ver crescimento de cliente'), async (req, res) => {
   try {
     const perMonth = new Map();
     (await listPlatformClients()).forEach((cliente) => {
@@ -148,17 +148,17 @@ router.get('/cliente-growth', verifyToken, requireMaster('Acesso negado: apenas 
       return { month: monthLabel(key), clients: added, total };
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar crescimento de clientes:', err);
+    console.error('❌ Erro ao buscar crescimento de cliente:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ✅ Eventos por mês (pela data do evento), separados por situação
-router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apenas master pode ver eventos globais'), async (req, res) => {
+router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apenas master pode ver evento globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
       SELECT TO_CHAR(e.data, 'YYYY-MM') AS month, LOWER(COALESCE(e.status, '')) AS status
-      FROM eventos e
+      FROM evento e
       WHERE e.data IS NOT NULL AND ${CUSTOMER_EVENTS}
     `);
     if (!rows.length) return res.json([]);
@@ -187,7 +187,7 @@ router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apena
       };
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar eventos por mês:', err);
+    console.error('❌ Erro ao buscar evento por mês:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -198,7 +198,7 @@ router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso neg
     const rows = await allQuery(`
       SELECT k.criadoEm
       FROM pontoVerificacao k
-      JOIN eventos e ON e.id = k.eventoId
+      JOIN evento e ON e.id = k.eventoId
       WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
         AND ${CUSTOMER_EVENTS}
     `);
@@ -223,7 +223,7 @@ router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso neg
   }
 });
 
-// ✅ Receita por plano (clientes ativos, valor do plano), do maior plano para o menor
+// ✅ Receita por plano (cliente ativos, valor do plano), do maior plano para o menor
 router.get('/revenue-by-plan', verifyToken, requireMaster('Acesso negado: apenas master pode ver receita'), async (req, res) => {
   try {
     const active = (await listPlatformClients()).filter(isActive);

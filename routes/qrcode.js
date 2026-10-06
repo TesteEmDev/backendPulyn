@@ -48,7 +48,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, nome, eventoId, empresaId FROM criancas WHERE id = @criancaId',
+      'SELECT id, nome, eventoId, empresaId FROM crianca WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -70,7 +70,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO ""codigosVinculoFamiliar"" (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
+      `INSERT INTO ""codigoVinculoFamiliar"" (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,
@@ -114,7 +114,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, nome, eventoId, empresaId FROM criancas WHERE id = @criancaId',
+      'SELECT id, nome, eventoId, empresaId FROM crianca WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -136,7 +136,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO ""codigosVinculoFamiliar"" (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
+      `INSERT INTO ""codigoVinculoFamiliar"" (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,

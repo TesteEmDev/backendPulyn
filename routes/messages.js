@@ -20,7 +20,7 @@ function requireRole(roles) {
 
 async function getEventForUser(req, eventoId) {
   const event = await queryOne(
-    'SELECT id, empresaId FROM eventos WHERE id = @id',
+    'SELECT id, empresaId FROM evento WHERE id = @id',
     { id: eventoId }
   );
   if (!event) return null;
@@ -42,7 +42,7 @@ function serializeMessage(message) {
   };
 }
 
-router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (req, res) => {
+router.get('/evento/:eventoId', verifyToken, requireRole(READ_ROLES), async (req, res) => {
   try {
     const event = await getEventForUser(req, req.params.eventoId);
     if (event === null) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -52,7 +52,7 @@ router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (re
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
     const messages = await allQuery(`
       SELECT TOP (@limit) id, eventoId, texto, tipo, remetente, enviadoEm
-      FROM mensagensDisplay
+      FROM mensagemDisplay
       WHERE eventoId = @eventoId
       ORDER BY enviadoEm DESC
     `, { eventoId: req.params.eventoId, limit });
@@ -63,7 +63,7 @@ router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (re
   }
 });
 
-router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (req, res) => {
+router.post('/evento/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (req, res) => {
   try {
     const event = await getEventForUser(req, req.params.eventoId);
     if (event === null) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -77,7 +77,7 @@ router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (
 
     const messageId = uuidv4();
     await query(`
-      INSERT INTO mensagensDisplay (id, eventoId, texto, tipo, remetente, enviadoEm)
+      INSERT INTO mensagemDisplay (id, eventoId, texto, tipo, remetente, enviadoEm)
       VALUES (@id, @eventoId, @texto, @tipo, @remetente, CURRENT_TIMESTAMP)
     `, {
       id: messageId,
@@ -88,7 +88,7 @@ router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (
     });
 
     const message = await queryOne(
-      'SELECT id, eventoId, texto, tipo, remetente, enviadoEm FROM mensagensDisplay WHERE id = @id',
+      'SELECT id, eventoId, texto, tipo, remetente, enviadoEm FROM mensagemDisplay WHERE id = @id',
       { id: messageId }
     );
     const serialized = serializeMessage(message);

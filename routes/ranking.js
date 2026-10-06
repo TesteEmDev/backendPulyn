@@ -9,14 +9,14 @@ router.use(verifyToken, (req, res, next) => {
   next();
 });
 
-router.get('/eventos/:eventoId/ranking/criancas', verifyToken, async (req, res) => {
+router.get('/evento/:eventoId/ranking/crianca', verifyToken, async (req, res) => {
   try {
     const empresaId = req.user.empresaId;
     const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresaId FROM eventos WHERE id = @id',
+      'SELECT id, empresaId FROM evento WHERE id = @id',
       { id: eventoId }
     );
     
@@ -32,8 +32,8 @@ router.get('/eventos/:eventoId/ranking/criancas', verifyToken, async (req, res) 
     const ranking = await allQuery(`
       SELECT c.id, c.nome, c.nicknome, c.avatar, c.scores, 
              t.nome as time_nome, t.cor as time_color
-      FROM criancas c
-      LEFT JOIN times t ON c.timeId = t.id
+      FROM crianca c
+      LEFT JOIN time t ON c.timeId = t.id
       WHERE c.eventoId = @eventoId 
         AND (c.empresaId = @empresaId OR @isMaster = 1)
         AND c.status = 'active'
@@ -47,14 +47,14 @@ router.get('/eventos/:eventoId/ranking/criancas', verifyToken, async (req, res) 
   }
 });
 
-router.get('/eventos/:eventoId/ranking/times', verifyToken, async (req, res) => {
+router.get('/evento/:eventoId/ranking/time', verifyToken, async (req, res) => {
   try {
     const empresaId = req.user.empresaId;
     const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresaId FROM eventos WHERE id = @id',
+      'SELECT id, empresaId FROM evento WHERE id = @id',
       { id: eventoId }
     );
     
@@ -69,8 +69,8 @@ router.get('/eventos/:eventoId/ranking/times', verifyToken, async (req, res) => 
     
     const ranking = await allQuery(`
       SELECT t.*, COUNT(c.id) as membros_count
-      FROM times t
-      LEFT JOIN criancas c ON c.timeId = t.id AND c.status = 'active'
+      FROM time t
+      LEFT JOIN crianca c ON c.timeId = t.id AND c.status = 'active'
       WHERE t.eventoId = @eventoId
         AND (t.empresaId = @empresaId OR @isMaster = 1)
       GROUP BY t.id, t.nome, t.cor, t.points, t.criadoEm, t.eventoId, t.empresaId
@@ -79,7 +79,7 @@ router.get('/eventos/:eventoId/ranking/times', verifyToken, async (req, res) => 
     
     res.json(ranking);
   } catch (err) {
-    console.error('❌ Erro ao buscar ranking de times:', err);
+    console.error('❌ Erro ao buscar ranking de time:', err);
     res.status(500).json({ error: err.message });
   }
 });

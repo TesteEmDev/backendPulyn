@@ -1,7 +1,7 @@
 // routes/empresa.js - Dados do próprio buffet (empresa do usuário logado)
 //
 // O cadastro da unidade (nome, e-mail, telefone, endereço e frequência de backup) fica na
-// tabela `clientes`; o CNPJ fica em `empresas`. Ver utils/unitProfileStore.js.
+// tabela `cliente`; o CNPJ fica em `empresa`. Ver utils/unitProfileStore.js.
 const express = require('express');
 const router = express.Router();
 const database = require('../database');
@@ -38,7 +38,7 @@ router.put('/me', async (req, res) => {
       }
       if (digits) {
         const duplicate = await database.queryOne(
-          'SELECT id FROM empresas WHERE cnpj = @cnpj AND id <> @id',
+          'SELECT id FROM empresa WHERE cnpj = @cnpj AND id <> @id',
           { cnpj: digits, id: req.user.empresaId }
         );
         if (duplicate) return res.status(409).json({ error: 'Este CNPJ já está cadastrado em outro buffet.' });
