@@ -128,10 +128,10 @@ router.get(
       const { eventoId } = req.params;
 
       const partidas = await allQuery(
-        `SELECT id, status, round_number, current_team_id, started_at, finished_at
-         FROM zone_conquest_team_partidas
-         WHERE LOWER(evento_id) = LOWER(@eventoId)
-         ORDER BY started_at DESC`,
+        `SELECT id, status, numeroRonda, timeAtualId, iniciadoEm, finalizadoEm
+         FROM zonaConquistaPartidaTime
+         WHERE LOWER(eventoId) = LOWER(@eventoId)
+         ORDER BY iniciadoEm DESC`,
         { eventoId }
       );
 
@@ -163,10 +163,10 @@ router.get(
       const { eventoId } = req.params;
 
       const partidas = await allQuery(
-        `SELECT id, status, version, started_at, finished_at
-         FROM zone_conquest_individual_partidas
-         WHERE LOWER(evento_id) = LOWER(@eventoId)
-         ORDER BY started_at DESC`,
+        `SELECT id, status, versao, iniciadoEm, finalizadoEm
+         FROM zonaConquistaPartidaIndividual
+         WHERE LOWER(eventoId) = LOWER(@eventoId)
+         ORDER BY iniciadoEm DESC`,
         { eventoId }
       );
 

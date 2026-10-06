@@ -26,10 +26,10 @@ router.get('/empresa/:empresa_id', requireRole('admin', 'master'), async (req, r
     }
 
     const users = await allQuery(`
-      SELECT id, email, role, status, data_criacao as created_at
-      FROM logins
-      WHERE empresa_id = @empresa_id
-      ORDER BY data_criacao DESC
+      SELECT loginId, email, perfil, status, dataCriacao as created_at
+      FROM login
+      WHERE empresaId = @empresa_id
+      ORDER BY dataCriacao DESC
     `, { empresa_id });
 
     res.json(users);
@@ -74,7 +74,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
     // Verificar se email já existe (o login ignora maiúsculas/minúsculas)
     const existing = await queryOne(
-      'SELECT id FROM logins WHERE LOWER(email) = LOWER(@email)',
+      'SELECT loginId FROM login WHERE LOWER(email) = LOWER(@email)',
       { email }
     );
 
@@ -94,7 +94,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     // Criar usuário com empresa_id do token
     const id = require('crypto').randomUUID();
     await query(
-      `INSERT INTO logins (id, email, password, role, empresa_id, status, data_criacao)
+      `INSERT INTO login (loginId, email, senha, perfil, empresaId, status, dataCriacao)
        VALUES (@id, @email, @password, @role, @empresa_id, @status, GETDATE())`,
       {
         id,
@@ -132,7 +132,7 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
 
     // Buscar usuário
     const user = await queryOne(
-      'SELECT empresa_id, role, status FROM logins WHERE id = @id',
+      'SELECT empresaId, perfil, status FROM login WHERE loginId = @id',
       { id }
     );
 
@@ -148,8 +148,8 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
     // Não deixar deletar o último admin
     if (user.role === 'admin') {
       const adminCount = await queryOne(`
-        SELECT COUNT(*) as count FROM logins
-        WHERE empresa_id = @empresa_id AND role = 'admin' AND status = 'active'
+        SELECT COUNT(*) as count FROM login
+        WHERE empresaId = @empresa_id AND perfil = 'admin' AND status = 'active'
       `, { empresa_id: user.empresa_id });
 
       if (adminCount.count <= 1) {
@@ -159,10 +159,10 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
 
     // Deletar usuário (soft delete)
     await query(
-      `UPDATE logins 
-       SET status = @status, data_atualizacao = GETDATE() 
-       WHERE id = @id 
-       AND empresa_id = @empresa_id`,
+      `UPDATE login 
+       SET status = @status, dataAtualizacao = GETDATE() 
+       WHERE loginId = @id 
+       AND empresaId = @empresa_id`,
       { id, status: 'inactive', empresa_id: user.empresa_id }
     );
 

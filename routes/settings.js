@@ -20,13 +20,13 @@ function resolveEmpresaId(req) {
 async function upsertSettings(tx, empresaId, entries) {
   for (const [key, value] of entries) {
     const updated = await tx.query(
-      `UPDATE settings SET setting_value = @value, updated_at = CURRENT_TIMESTAMP
-       WHERE setting_key = @key AND empresa_id = @empresaId`,
+      `UPDATE configuracao SET valor = @value, atualizadoEm = CURRENT_TIMESTAMP
+       WHERE chave = @key AND empresaId = @empresaId`,
       { value, key, empresaId }
     );
     if ((updated.rowsAffected?.[0] || 0) === 0) {
       await tx.query(
-        `INSERT INTO settings (setting_key, setting_value, empresa_id)
+        `INSERT INTO configuracao (chave, valor, empresaId)
          VALUES (@key, @value, @empresaId)`,
         { key, value, empresaId }
       );
@@ -39,7 +39,7 @@ router.get('/', verifyToken, async (req, res) => {
     const empresaId = resolveEmpresaId(req);
     if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
     const settings = await allQuery(
-      'SELECT setting_key, setting_value, empresa_id FROM settings WHERE empresa_id = @empresaId ORDER BY setting_key',
+      'SELECT chave, valor, empresaId FROM configuracao WHERE empresaId = @empresaId ORDER BY chave',
       { empresaId }
     );
     res.json(settings || []);
@@ -54,7 +54,7 @@ router.get('/:key', verifyToken, async (req, res) => {
     const empresaId = resolveEmpresaId(req);
     if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
     const rows = await allQuery(
-      'SELECT setting_key, setting_value, empresa_id FROM settings WHERE setting_key = @key AND empresa_id = @empresaId',
+      'SELECT chave, valor, empresaId FROM configuracao WHERE chave = @key AND empresaId = @empresaId',
       { key: req.params.key, empresaId }
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Configuração não encontrada' });

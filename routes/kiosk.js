@@ -29,17 +29,17 @@ router.use(verifyToken, requireRole('kiosk'));
 router.get('/events', async (req, res) => {
   try {
     const events = await require('../database').allQuery(
-      `SELECT e.id, e.name, e.date, e.time, e.duration, e.status,
+      `SELECT e.eventoId, e.nome, e.data, e.hora, e.duracao, e.status,
               CASE WHEN EXISTS (
                 SELECT 1
-                FROM checkpoints c
-                WHERE c.evento_id = e.id
-                  AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) = 'reception'
+                FROM pontoVerificacao c
+                WHERE c.eventoId = e.eventoId
+                  AND LOWER(COALESCE(c.proposito, 'game')) = 'reception'
               ) THEN 1 ELSE 0 END AS has_reception_checkpoint
-       FROM eventos e
-       WHERE e.empresa_id = @empresaId
+       FROM evento e
+       WHERE e.empresaId = @empresaId
          AND LOWER(COALESCE(e.status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
-       ORDER BY e.date DESC`,
+       ORDER BY e.data DESC`,
       { empresaId: req.user.empresa_id }
     );
     res.json(events || []);
@@ -55,8 +55,8 @@ router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const { queryOne } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
+      `SELECT eventoId, empresaId, status FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresa_id }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -78,18 +78,18 @@ router.get('/events/:eventId/teams', async (req, res) => {
   try {
     const { queryOne, allQuery } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
+      `SELECT eventoId, empresaId, status FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresa_id }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
 
     const teams = await allQuery(
-      `SELECT id, name, color, points
-       FROM times
-       WHERE evento_id = @eventId AND empresa_id = @empresaId
-       ORDER BY name`,
+      `SELECT timeId, nome, cor, pontos
+       FROM time
+       WHERE eventoId = @eventId AND empresaId = @empresaId
+       ORDER BY nome`,
       { eventId: event.id, empresaId: req.user.empresa_id }
     );
     res.json(teams || []);
@@ -107,9 +107,9 @@ router.get('/bracelets/:code', async (req, res) => {
 
     const { queryOne } = require('../database');
     const bracelet = await queryOne(
-      `SELECT code, status, crianca_id, empresa_id
-       FROM pulseiras
-       WHERE ${uidSqlExpression('code')} = @code`,
+      `SELECT codigo, status, criancaId, empresaId
+       FROM pulseira
+       WHERE ${uidSqlExpression('codigo')} = @code`,
       { code }
     );
 
@@ -150,8 +150,8 @@ router.post('/participants', async (req, res) => {
 
     const participant = await withTransaction(async (tx) => {
       const event = await tx.queryOne(
-        `SELECT id, empresa_id, status FROM eventos
-         WHERE id = @eventId AND empresa_id = @empresaId`,
+        `SELECT eventoId, empresaId, status FROM evento
+         WHERE eventoId = @eventId AND empresaId = @empresaId`,
         { eventId, empresaId: req.user.empresa_id }
       );
       if (!event) throw httpError('Evento não encontrado', 404);
@@ -160,17 +160,17 @@ router.post('/participants', async (req, res) => {
       let team = null;
       if (timeId) {
         team = await tx.queryOne(
-          `SELECT id, name FROM times
-           WHERE id = @timeId AND evento_id = @eventId AND empresa_id = @empresaId`,
+          `SELECT timeId, nome FROM time
+           WHERE timeId = @timeId AND eventoId = @eventId AND empresaId = @empresaId`,
           { timeId, eventId, empresaId: event.empresa_id }
         );
         if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
       }
 
       let bracelet = await tx.queryOne(
-        `SELECT code, status, crianca_id, empresa_id
-         FROM pulseiras
-         WHERE ${uidSqlExpression('code')} = @code`,
+        `SELECT codigo, status, criancaId, empresaId
+         FROM pulseira
+         WHERE ${uidSqlExpression('codigo')} = @code`,
         { code }
       );
 
@@ -179,7 +179,7 @@ router.post('/participants', async (req, res) => {
       }
       if (!bracelet) {
         await tx.query(
-          `INSERT INTO pulseiras (code, status, empresa_id, created_at)
+          `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
            VALUES (@code, 'disponivel', @empresaId, GETDATE())`,
           { code, empresaId: event.empresa_id }
         );
@@ -192,8 +192,8 @@ router.post('/participants', async (req, res) => {
 
       const childId = uuidv4();
       await tx.query(
-        `INSERT INTO criancas
-          (id, evento_id, empresa_id, time_id, name, nickname, age, avatar, bracelet_code, scores)
+        `INSERT INTO crianca
+          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos)
          VALUES (@id, @eventId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @code, 0)`,
         {
           id: childId,
@@ -209,12 +209,12 @@ router.post('/participants', async (req, res) => {
       );
 
       const braceletUpdate = await tx.query(
-        `UPDATE pulseiras
-         SET status = 'em_uso', crianca_id = @childId
-         WHERE ${uidSqlExpression('code')} = @code
-           AND empresa_id = @empresaId
+        `UPDATE pulseira
+         SET status = 'em_uso', criancaId = @childId
+         WHERE ${uidSqlExpression('codigo')} = @code
+           AND empresaId = @empresaId
            AND status = 'disponivel'
-           AND crianca_id IS NULL`,
+           AND criancaId IS NULL`,
         { code, childId, empresaId: event.empresa_id }
       );
       if ((braceletUpdate.rowsAffected?.[0] || 0) === 0) {

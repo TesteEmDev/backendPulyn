@@ -13,20 +13,20 @@ router.get('/', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master vê todas as pulseiras (exceto as da Master Admin)
       pulseiras = await allQuery(`
-        SELECT p.code, p.status, p.crianca_id, c.name as crianca_name, p.empresa_id
-        FROM pulseiras p
-        LEFT JOIN criancas c ON p.crianca_id = c.id
-        LEFT JOIN empresas e ON p.empresa_id = e.id
+        SELECT p.codigo, p.status, p.criancaId, c.nome as crianca_name, p.empresaId
+        FROM pulseira p
+        LEFT JOIN crianca c ON p.criancaId = c.criancaId
+        LEFT JOIN empresa e ON p.empresaId = e.empresaId
         WHERE e.nome != 'Master Admin'
-        ORDER BY p.code
+        ORDER BY p.codigo
       `);
     } else {
       pulseiras = await allQuery(`
-        SELECT p.code, p.status, p.crianca_id, c.name as crianca_name, p.empresa_id
-        FROM pulseiras p
-        LEFT JOIN criancas c ON p.crianca_id = c.id
-        WHERE p.empresa_id = @empresa_id
-        ORDER BY p.code
+        SELECT p.codigo, p.status, p.criancaId, c.nome as crianca_name, p.empresaId
+        FROM pulseira p
+        LEFT JOIN crianca c ON p.criancaId = c.criancaId
+        WHERE p.empresaId = @empresa_id
+        ORDER BY p.codigo
       `, { empresa_id });
     }
     
@@ -49,14 +49,14 @@ router.post('/', verifyToken, async (req, res) => {
     }
     
     const existing = await queryOne(
-      `SELECT code FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
+      `SELECT codigo FROM pulseira WHERE ${uidSqlExpression('codigo')} = @code`,
       { code: codeUpper }
     );
     if (existing) {
       return res.status(400).json({ error: 'Pulseira já cadastrada!' });
     }
     
-    await query('INSERT INTO pulseiras (code, status, empresa_id, created_at) VALUES (@code, @status, @empresa_id, GETDATE())', 
+    await query('INSERT INTO pulseira (codigo, status, empresaId, criadoEm) VALUES (@code, @status, @empresa_id, GETDATE())', 
       { code: codeUpper, status: 'disponivel', empresa_id });
     
     res.json({ code: codeUpper, status: 'disponivel', empresa_id, crianca_id: null, crianca_name: null });
@@ -85,7 +85,7 @@ router.put('/:code/status', verifyToken, async (req, res) => {
     // Verificar que a pulseira pertence à empresa (ou master)
     const normalizedCode = normalizeUid(code);
     const pulseira = await queryOne(
-      `SELECT empresa_id, crianca_id FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
+      `SELECT empresaId, criancaId FROM pulseira WHERE ${uidSqlExpression('codigo')} = @code`,
       { code: normalizedCode }
     );
     
@@ -100,17 +100,17 @@ router.put('/:code/status', verifyToken, async (req, res) => {
     
     if (status !== 'em_uso' && pulseira.crianca_id) {
       await query(
-        `UPDATE criancas SET bracelet_code = NULL
-         WHERE id = @criancaId AND empresa_id = @empresaId`,
+        `UPDATE crianca SET codigoPulseira = NULL
+         WHERE criancaId = @criancaId AND empresaId = @empresaId`,
         { criancaId: pulseira.crianca_id, empresaId: pulseira.empresa_id }
       );
     }
 
     await query(
-      `UPDATE pulseiras SET status = @status,
-       crianca_id = @criancaId
-       WHERE ${uidSqlExpression('code')} = @code
-       AND empresa_id = @empresa_id`,
+      `UPDATE pulseira SET status = @status,
+       criancaId = @criancaId
+       WHERE ${uidSqlExpression('codigo')} = @code
+       AND empresaId = @empresa_id`,
       {
         code: normalizedCode,
         status,

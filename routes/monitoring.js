@@ -28,20 +28,20 @@ function formatEvent(event) {
 async function loadMonitoringData() {
   const [companies, checkpoints, events] = await Promise.all([
     allQuery(`
-      SELECT id, nome, cidade, estado, status
-      FROM empresas
+      SELECT empresaId, nome, cidade, estado, status
+      FROM empresa
       WHERE nome <> @masterName
       ORDER BY nome
     `, { masterName: 'Master Admin' }),
     allQuery(`
-      SELECT id, evento_id, empresa_id, name, status, last_seen, ip, zone, points
-      FROM checkpoints
-      WHERE LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+      SELECT checkpointId, eventoId, empresaId, nome, status, ultimoVisto, ip, zona, pontos
+      FROM pontoVerificacao
+      WHERE LOWER(COALESCE(proposito, 'game')) <> 'reception'
     `),
     allQuery(`
-      SELECT id, empresa_id, name, [date] AS event_date, [time] AS event_time, created_at
-      FROM eventos
-      WHERE empresa_id IS NOT NULL
+      SELECT eventoId, empresaId, nome, [data] AS event_date, [hora] AS event_time, criadoEm
+      FROM evento
+      WHERE empresaId IS NOT NULL
     `),
   ]);
 

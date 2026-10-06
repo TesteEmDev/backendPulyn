@@ -8,11 +8,11 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
   
   const resultado = await withTransaction(async (tx) => {
     // Buscar evento e jogo
-    const evento = await tx.queryOne('SELECT * FROM eventos WHERE id = @id', { id: eventoId });
+    const evento = await tx.queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: eventoId });
     if (!evento) throw new Error('Evento não encontrado');
 
     const game = await tx.queryOne(
-      'SELECT * FROM brincadeiras WHERE id = @id',
+      'SELECT * FROM brincadeira WHERE brincadeiraId = @id',
       { id: brincadeiraId }
     );
     if (!game) throw new Error('Jogo não encontrado');
@@ -45,10 +45,10 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
 
     // 3. Buscar todas as equipes participantes
     const participatingTeams = await tx.allQuery(`
-      SELECT DISTINCT t.id, t.name
-      FROM times t
-      WHERE t.evento_id = @eventoId
-      ORDER BY t.name`, { eventoId });
+      SELECT DISTINCT t.timeId, t.nome
+      FROM time t
+      WHERE t.eventoId = @eventoId
+      ORDER BY t.nome`, { eventoId });
 
     // 4. Criar state para cada equipe
     for (const team of participatingTeams) {
@@ -184,9 +184,9 @@ async function calculateAndSaveZoneConquestResults(eventoId) {
     const ownership = checkpointDominance[checkpoint_id];
     
     await query(`
-      UPDATE checkpoints
-      SET territory_owner_time_id = @timeId, last_conquered_at = @now
-      WHERE id = @checkpointId`, {
+      UPDATE pontoVerificacao
+      SET territorioDonoTimeId = @timeId, ultimoConquistadoEm = @now
+      WHERE checkpointId = @checkpointId`, {
       checkpointId: checkpoint_id,
       timeId: ownership.time_id,
       now,
@@ -206,8 +206,8 @@ async function recordZoneConquestScan(eventoId, checkpointId, criancaId, timeId,
 
   // 2. Buscar jogo ativo
   const brincadeira = await queryOne(`
-    SELECT id FROM brincadeiras
-    WHERE evento_id = @eventoId AND status = 'active'`, { eventoId });
+    SELECT brincadeiraId FROM brincadeira
+    WHERE eventoId = @eventoId AND status = 'active'`, { eventoId });
 
   // 3. Registrar scan
   const scanId = uuidv4();

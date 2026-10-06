@@ -18,17 +18,17 @@ router.get('/', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master vê todos os times (exceto os da Master Admin)
       times = await allQuery(`
-        SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
-        FROM times t
-        LEFT JOIN empresas e ON t.empresa_id = e.id
+        SELECT t.*, (SELECT COUNT(*) FROM crianca c WHERE c.timeId = t.timeId) AS members_count
+        FROM time t
+        LEFT JOIN empresa e ON t.empresaId = e.empresaId
         WHERE e.nome != 'Master Admin'
-        ORDER BY t.name
+        ORDER BY t.nome
       `);
       console.log(`✅ ${times.length} times (master - TODAS as empresas, exceto Master Admin)`);
     } else {
       times = await allQuery(
-        `SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
-         FROM times t WHERE t.empresa_id = @empresa_id ORDER BY t.name`,
+        `SELECT t.*, (SELECT COUNT(*) FROM crianca c WHERE c.timeId = t.timeId) AS members_count
+         FROM time t WHERE t.empresaId = @empresa_id ORDER BY t.nome`,
         { empresa_id }
       );
       console.log(`✅ ${times.length} times da empresa ${empresa_id}`);
@@ -45,7 +45,7 @@ router.get('/', verifyToken, async (req, res) => {
 router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const templates = await allQuery(
-      'SELECT id, name, color, created_at FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
+      'SELECT timeId, nome, cor, criadoEm FROM time WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, nome',
       { empresaId: req.user.empresa_id }
     );
     res.json(templates);
@@ -59,7 +59,7 @@ router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, 
 router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id',
       { evento_id: req.params.evento_id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -69,20 +69,20 @@ router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_
 
     const result = await withTransaction(async (tx) => {
       const templates = await tx.allQuery(
-        'SELECT name, color FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
+        'SELECT nome, cor FROM time WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, nome',
         { empresaId: evento.empresa_id }
       );
       if (templates.length === 0) return { error: 'Cadastre os times padrão antes de aplicá-los a um evento.' };
 
       const existing = await tx.allQuery(
-        'SELECT name FROM times WHERE evento_id = @eventoId AND empresa_id = @empresaId',
+        'SELECT nome FROM time WHERE eventoId = @eventoId AND empresaId = @empresaId',
         { eventoId: evento.id, empresaId: evento.empresa_id }
       );
       const toCreate = planDefaultTeams({ templates, existingTeams: existing });
       for (const team of toCreate) {
         await tx.query(
           // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
-          `INSERT INTO times (id, evento_id, empresa_id, name, color, points)
+          `INSERT INTO time (timeId, eventoId, empresaId, nome, cor, pontos)
            VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
           { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresa_id, name: team.name, color: team.color }
         );
@@ -103,16 +103,16 @@ router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_
 router.get('/eventos/:evento_id/times', verifyToken, async (req, res) => {
   try {
     const empresa_id = req.user.empresa_id;
-    const evento = await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @evento_id', { evento_id: req.params.evento_id });
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id', { evento_id: req.params.evento_id });
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isMaster(req) && evento.empresa_id !== empresa_id) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
     const times = await allQuery(
-      `SELECT * FROM times 
-       WHERE evento_id = @evento_id AND (empresa_id = @empresa_id OR @isMaster = 1)
-       ORDER BY points DESC`,
+      `SELECT * FROM time 
+       WHERE eventoId = @evento_id AND (empresaId = @empresa_id OR @isMaster = 1)
+       ORDER BY pontos DESC`,
       { evento_id: req.params.evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 }
     );
 
@@ -133,14 +133,14 @@ router.post('/', verifyToken, async (req, res) => {
     }
 
     const evento = evento_id
-      ? await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @evento_id', { evento_id })
+      ? await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id', { evento_id })
       : null;
     if (evento_id && !evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (evento && !isMaster(req) && evento.empresa_id !== empresa_id) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     const targetEmpresaId = evento?.empresa_id || empresa_id;
-    const empresa = await queryOne('SELECT id FROM empresas WHERE id = @id', { id: targetEmpresaId });
+    const empresa = await queryOne('SELECT empresaId FROM empresa WHERE empresaId = @id', { id: targetEmpresaId });
     if (!empresa) return res.status(403).json({ error: 'Empresa não encontrada' });
 
     // ✅ CRIAR
@@ -148,7 +148,7 @@ router.post('/', verifyToken, async (req, res) => {
 
     await query(
       // A pontuação nunca vem do cliente: todo time novo começa com 0 ponto.
-      `INSERT INTO times (id, evento_id, empresa_id, name, color, points) 
+      `INSERT INTO time (timeId, eventoId, empresaId, nome, cor, pontos) 
        VALUES (@id, @evento_id, @empresa_id, @name, @color, 0)`,
       { id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color }
     );
@@ -169,7 +169,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresa_id FROM times WHERE id = @id',
+      'SELECT empresaId FROM time WHERE timeId = @id',
       { id: req.params.id }
     );
 
@@ -183,7 +183,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // ✅ ATUALIZAR
     await query(
-      'UPDATE times SET name = @name, color = @color WHERE id = @id',
+      'UPDATE time SET nome = @name, cor = @color WHERE timeId = @id',
       { name, color, id: req.params.id }
     );
 
@@ -201,7 +201,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresa_id FROM times WHERE id = @id',
+      'SELECT empresaId FROM time WHERE timeId = @id',
       { id: req.params.id }
     );
 
@@ -214,7 +214,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
     }
 
     // ✅ DELETAR
-    await query('DELETE FROM times WHERE id = @id', { id: req.params.id });
+    await query('DELETE FROM time WHERE timeId = @id', { id: req.params.id });
 
     console.log(`✅ Time deletado: ${req.params.id}`);
     res.json({ deleted: true });
@@ -235,7 +235,7 @@ router.post(
       if (!DISTRIBUTION_MODES.has(mode)) return res.status(400).json({ error: 'Modo de distribuição inválido' });
 
       const evento = await queryOne(
-        'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+        'SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id',
         { evento_id: req.params.evento_id }
       );
       if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -245,7 +245,7 @@ router.post(
 
       const result = await withTransaction(async (tx) => {
         const teams = await tx.allQuery(
-          'SELECT id, name FROM times WHERE evento_id = @eventoId AND empresa_id = @empresaId ORDER BY name',
+          'SELECT timeId, nome FROM time WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY nome',
           { eventoId: evento.id, empresaId: evento.empresa_id }
         );
         if (teams.length < 2) {
@@ -253,14 +253,14 @@ router.post(
         }
 
         const children = await tx.allQuery(
-          'SELECT id, time_id FROM criancas WHERE evento_id = @eventoId AND empresa_id = @empresaId',
+          'SELECT criancaId, timeId FROM crianca WHERE eventoId = @eventoId AND empresaId = @empresaId',
           { eventoId: evento.id, empresaId: evento.empresa_id }
         );
         const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.id), mode });
 
         for (const { criancaId, timeId } of assignments) {
           await tx.query(
-            'UPDATE criancas SET time_id = @timeId WHERE id = @criancaId AND evento_id = @eventoId',
+            'UPDATE crianca SET timeId = @timeId WHERE criancaId = @criancaId AND eventoId = @eventoId',
             { timeId, criancaId, eventoId: evento.id }
           );
         }
@@ -268,15 +268,15 @@ router.post(
         // A pontuação do time é a soma das crianças; recalcula para refletir a nova composição.
         for (const team of teams) {
           await tx.query(
-            `UPDATE times
-             SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
-             WHERE id = @timeId`,
+            `UPDATE time
+             SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
+             WHERE timeId = @timeId`,
             { timeId: team.id }
           );
         }
 
         const sizes = await tx.allQuery(
-          'SELECT time_id, COUNT(*) AS total FROM criancas WHERE evento_id = @eventoId AND time_id IS NOT NULL GROUP BY time_id',
+          'SELECT timeId, COUNT(*) AS total FROM crianca WHERE eventoId = @eventoId AND timeId IS NOT NULL GROUP BY timeId',
           { eventoId: evento.id }
         );
         const totalByTeam = new Map(sizes.map(row => [row.time_id, Number(row.total)]));

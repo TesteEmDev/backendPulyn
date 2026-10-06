@@ -43,17 +43,17 @@ async function findProcessedReading(readingId, checkpoint) {
   if (!readingId) return null;
 
   const existing = await queryOne(
-    `SELECT l.id, l.checkpoint_id, l.authorized, l.points_awarded,
-            l.uid, l.crianca_id, l.brincadeira_id, c.evento_id,
-            c.name AS crianca_name, c.time_id, t.name AS team_name, t.color AS team_color,
-            ms.attack_type AS monster_attack_type, ms.damage AS monster_damage,
-            ms.monster_hp_after, ms.monster_defeated, mp.max_hp AS monster_max_hp
-     FROM leituras l
-     LEFT JOIN criancas c ON c.id = l.crianca_id
-     LEFT JOIN times t ON t.id = c.time_id
-     LEFT JOIN monster_hunt_scans ms ON ms.leitura_id = l.id
-     LEFT JOIN monster_hunt_partidas mp ON mp.id = ms.partida_id
-     WHERE l.id = @readingId`,
+    `SELECT l.leituraId, l.checkpointId, l.autorizado, l.pontosAtribuidos,
+            l.uid, l.criancaId, l.brincadeiraId, c.eventoId,
+            c.nome AS crianca_name, c.timeId, t.nome AS team_name, t.cor AS team_color,
+            ms.tipoAtaque AS monster_attack_type, ms.dano AS monster_damage,
+            ms.vidaMonstroApos, ms.monstroDerrotado, mp.vidaMaxima AS monster_max_hp
+     FROM leitura l
+     LEFT JOIN crianca c ON c.criancaId = l.criancaId
+     LEFT JOIN time t ON t.timeId = c.timeId
+     LEFT JOIN monsterCacaLeitura ms ON ms.leituraId = l.leituraId
+     LEFT JOIN monsterCacaPartida mp ON mp.id = ms.partidaId
+     WHERE l.leituraId = @readingId`,
     { readingId }
   );
 
@@ -68,7 +68,7 @@ async function findProcessedReading(readingId, checkpoint) {
 
 async function sendProcessedReading(res, reading) {
   const game = reading.brincadeira_id
-    ? await queryOne('SELECT type FROM brincadeiras WHERE id = @id', { id: reading.brincadeira_id })
+    ? await queryOne('SELECT tipo FROM brincadeira WHERE brincadeiraId = @id', { id: reading.brincadeira_id })
     : null;
   const isTreasure = game?.type === 'treasure_hunt';
   const isMonster = game?.type === 'monster_hunt' || Boolean(reading.monster_attack_type);
@@ -142,7 +142,7 @@ function broadcastEvent(data) {
 async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameType, teamColor, leituraId, uid, now }) {
   try {
     const coords = await queryOne(
-      'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (coords?.map_x == null || coords?.map_y == null) {
@@ -151,7 +151,7 @@ async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId,
 
     let color = teamColor || crianca.teamColor || null;
     if (!color && crianca.time_id) {
-      const team = await queryOne('SELECT color FROM times WHERE id = @id', { id: crianca.time_id });
+      const team = await queryOne('SELECT cor FROM time WHERE timeId = @id', { id: crianca.time_id });
       color = team?.color || null;
     }
 
@@ -204,7 +204,7 @@ router.post('/reception', async (req, res) => {
     // de qualquer evento ABERTO da mesma empresa. Nenhuma regra de jogo é
     // executada nesta rota.
     const checkpoint = await queryOne(
-      'SELECT id, empresa_id, evento_id, checkpoint_purpose FROM checkpoints WHERE id = @id AND LOWER(COALESCE(checkpoint_purpose, \'game\')) = \'reception\'',
+      'SELECT checkpointId, empresaId, eventoId, proposito FROM pontoVerificacao WHERE checkpointId = @id AND LOWER(COALESCE(proposito, \'game\')) = \'reception\'',
       { id: checkpointId }
     );
 
@@ -213,10 +213,10 @@ router.post('/reception', async (req, res) => {
     }
 
     const pulseira = await queryOne(
-      `SELECT code, status, crianca_id
-       FROM pulseiras
-       WHERE ${uidSqlExpression('code')} = @uid
-         AND LOWER(empresa_id) = LOWER(@empresaId)`,
+      `SELECT codigo, status, criancaId
+       FROM pulseira
+       WHERE ${uidSqlExpression('codigo')} = @uid
+         AND LOWER(empresaId) = LOWER(@empresaId)`,
       { uid: normalizedUid, empresaId: checkpoint.empresa_id }
     );
 
@@ -225,8 +225,8 @@ router.post('/reception', async (req, res) => {
     // checkpoint só entra se ainda estiver aberto; se não houver nenhum aberto,
     // mantém o comportamento antigo (evento do checkpoint).
     const openEvents = await allQuery(
-      `SELECT id FROM eventos
-       WHERE LOWER(empresa_id) = LOWER(@empresaId)
+      `SELECT eventoId FROM evento
+       WHERE LOWER(empresaId) = LOWER(@empresaId)
          AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
       { empresaId: checkpoint.empresa_id }
     );
@@ -283,7 +283,7 @@ router.post('/', async (req, res) => {
     }
     
     // O checkpoint define a empresa e o evento da leitura.
-    const checkpoint = await queryOne('SELECT id, empresa_id, evento_id, status, checkpoint_purpose FROM checkpoints WHERE id = @id', { id: checkpointId });
+    const checkpoint = await queryOne('SELECT checkpointId, empresaId, eventoId, status, proposito FROM pontoVerificacao WHERE checkpointId = @id', { id: checkpointId });
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
@@ -321,14 +321,14 @@ router.post('/', async (req, res) => {
     if (!treasureSession || checkpointIsOnline) {
       try {
         await query(
-          `UPDATE checkpoints SET status = 'online', last_seen = @now WHERE id = @checkpointId`,
+          `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now WHERE checkpointId = @checkpointId`,
           { checkpointId, now }
         );
       } catch (err) {
       // Se coluna last_seen não existe ainda, só atualiza o status
       if (err.message.includes('last_seen')) {
         await query(
-          `UPDATE checkpoints SET status = 'online' WHERE id = @checkpointId`,
+          `UPDATE pontoVerificacao SET status = 'online' WHERE checkpointId = @checkpointId`,
           { checkpointId }
         );
       } else {
@@ -340,9 +340,9 @@ router.post('/', async (req, res) => {
     // A pulseira precisa existir, pertencer à mesma empresa e estar ativa.
     // Isso evita processar uma criança cujo vínculo foi removido ou bloqueado.
     const pulseira = await queryOne(
-      `SELECT code, empresa_id, status, crianca_id
-       FROM pulseiras
-       WHERE ${uidSqlExpression('code')} = @uid`,
+      `SELECT codigo, empresaId, status, criancaId
+       FROM pulseira
+       WHERE ${uidSqlExpression('codigo')} = @uid`,
       { uid: normalizedUid }
     );
 
@@ -373,9 +373,9 @@ router.post('/', async (req, res) => {
     }
 
     const crianca = await queryOne(
-      `SELECT c.* FROM criancas c
-       WHERE c.id = @criancaId
-         AND ${uidSqlExpression('c.bracelet_code')} = @uid`,
+      `SELECT c.* FROM crianca c
+       WHERE c.criancaId = @criancaId
+         AND ${uidSqlExpression('c.codigoPulseira')} = @uid`,
       { criancaId: pulseira.crianca_id, uid: normalizedUid }
     );
 
@@ -443,7 +443,7 @@ router.post('/', async (req, res) => {
     }
     
     // ✨ NOVO: Validar se o evento está ACTIVE antes de processar pontos
-    const evento = await queryOne('SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@id)', { id: crianca.evento_id });
+    const evento = await queryOne('SELECT eventoId, status FROM evento WHERE LOWER(eventoId) = LOWER(@id)', { id: crianca.evento_id });
     
     // Caça ao Monstro tem prioridade sobre o fluxo de território e confirma
     // scan, HP, vencedor e leitura na mesma transação.
@@ -463,9 +463,9 @@ router.post('/', async (req, res) => {
             });
             if (result?.accepted && !result.alreadyScanned) {
               await tx.query(
-                `INSERT INTO leituras
-                  (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-                   points_awarded, signal_strength, empresa_id, session_id)
+                `INSERT INTO leitura
+                  (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+                   pontosAtribuidos, forcaSinal, empresaId, sessaoId)
                  VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                          0, @signal, @empresaId, @sessionId)`,
                 {
@@ -534,7 +534,7 @@ router.post('/', async (req, res) => {
 
           // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile
           const checkpointData = await queryOne(
-            'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
             { id: checkpointId }
           );
           
@@ -646,9 +646,9 @@ router.post('/', async (req, res) => {
 
         if (result?.accepted && !result.duplicate) {
           await tx.query(
-            `INSERT INTO leituras
-              (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-               points_awarded, signal_strength, empresa_id, session_id)
+            `INSERT INTO leitura
+              (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+               pontosAtribuidos, forcaSinal, empresaId, sessaoId)
              VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                      0, @signal, @empresaId, @sessionId)`,
             {
@@ -687,7 +687,7 @@ router.post('/', async (req, res) => {
         // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile (replicado de Zone)
         if (treasureResult.accepted) {
           const checkpointCoords = await queryOne(
-            'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
             { id: checkpointId }
           );
           
@@ -786,9 +786,9 @@ router.post('/', async (req, res) => {
 
         if (result?.accepted) {
           await tx.query(
-            `INSERT INTO leituras
-              (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-               points_awarded, signal_strength, empresa_id)
+            `INSERT INTO leitura
+              (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+               pontosAtribuidos, forcaSinal, empresaId)
              VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                      0, @signal, @empresaId)`,
             {
@@ -839,7 +839,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const checkpointData = await queryOne('SELECT * FROM checkpoints WHERE id = @id', { id: checkpointId });
+    const checkpointData = await queryOne('SELECT * FROM pontoVerificacao WHERE checkpointId = @id', { id: checkpointId });
     
     if (!checkpointData) {
       return res.json({ ok: true, registered: true, braceletCode: normalizedUid, message: 'Pulseira cadastrada' });
@@ -854,10 +854,10 @@ router.post('/', async (req, res) => {
     if (zoneConquestTeamGame || zoneConquestIndividualGame) {
       try {
         const activeSession = await queryOne(
-          `SELECT id FROM game_sessions 
-           WHERE LOWER(evento_id) = LOWER(@eventoId) 
+          `SELECT id FROM sessaoJogo 
+           WHERE LOWER(eventoId) = LOWER(@eventoId) 
              AND status = 'active'
-           ORDER BY started_at DESC
+           ORDER BY iniciadoEm DESC
            LIMIT 1`,
           { eventoId: checkpoint.evento_id }
         );
@@ -1058,20 +1058,20 @@ router.post('/', async (req, res) => {
     // juntos. Se qualquer escrita falhar, toda a operação é desfeita.
     const transactionResult = await withTransaction(async (tx) => {
       const territoryUpdate = await tx.query(`
-        UPDATE checkpoints SET
-          territory_owner_time_id = @timeId,
-          territory_locked_until = @lockedUntil,
-          territory_cooldown_until = @cooldownUntil,
-          last_conquered_at = @now
-        WHERE id = @checkpointId
-          AND evento_id = @eventoId
-          AND empresa_id = @empresaId
-          AND (territory_locked_until IS NULL OR territory_locked_until <= @now)
+        UPDATE pontoVerificacao SET
+          territorioDonoTimeId = @timeId,
+          territorioTravadoAte = @lockedUntil,
+          territorioCooldownAte = @cooldownUntil,
+          ultimoConquistadoEm = @now
+        WHERE checkpointId = @checkpointId
+          AND eventoId = @eventoId
+          AND empresaId = @empresaId
+          AND (territorioTravadoAte IS NULL OR territorioTravadoAte <= @now)
           AND (
-            territory_owner_time_id IS NULL
-            OR LOWER(CAST(territory_owner_time_id AS VARCHAR(36))) <> LOWER(CAST(@timeId AS VARCHAR(36)))
-            OR territory_cooldown_until IS NULL
-            OR territory_cooldown_until <= @now
+            territorioDonoTimeId IS NULL
+            OR LOWER(CAST(territorioDonoTimeId AS VARCHAR(36))) <> LOWER(CAST(@timeId AS VARCHAR(36)))
+            OR territorioCooldownAte IS NULL
+            OR territorioCooldownAte <= @now
           )
       `, {
         timeId: crianca.time_id,
@@ -1088,20 +1088,20 @@ router.post('/', async (req, res) => {
       }
 
       await tx.query(
-        'UPDATE criancas SET scores = scores + @points WHERE id = @criancaId',
+        'UPDATE crianca SET pontos = pontos + @points WHERE criancaId = @criancaId',
         { points: pointsAwarded, criancaId: crianca.id }
       );
 
       await tx.query(
-        `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
-         WHERE id = @timeId`,
+        `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
+         WHERE timeId = @timeId`,
         { timeId: crianca.time_id }
       );
 
       await tx.query(
-        `INSERT INTO leituras
-          (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-           points_awarded, signal_strength, empresa_id, session_id)
+        `INSERT INTO leitura
+          (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+           pontosAtribuidos, forcaSinal, empresaId, sessaoId)
          VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                  @points, @signal, @empresaId, @sessionId)`,
         {
@@ -1119,8 +1119,8 @@ router.post('/', async (req, res) => {
       console.log(`   📝 [LEITURA] Inserida com session_id=${global.currentSessionId || 'NULL'}`);
 
       await tx.query(
-        `INSERT INTO pontuacoes
-          (id, evento_id, crianca_id, brincadeira_id, checkpoint_id, points, leitura_id, empresa_id)
+        `INSERT INTO pontuacao
+          (pontuacaoId, eventoId, criancaId, brincadeiraId, checkpointId, pontos, leituraId, empresaId)
          VALUES (@id, @eventoId, @criancaId, @brincadeiraId, @checkpointId, @points, @leituraId, @empresaId)`,
         {
           id: uuidv4(),
@@ -1134,7 +1134,7 @@ router.post('/', async (req, res) => {
         }
       );
 
-      const time = await tx.queryOne('SELECT color FROM times WHERE id = @id', { id: crianca.time_id });
+      const time = await tx.queryOne('SELECT cor FROM time WHERE timeId = @id', { id: crianca.time_id });
       return {
         conflict: false,
         teamColor: time?.color || '#00AA00',
@@ -1143,7 +1143,7 @@ router.post('/', async (req, res) => {
 
     if (transactionResult.conflict) {
       const current = await queryOne(
-        'SELECT territory_locked_until, territory_cooldown_until, territory_owner_time_id FROM checkpoints WHERE id = @id',
+        'SELECT territorioTravadoAte, territorioCooldownAte, territorioDonoTimeId FROM pontoVerificacao WHERE checkpointId = @id',
         { id: checkpointId }
       );
       const currentLocked = current?.territory_locked_until && new Date(current.territory_locked_until) > now;
@@ -1185,7 +1185,7 @@ router.post('/', async (req, res) => {
     
     // 📍 Buscar coordenadas do checkpoint para rastreio no mobile
     const checkpointCoords = await queryOne(
-      'SELECT map_x, map_y FROM checkpoints WHERE id = @id',
+      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     
@@ -1262,7 +1262,7 @@ router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
     
     // Validar acesso ao evento
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: eventoId }
     );
     
@@ -1313,7 +1313,7 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
     const sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
 
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -1328,45 +1328,45 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
       console.log(`   🔍 [HISTORICO] Filtrando por session_id=${sessionId}`);
       history = await allQuery(`
         SELECT TOP (@limit)
-          l.id,
-          c.evento_id,
-          l.crianca_id AS child_id,
-          c.name AS child_name,
-          c.nickname AS child_nickname,
-          l.checkpoint_id,
-          cp.name AS checkpoint_name,
-          l.points_awarded AS points,
-          l.created_at,
-          t.color AS team_color
-        FROM leituras l
-        LEFT JOIN criancas c ON c.id = l.crianca_id
-        LEFT JOIN checkpoints cp ON cp.id = l.checkpoint_id
-        LEFT JOIN times t ON t.id = c.time_id
-        WHERE LOWER(c.evento_id) = LOWER(@eventoId)
-          AND l.session_id = @sessionId
-          AND (l.empresa_id = @empresaId OR @master = 1)
-        ORDER BY l.created_at DESC
+          l.leituraId,
+          c.eventoId,
+          l.criancaId AS child_id,
+          c.nome AS child_name,
+          c.apelido AS child_nickname,
+          l.checkpointId,
+          cp.nome AS checkpoint_name,
+          l.pontosAtribuidos AS points,
+          l.criadoEm,
+          t.cor AS team_color
+        FROM leitura l
+        LEFT JOIN crianca c ON c.criancaId = l.criancaId
+        LEFT JOIN pontoVerificacao cp ON cp.checkpointId = l.checkpointId
+        LEFT JOIN time t ON t.timeId = c.timeId
+        WHERE LOWER(c.eventoId) = LOWER(@eventoId)
+          AND l.sessaoId = @sessionId
+          AND (l.empresaId = @empresaId OR @master = 1)
+        ORDER BY l.criadoEm DESC
       `, { limit, eventoId, empresaId, master, sessionId });
     } else {
       history = await allQuery(`
         SELECT TOP (@limit)
-          p.id,
-          p.evento_id,
-          p.crianca_id AS child_id,
-          c.name AS child_name,
-          c.nickname AS child_nickname,
-          p.checkpoint_id,
-          cp.name AS checkpoint_name,
-          p.points,
-          p.created_at,
-          t.color AS team_color
-        FROM pontuacoes p
-        LEFT JOIN criancas c ON c.id = p.crianca_id
-        LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
-        LEFT JOIN times t ON t.id = c.time_id
-        WHERE LOWER(p.evento_id) = LOWER(@eventoId)
-          AND (p.empresa_id = @empresaId OR @master = 1)
-        ORDER BY p.created_at DESC
+          p.pontuacaoId,
+          p.eventoId,
+          p.criancaId AS child_id,
+          c.nome AS child_name,
+          c.apelido AS child_nickname,
+          p.checkpointId,
+          cp.nome AS checkpoint_name,
+          p.pontos,
+          p.criadoEm,
+          t.cor AS team_color
+        FROM pontuacao p
+        LEFT JOIN crianca c ON c.criancaId = p.criancaId
+        LEFT JOIN pontoVerificacao cp ON cp.checkpointId = p.checkpointId
+        LEFT JOIN time t ON t.timeId = c.timeId
+        WHERE LOWER(p.eventoId) = LOWER(@eventoId)
+          AND (p.empresaId = @empresaId OR @master = 1)
+        ORDER BY p.criadoEm DESC
       `, { limit, eventoId, empresaId, master });
 
       // O app dos pais usa este histórico para saber por qual checkpoint cada
@@ -1377,25 +1377,25 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
       if (req.query.allGames === '1') {
         const extra = await allQuery(`
           SELECT TOP (@limit)
-            l.id,
-            c.evento_id,
-            l.crianca_id AS child_id,
-            c.name AS child_name,
-            c.nickname AS child_nickname,
-            l.checkpoint_id,
-            cp.name AS checkpoint_name,
-            l.points_awarded AS points,
-            l.created_at,
-            t.color AS team_color
-          FROM leituras l
-          LEFT JOIN criancas c ON c.id = l.crianca_id
-          LEFT JOIN checkpoints cp ON cp.id = l.checkpoint_id
-          LEFT JOIN times t ON t.id = c.time_id
-          WHERE LOWER(c.evento_id) = LOWER(@eventoId)
-            AND l.authorized = 1
-            AND (l.empresa_id = @empresaId OR @master = 1)
-            AND NOT EXISTS (SELECT 1 FROM pontuacoes p WHERE p.leitura_id = l.id)
-          ORDER BY l.created_at DESC
+            l.leituraId,
+            c.eventoId,
+            l.criancaId AS child_id,
+            c.nome AS child_name,
+            c.apelido AS child_nickname,
+            l.checkpointId,
+            cp.nome AS checkpoint_name,
+            l.pontosAtribuidos AS points,
+            l.criadoEm,
+            t.cor AS team_color
+          FROM leitura l
+          LEFT JOIN crianca c ON c.criancaId = l.criancaId
+          LEFT JOIN pontoVerificacao cp ON cp.checkpointId = l.checkpointId
+          LEFT JOIN time t ON t.timeId = c.timeId
+          WHERE LOWER(c.eventoId) = LOWER(@eventoId)
+            AND l.autorizado = 1
+            AND (l.empresaId = @empresaId OR @master = 1)
+            AND NOT EXISTS (SELECT 1 FROM pontuacao p WHERE p.leituraId = l.leituraId)
+          ORDER BY l.criadoEm DESC
         `, { limit, eventoId, empresaId, master });
 
         history = [...history, ...extra]

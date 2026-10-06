@@ -29,22 +29,22 @@ function isBraceletReleaseDue(endedAt, now = new Date(), delayMs = BRACELET_RELE
 async function releaseBraceletsWith(db, eventoId) {
   // Pela ligação da pulseira com a criança...
   const byLink = await db.query(
-    `UPDATE pulseiras SET status = 'disponivel', crianca_id = NULL
-     WHERE crianca_id IN (SELECT id FROM criancas WHERE LOWER(evento_id) = LOWER(@eventoId))`,
+    `UPDATE pulseira SET status = 'disponivel', criancaId = NULL
+     WHERE criancaId IN (SELECT criancaId FROM crianca WHERE LOWER(eventoId) = LOWER(@eventoId))`,
     { eventoId }
   );
   // ...e pelo código guardado na criança (cobre vínculo que ficou só de um lado).
   const byCode = await db.query(
-    `UPDATE pulseiras SET status = 'disponivel', crianca_id = NULL
+    `UPDATE pulseira SET status = 'disponivel', criancaId = NULL
      WHERE status <> 'disponivel'
-       AND code IN (SELECT bracelet_code FROM criancas
-                    WHERE LOWER(evento_id) = LOWER(@eventoId) AND bracelet_code IS NOT NULL)`,
+       AND codigo IN (SELECT codigoPulseira FROM crianca
+                    WHERE LOWER(eventoId) = LOWER(@eventoId) AND codigoPulseira IS NOT NULL)`,
     { eventoId }
   );
   // A criança guarda qual pulseira usou (last_bracelet_code) para os relatórios; só o vínculo é desfeito.
   const cleared = await db.query(
-    `UPDATE criancas SET last_bracelet_code = bracelet_code, bracelet_code = NULL
-     WHERE LOWER(evento_id) = LOWER(@eventoId) AND bracelet_code IS NOT NULL`,
+    `UPDATE crianca SET ultimaPulseira = codigoPulseira, codigoPulseira = NULL
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND codigoPulseira IS NOT NULL`,
     { eventoId }
   );
   return {
@@ -61,15 +61,15 @@ function releaseBraceletsForEvent(eventoId) {
 // Uma varredura: libera as pulseiras dos eventos encerrados há 10 minutos ou mais que ainda as têm.
 async function runBraceletReleaseTick({ now = new Date() } = {}) {
   const candidates = await allQuery(
-    `SELECT e.id, e.empresa_id, e.name, e.ended_at
-     FROM eventos e
+    `SELECT e.eventoId, e.empresaId, e.nome, e.finalizadoEm
+     FROM evento e
      WHERE LOWER(COALESCE(e.status, '')) IN ('finished', 'completed')
-       AND e.ended_at IS NOT NULL
+       AND e.finalizadoEm IS NOT NULL
        AND (
-         EXISTS (SELECT 1 FROM criancas c
-                 WHERE LOWER(c.evento_id) = LOWER(e.id) AND c.bracelet_code IS NOT NULL)
-         OR EXISTS (SELECT 1 FROM pulseiras p JOIN criancas c ON c.id = p.crianca_id
-                    WHERE LOWER(c.evento_id) = LOWER(e.id))
+         EXISTS (SELECT 1 FROM crianca c
+                 WHERE LOWER(c.eventoId) = LOWER(e.eventoId) AND c.codigoPulseira IS NOT NULL)
+         OR EXISTS (SELECT 1 FROM pulseira p JOIN crianca c ON c.criancaId = p.criancaId
+                    WHERE LOWER(c.eventoId) = LOWER(e.eventoId))
        )`
   );
 

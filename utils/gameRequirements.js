@@ -54,7 +54,7 @@ async function checkGameStartRequirements(eventoId, game) {
   const row = game && typeof game === 'object' && 'type' in game && 'checkpoints' in game
     ? game
     : await queryOne(
-      'SELECT id, name, type, game_type, checkpoints FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
+      'SELECT brincadeiraId, nome, tipo, tipoJogo, checkpoints FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id)',
       { id: typeof game === 'object' ? game?.id : game }
     );
 
@@ -62,9 +62,9 @@ async function checkGameStartRequirements(eventoId, game) {
   const required = MIN_CHECKPOINTS[kind];
 
   const online = await allQuery(
-    `SELECT id FROM checkpoints
-     WHERE LOWER(evento_id) = LOWER(@eventoId)
-       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+    `SELECT checkpointId FROM pontoVerificacao
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
+       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
        AND LOWER(COALESCE(status, 'offline')) = 'online'`,
     { eventoId }
   );

@@ -11,11 +11,11 @@ const { refreshMonsterSpecialAfterListChange } = require('../utils/monster');
 // Eventos em que uma partida deste jogo (Tesouro ou Monstro) está em andamento agora.
 async function eventsRunningGame(gameId) {
   const rows = await allQuery(
-    `SELECT evento_id, 'treasure_hunt' AS kind FROM caca_tesouro_partidas
-       WHERE LOWER(brincadeira_id) = LOWER(@gameId) AND status = 'active'
+    `SELECT eventoId, 'treasure_hunt' AS kind FROM cacaTesourPartida
+       WHERE LOWER(brincadeiraId) = LOWER(@gameId) AND status = 'active'
      UNION
-     SELECT evento_id, 'monster_hunt' AS kind FROM monster_hunt_partidas
-       WHERE LOWER(brincadeira_id) = LOWER(@gameId) AND status = 'active'`,
+     SELECT eventoId, 'monster_hunt' AS kind FROM monsterCacaPartida
+       WHERE LOWER(brincadeiraId) = LOWER(@gameId) AND status = 'active'`,
     { gameId }
   );
   return rows.map(row => ({ eventoId: row.evento_id, kind: row.kind }));
@@ -77,14 +77,14 @@ router.get('/', verifyToken, async (req, res) => {
     const empresa_id = req.user.empresa_id;
     const evento_id = req.query.evento_id ? String(req.query.evento_id) : null;
 
-    let whereClause = `b.empresa_id = @empresa_id
+    let whereClause = `b.empresaId = @empresa_id
       AND LOWER(COALESCE(b.status, 'active')) <> 'archived'`;
-    let eventoSelect = 'b.evento_id';
+    let eventoSelect = 'b.eventoId';
     const params = { empresa_id };
 
     if (evento_id) {
       const evento = await queryOne(
-        'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@evento_id)',
+        'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@evento_id)',
         { evento_id }
       );
       if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -94,15 +94,15 @@ router.get('/', verifyToken, async (req, res) => {
 
       // O evento é a fonte do escopo. Aceita tanto o vínculo direto quanto o legado
       // em evento_brincadeiras, sempre mantendo o isolamento pela empresa do evento.
-      whereClause = `LOWER(b.empresa_id) = LOWER(@evento_empresa_id)
+      whereClause = `LOWER(b.empresaId) = LOWER(@evento_empresa_id)
         AND LOWER(COALESCE(b.status, 'active')) <> 'archived'
         AND (
-          LOWER(b.evento_id) = LOWER(@evento_id)
+          LOWER(b.eventoId) = LOWER(@evento_id)
           OR EXISTS (
             SELECT 1
-            FROM evento_brincadeiras eb
-            WHERE LOWER(eb.brincadeira_id) = LOWER(b.id)
-              AND LOWER(eb.evento_id) = LOWER(@evento_id)
+            FROM eventoBrincadeira eb
+            WHERE LOWER(eb.brincadeiraId) = LOWER(b.brincadeiraId)
+              AND LOWER(eb.eventoId) = LOWER(@evento_id)
           )
         )`;
       eventoSelect = '@evento_id AS evento_id';
@@ -112,11 +112,11 @@ router.get('/', verifyToken, async (req, res) => {
 
     console.log(`📋 [BRINCADEIRAS] Buscando jogos${evento_id ? ` do evento ${evento_id}` : ''}`);
     const brincadeiras = await allQuery(
-      `SELECT b.id, b.name, b.description, b.rules, b.type, b.duration, b.default_points,
-              b.empresa_id, b.status, ${eventoSelect}, b.checkpoints
-       FROM brincadeiras b
+      `SELECT b.brincadeiraId, b.nome, b.descricao, b.regras, b.tipo, b.duracao, b.pontosPadrao,
+              b.empresaId, b.status, ${eventoSelect}, b.checkpoints
+       FROM brincadeira b
        WHERE ${whereClause}
-       ORDER BY b.name`,
+       ORDER BY b.nome`,
       params
     );
 
@@ -147,7 +147,7 @@ router.post('/', verifyToken, async (req, res) => {
     }
 
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id',
       { evento_id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -163,10 +163,10 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
     }
     const validCheckpoints = await allQuery(
-      `SELECT id FROM checkpoints
-       WHERE evento_id = @evento_id
-         AND empresa_id = @empresa_id
-         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
+      `SELECT checkpointId FROM pontoVerificacao
+       WHERE eventoId = @evento_id
+         AND empresaId = @empresa_id
+         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
       { evento_id, empresa_id: evento.empresa_id }
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
@@ -177,7 +177,7 @@ router.post('/', verifyToken, async (req, res) => {
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
     
     await query(
-      'INSERT INTO brincadeiras (id, name, description, rules, type, duration, default_points, empresa_id, status, evento_id, checkpoints) VALUES (@id, @name, @description, @rules, @type, @duration, @default_points, @empresa_id, @status, @evento_id, @checkpoints)',
+      'INSERT INTO brincadeira (brincadeiraId, nome, descricao, regras, tipo, duracao, pontosPadrao, empresaId, status, eventoId, checkpoints) VALUES (@id, @name, @description, @rules, @type, @duration, @default_points, @empresa_id, @status, @evento_id, @checkpoints)',
       { 
         id, 
         name, 
@@ -213,9 +213,9 @@ router.put('/:id', verifyToken, async (req, res) => {
     
     // ✅ Verificar que o jogo pertence à empresa
     const brincadeira = await queryOne(
-      `SELECT id, empresa_id, evento_id, status
-       FROM brincadeiras
-       WHERE id = @id`,
+      `SELECT brincadeiraId, empresaId, eventoId, status
+       FROM brincadeira
+       WHERE brincadeiraId = @id`,
       { id: req.params.id }
     );
     
@@ -235,7 +235,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'evento_id é obrigatório' });
     }
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id',
       { evento_id: targetEventoId }
     );
     if (!evento) {
@@ -252,10 +252,10 @@ router.put('/:id', verifyToken, async (req, res) => {
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
 
     const validCheckpoints = await allQuery(
-      `SELECT id FROM checkpoints
-       WHERE evento_id = @evento_id
-         AND empresa_id = @empresa_id
-         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
+      `SELECT checkpointId FROM pontoVerificacao
+       WHERE eventoId = @evento_id
+         AND empresaId = @empresa_id
+         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
       { evento_id: targetEventoId, empresa_id: evento.empresa_id }
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
@@ -264,10 +264,10 @@ router.put('/:id', verifyToken, async (req, res) => {
     }
 
     await query(
-      `UPDATE brincadeiras SET name = @name, description = @description, rules = @rules, 
-       type = @type, duration = @duration, default_points = @default_points, status = @status,
-       evento_id = @evento_id, checkpoints = @checkpoints
-       WHERE id = @id`,
+      `UPDATE brincadeira SET nome = @name, descricao = @description, regras = @rules, 
+       tipo = @type, duracao = @duration, pontosPadrao = @default_points, status = @status,
+       eventoId = @evento_id, checkpoints = @checkpoints
+       WHERE brincadeiraId = @id`,
       {
         name,
         description,
@@ -302,7 +302,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const game = await queryOne(
-      'SELECT id, name, empresa_id, evento_id, type, status, checkpoints FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
+      'SELECT brincadeiraId, nome, empresaId, eventoId, tipo, status, checkpoints FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id)',
       { id: req.params.id }
     );
     if (!game || String(game.status || '').trim().toLowerCase() === 'archived') {
@@ -317,9 +317,9 @@ router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 
     if (requestedIds.length === 0) return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
 
     const valid = await allQuery(
-      `SELECT id FROM checkpoints
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
-         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
+      `SELECT checkpointId FROM pontoVerificacao
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
+         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
       { eventoId: game.evento_id }
     );
     const validIds = new Set(valid.map(row => String(row.id).toLowerCase()));
@@ -348,7 +348,7 @@ router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 
       }
     }
 
-    await query('UPDATE brincadeiras SET checkpoints = @checkpoints WHERE id = @id', { checkpoints: checkpointsJson, id: game.id });
+    await query('UPDATE brincadeira SET checkpoints = @checkpoints WHERE brincadeiraId = @id', { checkpoints: checkpointsJson, id: game.id });
     const changes = await reconcileRunningGames(game.id, requestedIds);
 
     res.json({ updated: true, running: running.length > 0, checkpoints: items, changes });
@@ -367,7 +367,7 @@ router.patch('/:id/status', verifyToken, requireRole('admin', 'master'), async (
     }
 
     const brincadeira = await queryOne(
-      'SELECT id, empresa_id, status FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
+      'SELECT brincadeiraId, empresaId, status FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id)',
       { id: req.params.id }
     );
     if (!brincadeira || String(brincadeira.status || '').trim().toLowerCase() === 'archived') {
@@ -380,7 +380,7 @@ router.patch('/:id/status', verifyToken, requireRole('admin', 'master'), async (
     }
 
     await query(
-      "UPDATE brincadeiras SET status = @status WHERE LOWER(id) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
+      "UPDATE brincadeira SET status = @status WHERE LOWER(brincadeiraId) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
       { status, id: brincadeira.id }
     );
 
@@ -400,9 +400,9 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
 
     const result = await withTransaction(async (tx) => {
       const brincadeira = await tx.queryOne(
-        `SELECT id, name, type, empresa_id, status
-         FROM brincadeiras
-         WHERE LOWER(id) = LOWER(@id)`,
+        `SELECT brincadeiraId, nome, tipo, empresaId, status
+         FROM brincadeira
+         WHERE LOWER(brincadeiraId) = LOWER(@id)`,
         { id: gameId }
       );
 
@@ -427,9 +427,9 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       }
 
       const activeEvent = await tx.queryOne(
-        `SELECT TOP 1 id
-         FROM eventos
-         WHERE LOWER(active_brincadeira_id) = LOWER(@id)
+        `SELECT TOP 1 eventoId
+         FROM evento
+         WHERE LOWER(brincadeiraAtivaId) = LOWER(@id)
            AND LOWER(COALESCE(status, '')) = 'active'`,
         { id: gameId }
       );
@@ -440,10 +440,10 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       }
 
       const activeState = await tx.queryOne(
-        `SELECT TOP 1 evento_id
-         FROM event_game_state
-         WHERE LOWER(game_id) = LOWER(@id)
-           AND LOWER(COALESCE(mode, 'idle')) = 'game'`,
+        `SELECT TOP 1 eventoId
+         FROM estadoJogoEvento
+         WHERE LOWER(brincadeiraId) = LOWER(@id)
+           AND LOWER(COALESCE(modo, 'idle')) = 'game'`,
         { id: gameId }
       );
       if (activeState) {
@@ -453,13 +453,13 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       }
 
       const activeSessionTable = brincadeira.type === 'treasure_hunt'
-        ? 'caca_tesouro_partidas'
-        : brincadeira.type === 'monster_hunt' ? 'monster_hunt_partidas' : null;
+        ? 'cacaTesourPartida'
+        : brincadeira.type === 'monster_hunt' ? 'monsterCacaPartida' : null;
       if (activeSessionTable) {
         const activeSession = await tx.queryOne(
-          `SELECT TOP 1 id
+          `SELECT TOP 1 1 AS found
            FROM ${activeSessionTable}
-           WHERE LOWER(brincadeira_id) = LOWER(@id)
+           WHERE LOWER(brincadeiraId) = LOWER(@id)
              AND LOWER(COALESCE(status, '')) = 'active'`,
           { id: gameId }
         );
@@ -471,9 +471,9 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       }
 
       const update = await tx.query(
-        `UPDATE brincadeiras
+        `UPDATE brincadeira
          SET status = 'archived'
-         WHERE LOWER(id) = LOWER(@id)`,
+         WHERE LOWER(brincadeiraId) = LOWER(@id)`,
         { id: gameId }
       );
       if (!(update.rowsAffected?.[0] || 0)) {

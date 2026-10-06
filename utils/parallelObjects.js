@@ -14,11 +14,11 @@ const serialize = (row) => ({ id: row.id, name: row.name });
 // A primeira vez que a empresa usa a brincadeira, ganha a lista inicial. Objetos removidos continuam na
 // tabela (status 'removed'), então apagar tudo não faz a lista inicial voltar sozinha.
 async function ensureDefaultObjects(empresaId) {
-  const existing = await queryOne('SELECT COUNT(*) AS total FROM parallel_objects WHERE empresa_id = @empresaId', { empresaId });
+  const existing = await queryOne('SELECT COUNT(*) AS total FROM objetoBrincadeiraParalela WHERE empresaId = @empresaId', { empresaId });
   if (Number(existing?.total) > 0) return;
   for (const name of DEFAULT_OBJECTS) {
     await query(
-      `INSERT INTO parallel_objects (id, empresa_id, name, status) VALUES (@id, @empresaId, @name, 'active')`,
+      `INSERT INTO objetoBrincadeiraParalela (id, empresaId, nome, status) VALUES (@id, @empresaId, @name, 'active')`,
       { id: uuidv4(), empresaId, name }
     );
   }
@@ -27,7 +27,7 @@ async function ensureDefaultObjects(empresaId) {
 async function listObjects(empresaId) {
   await ensureDefaultObjects(empresaId);
   const rows = await allQuery(
-    `SELECT id, name FROM parallel_objects WHERE empresa_id = @empresaId AND status = 'active' ORDER BY created_at, name`,
+    `SELECT id, nome FROM objetoBrincadeiraParalela WHERE empresaId = @empresaId AND status = 'active' ORDER BY criadoEm, nome`,
     { empresaId }
   );
   return rows.map(serialize);
@@ -35,7 +35,7 @@ async function listObjects(empresaId) {
 
 async function assertNameFree(empresaId, name, exceptId = null) {
   const rows = await allQuery(
-    `SELECT id, name FROM parallel_objects WHERE empresa_id = @empresaId AND status = 'active'`,
+    `SELECT id, nome FROM objetoBrincadeiraParalela WHERE empresaId = @empresaId AND status = 'active'`,
     { empresaId }
   );
   if (rows.some((row) => row.id !== exceptId && sameName(row.name, name))) {
@@ -50,7 +50,7 @@ async function addObject(empresaId, rawName) {
   await assertNameFree(empresaId, normalized.name);
   const id = uuidv4();
   await query(
-    `INSERT INTO parallel_objects (id, empresa_id, name, status) VALUES (@id, @empresaId, @name, 'active')`,
+    `INSERT INTO objetoBrincadeiraParalela (id, empresaId, nome, status) VALUES (@id, @empresaId, @name, 'active')`,
     { id, empresaId, name: normalized.name }
   );
   return { id, name: normalized.name };
@@ -58,7 +58,7 @@ async function addObject(empresaId, rawName) {
 
 async function findOwned(empresaId, id) {
   const row = await queryOne(
-    `SELECT id, name FROM parallel_objects WHERE id = @id AND empresa_id = @empresaId AND status = 'active'`,
+    `SELECT id, nome FROM objetoBrincadeiraParalela WHERE id = @id AND empresaId = @empresaId AND status = 'active'`,
     { id, empresaId }
   );
   if (!row) throw httpError('Objeto não encontrado', 404);
@@ -70,13 +70,13 @@ async function renameObject(empresaId, id, rawName) {
   if (normalized.error) throw httpError(normalized.error, 400);
   await findOwned(empresaId, id);
   await assertNameFree(empresaId, normalized.name, id);
-  await query('UPDATE parallel_objects SET name = @name WHERE id = @id AND empresa_id = @empresaId', { id, empresaId, name: normalized.name });
+  await query('UPDATE objetoBrincadeiraParalela SET nome = @name WHERE id = @id AND empresaId = @empresaId', { id, empresaId, name: normalized.name });
   return { id, name: normalized.name };
 }
 
 async function removeObject(empresaId, id) {
   await findOwned(empresaId, id);
-  await query(`UPDATE parallel_objects SET status = 'removed' WHERE id = @id AND empresa_id = @empresaId`, { id, empresaId });
+  await query(`UPDATE objetoBrincadeiraParalela SET status = 'removed' WHERE id = @id AND empresaId = @empresaId`, { id, empresaId });
 }
 
 module.exports = { listObjects, addObject, renameObject, removeObject };

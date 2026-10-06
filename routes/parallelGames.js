@@ -10,7 +10,7 @@ router.use(verifyToken, requireRole('admin', 'game_master', 'master'));
 
 // O evento precisa ser da empresa do usuário (o master pode operar qualquer um).
 async function loadEvent(req, res) {
-  const evento = await queryOne('SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@id)', { id: req.params.eventoId });
+  const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@id)', { id: req.params.eventoId });
   if (!evento) {
     res.status(404).json({ error: 'Evento não encontrado' });
     return null;

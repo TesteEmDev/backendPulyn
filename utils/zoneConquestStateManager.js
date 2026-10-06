@@ -10,9 +10,9 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 async function initializeCheckpointStates(partidaId, empresaId, eventoId, gameType = 'team') {
   try {
     const checkpoints = await allQuery(
-      `SELECT id, name FROM checkpoints 
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
-       AND (checkpoint_purpose IS NULL OR checkpoint_purpose = 'game')`,
+      `SELECT checkpointId, nome FROM pontoVerificacao 
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
+       AND (proposito IS NULL OR proposito = 'game')`,
       { eventoId }
     );
 
@@ -20,8 +20,8 @@ async function initializeCheckpointStates(partidaId, empresaId, eventoId, gameTy
       for (const cp of checkpoints) {
         const stateId = uuidv4();
         await tx.query(
-          `INSERT INTO zone_conquest_checkpoint_states 
-           (id, partida_id, empresa_id, evento_id, checkpoint_id, current_owner_id, owner_type, protected_until, last_conquered_at, conquest_count)
+          `INSERT INTO zonaConquistaEstadoCheckpoint 
+           (id, partidaId, empresaId, eventoId, checkpointId, donoAtualId, tipoDono, protegidoAte, ultimoConquistadoEm, totalConquistas)
            VALUES (@id, @partidaId, @empresaId, @eventoId, @checkpointId, NULL, @ownerType, NULL, NULL, 0)`,
           {
             id: stateId,
@@ -50,11 +50,11 @@ async function getCheckpointStates(partidaId, eventoId) {
   try {
     const states = await allQuery(
       `SELECT 
-        id, partida_id, checkpoint_id, current_owner_id, owner_type,
-        protected_until, last_conquered_at, conquest_count, created_at, updated_at
-       FROM zone_conquest_checkpoint_states
-       WHERE partida_id = @partidaId AND evento_id = @eventoId
-       ORDER BY created_at ASC`,
+        id, partidaId, checkpointId, donoAtualId, tipoDono,
+        protegidoAte, ultimoConquistadoEm, totalConquistas, criadoEm, atualizadoEm
+       FROM zonaConquistaEstadoCheckpoint
+       WHERE partidaId = @partidaId AND eventoId = @eventoId
+       ORDER BY criadoEm ASC`,
       { partidaId, eventoId }
     );
 
@@ -70,23 +70,24 @@ async function getCheckpointStates(partidaId, eventoId) {
  */
 async function updateCheckpointState(checkpointStateId, updates) {
   try {
-    const allowedFields = ['current_owner_id', 'protected_until', 'last_conquered_at', 'conquest_count'];
+    const columns = { current_owner_id: 'donoAtualId', protected_until: 'protegidoAte', last_conquered_at: 'ultimoConquistadoEm', conquest_count: 'totalConquistas' };
+    const allowedFields = Object.keys(columns);
     const setClauses = [];
     const params = { id: checkpointStateId };
 
     Object.entries(updates).forEach(([key, value]) => {
       if (allowedFields.includes(key)) {
-        setClauses.push(`${key} = @${key}`);
+        setClauses.push(`${columns[key]} = @${key}`);
         params[key] = value;
       }
     });
 
     if (setClauses.length === 0) return null;
 
-    setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    setClauses.push('atualizadoEm = CURRENT_TIMESTAMP');
 
     const result = await queryOne(
-      `UPDATE zone_conquest_checkpoint_states
+      `UPDATE zonaConquistaEstadoCheckpoint
        SET ${setClauses.join(', ')}
        WHERE id = @id`,
       params
@@ -106,10 +107,10 @@ async function getCheckpointState(checkpointId, partidaId) {
   try {
     const state = await queryOne(
       `SELECT 
-        id, partida_id, checkpoint_id, current_owner_id, owner_type,
-        protected_until, last_conquered_at, conquest_count, created_at, updated_at
-       FROM zone_conquest_checkpoint_states
-       WHERE checkpoint_id = @checkpointId AND partida_id = @partidaId`,
+        id, partidaId, checkpointId, donoAtualId, tipoDono,
+        protegidoAte, ultimoConquistadoEm, totalConquistas, criadoEm, atualizadoEm
+       FROM zonaConquistaEstadoCheckpoint
+       WHERE checkpointId = @checkpointId AND partidaId = @partidaId`,
       { checkpointId, partidaId }
     );
 
@@ -129,16 +130,16 @@ async function getCheckpointState(checkpointId, partidaId) {
 async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = 'team') {
   try {
     const zones = await allQuery(
-      `SELECT id, name FROM zonas 
-       WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+      `SELECT zonaId, nome FROM zona 
+       WHERE LOWER(eventoId) = LOWER(@eventoId)`,
       { eventoId }
     );
 
     // Contar checkpoints por zona
     const checkpointsByZone = await allQuery(
-      `SELECT zone, COUNT(*) as count FROM checkpoints
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
-       GROUP BY zone`,
+      `SELECT zona, COUNT(*) as count FROM pontoVerificacao
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
+       GROUP BY zona`,
       { eventoId }
     );
 
@@ -153,8 +154,8 @@ async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = '
         const checkpointCount = zoneCheckpointMap.get(zone.name?.toLowerCase()) || 0;
 
         await tx.query(
-          `INSERT INTO zone_conquest_zone_states
-           (id, partida_id, empresa_id, evento_id, zone_id, current_owner_id, owner_type, is_disputed, checkpoints_count, checkpoints_owned, last_updated_at)
+          `INSERT INTO zonaConquistaEstadoZona
+           (id, partidaId, empresaId, eventoId, zonaId, donoAtualId, tipoDono, disputada, totalCheckpoints, checkpointsConquistados, ultimaAtualizacaoEm)
            VALUES (@id, @partidaId, @empresaId, @eventoId, @zoneId, NULL, @ownerType, 0, @checkpointsCount, 0, NULL)`,
           {
             id: stateId,
@@ -184,11 +185,11 @@ async function getZoneStates(partidaId, eventoId) {
   try {
     const states = await allQuery(
       `SELECT 
-        id, partida_id, zone_id, current_owner_id, owner_type, is_disputed,
-        checkpoints_count, checkpoints_owned, last_updated_at, created_at, updated_at
-       FROM zone_conquest_zone_states
-       WHERE partida_id = @partidaId AND evento_id = @eventoId
-       ORDER BY created_at ASC`,
+        id, partidaId, zonaId, donoAtualId, tipoDono, disputada,
+        totalCheckpoints, checkpointsConquistados, ultimaAtualizacaoEm, criadoEm, atualizadoEm
+       FROM zonaConquistaEstadoZona
+       WHERE partidaId = @partidaId AND eventoId = @eventoId
+       ORDER BY criadoEm ASC`,
       { partidaId, eventoId }
     );
 
@@ -204,23 +205,24 @@ async function getZoneStates(partidaId, eventoId) {
  */
 async function updateZoneState(zoneStateId, updates) {
   try {
-    const allowedFields = ['current_owner_id', 'is_disputed', 'checkpoints_owned', 'last_updated_at'];
+    const columns = { current_owner_id: 'donoAtualId', is_disputed: 'disputada', checkpoints_owned: 'checkpointsConquistados', last_updated_at: 'ultimaAtualizacaoEm' };
+    const allowedFields = Object.keys(columns);
     const setClauses = [];
     const params = { id: zoneStateId };
 
     Object.entries(updates).forEach(([key, value]) => {
       if (allowedFields.includes(key)) {
-        setClauses.push(`${key} = @${key}`);
+        setClauses.push(`${columns[key]} = @${key}`);
         params[key] = value;
       }
     });
 
     if (setClauses.length === 0) return null;
 
-    setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    setClauses.push('atualizadoEm = CURRENT_TIMESTAMP');
 
     const result = await queryOne(
-      `UPDATE zone_conquest_zone_states
+      `UPDATE zonaConquistaEstadoZona
        SET ${setClauses.join(', ')}
        WHERE id = @id`,
       params
@@ -240,10 +242,10 @@ async function getZoneState(zoneId, partidaId) {
   try {
     const state = await queryOne(
       `SELECT 
-        id, partida_id, zone_id, current_owner_id, owner_type, is_disputed,
-        checkpoints_count, checkpoints_owned, last_updated_at, created_at, updated_at
-       FROM zone_conquest_zone_states
-       WHERE zone_id = @zoneId AND partida_id = @partidaId`,
+        id, partidaId, zonaId, donoAtualId, tipoDono, disputada,
+        totalCheckpoints, checkpointsConquistados, ultimaAtualizacaoEm, criadoEm, atualizadoEm
+       FROM zonaConquistaEstadoZona
+       WHERE zonaId = @zoneId AND partidaId = @partidaId`,
       { zoneId, partidaId }
     );
 
@@ -261,14 +263,14 @@ async function clearPartidaStates(partidaId, eventoId) {
   try {
     await withTransaction(async (tx) => {
       await tx.query(
-        `DELETE FROM zone_conquest_checkpoint_states 
-         WHERE partida_id = @partidaId AND evento_id = @eventoId`,
+        `DELETE FROM zonaConquistaEstadoCheckpoint 
+         WHERE partidaId = @partidaId AND eventoId = @eventoId`,
         { partidaId, eventoId }
       );
 
       await tx.query(
-        `DELETE FROM zone_conquest_zone_states 
-         WHERE partida_id = @partidaId AND evento_id = @eventoId`,
+        `DELETE FROM zonaConquistaEstadoZona 
+         WHERE partidaId = @partidaId AND eventoId = @eventoId`,
         { partidaId, eventoId }
       );
     });

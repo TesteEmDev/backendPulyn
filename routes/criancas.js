@@ -19,16 +19,16 @@ router.get('/', verifyToken, async (req, res) => {
     const criancas = await allQuery(`
       SELECT TOP 5000
         c.*,
-        t.name AS time_name,
-        t.color AS time_color,
-        e.name AS evento_name,
+        t.nome AS time_name,
+        t.cor AS time_color,
+        e.nome AS evento_name,
         e.status AS evento_status,
-        e.date AS evento_date
-      FROM criancas c
-      LEFT JOIN times t ON c.time_id = t.id
-      LEFT JOIN eventos e ON c.evento_id = e.id
-      WHERE c.empresa_id = @empresa_id
-      ORDER BY e.date DESC, c.scores DESC
+        e.data AS evento_date
+      FROM crianca c
+      LEFT JOIN time t ON c.timeId = t.timeId
+      LEFT JOIN evento e ON c.eventoId = e.eventoId
+      WHERE c.empresaId = @empresa_id
+      ORDER BY e.data DESC, c.pontos DESC
     `, { empresa_id: req.user?.empresa_id });
     res.json(criancas);
   } catch (err) {
@@ -44,12 +44,12 @@ router.get('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     const empresaId = req.user?.empresa_id;
     
     const criancas = await allQuery(`
-      SELECT c.*, t.name as time_name, t.color as time_color 
-      FROM criancas c
-      LEFT JOIN times t ON c.time_id = t.id
-      WHERE c.evento_id = @evento_id
-      AND c.empresa_id = @empresa_id
-      ORDER BY c.scores DESC
+      SELECT c.*, t.nome as time_name, t.cor as time_color 
+      FROM crianca c
+      LEFT JOIN time t ON c.timeId = t.timeId
+      WHERE c.eventoId = @evento_id
+      AND c.empresaId = @empresa_id
+      ORDER BY c.pontos DESC
     `, { evento_id: req.params.evento_id, empresa_id: empresaId });
     res.json(criancas);
   } catch (err) {
@@ -79,7 +79,7 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     }
     
     // ✅ NOVO: Obter empresa_id do evento
-    const evento = await queryOne('SELECT empresa_id FROM eventos WHERE id = @evento_id', { evento_id });
+    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @evento_id', { evento_id });
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
@@ -91,9 +91,9 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
 
     if (timeId) {
       const time = await queryOne(
-        `SELECT id FROM times
-         WHERE id = @timeId AND evento_id = @eventoId
-           AND (empresa_id = @empresaId OR @isMaster = 1)`,
+        `SELECT timeId FROM time
+         WHERE timeId = @timeId AND eventoId = @eventoId
+           AND (empresaId = @empresaId OR @isMaster = 1)`,
         { timeId, eventoId: evento_id, empresaId, isMaster: isMaster(req) ? 1 : 0 }
       );
       if (!time) return res.status(400).json({ error: 'Time não pertence ao evento selecionado' });
@@ -101,8 +101,8 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
 
     if (normalizedBraceletCode) {
       const pulseira = await queryOne(
-        `SELECT code, status FROM pulseiras
-         WHERE ${uidSqlExpression('code')} = @code AND empresa_id = @empresaId`,
+        `SELECT codigo, status FROM pulseira
+         WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
         { code: normalizedBraceletCode, empresaId }
       );
       if (!pulseira) return res.status(400).json({ error: 'Pulseira não encontrada nesta empresa' });
@@ -111,7 +111,7 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     
     if (normalizedBraceletCode) {
       const existing = await queryOne(
-        `SELECT id FROM criancas WHERE ${uidSqlExpression('bracelet_code')} = @code`,
+        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @code`,
         { code: normalizedBraceletCode }
       );
       if (existing) {
@@ -121,22 +121,22 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     
     // ✅ CORRIGIDO: Incluir empresa_id na INSERT
     await query(
-      `INSERT INTO criancas (id, evento_id, empresa_id, time_id, name, nickname, age, avatar, bracelet_code) 
+      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira) 
        VALUES (@id, @evento_id, @empresa_id, @timeId, @name, @nickname, @age, @avatar, @braceletCode)`,
       { id, evento_id, empresa_id: empresaId, timeId, name, nickname, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode }
     );
     
     if (normalizedBraceletCode) {
       await query(
-        `UPDATE pulseiras SET status = @status, crianca_id = @crianca_id
-         WHERE ${uidSqlExpression('code')} = @code AND empresa_id = @empresa_id`,
+        `UPDATE pulseira SET status = @status, criancaId = @crianca_id
+         WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresa_id`,
         { status: 'em_uso', crianca_id: id, code: normalizedBraceletCode, empresa_id: empresaId }
       );
     }
     
     await query(
-      `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId) 
-       WHERE id = @timeId`,
+      `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId) 
+       WHERE timeId = @timeId`,
       { timeId }
     );
     
@@ -156,11 +156,11 @@ router.get('/criancas/by-bracelet/:code', verifyToken, async (req, res) => {
 
     const empresaId = req.user.empresa_id;
     const crianca = await queryOne(`
-      SELECT c.*, t.name as time_name, t.color as time_color 
-      FROM criancas c
-      LEFT JOIN times t ON c.time_id = t.id
-      WHERE ${uidSqlExpression('c.bracelet_code')} = @code
-        AND (c.empresa_id = @empresaId OR @isMaster = 1)
+      SELECT c.*, t.nome as time_name, t.cor as time_color 
+      FROM crianca c
+      LEFT JOIN time t ON c.timeId = t.timeId
+      WHERE ${uidSqlExpression('c.codigoPulseira')} = @code
+        AND (c.empresaId = @empresaId OR @isMaster = 1)
     `, { code: normalizedCode, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     if (!crianca) {
@@ -186,7 +186,7 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     console.log(`   - name: ${name}`);
     
     // Verificar se criança existe
-    const crianca = await queryOne('SELECT * FROM criancas WHERE id = @id AND evento_id = @evento_id AND (empresa_id = @empresaId OR @isMaster = 1)', 
+    const crianca = await queryOne('SELECT * FROM crianca WHERE criancaId = @id AND eventoId = @evento_id AND (empresaId = @empresaId OR @isMaster = 1)', 
       { id: crianca_id, evento_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 });
     
     if (!crianca) {
@@ -203,10 +203,10 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     const nextTimeId = timeId === undefined ? crianca.time_id : (timeId || null);
     if (nextTimeId) {
       const targetTime = await queryOne(
-        `SELECT id FROM times
-         WHERE id = @timeId
-           AND evento_id = @eventoId
-           AND (empresa_id = @empresaId OR @isMaster = 1)`,
+        `SELECT timeId FROM time
+         WHERE timeId = @timeId
+           AND eventoId = @eventoId
+           AND (empresaId = @empresaId OR @isMaster = 1)`,
         {
           timeId: nextTimeId,
           eventoId: evento_id,
@@ -223,7 +223,7 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     if (normalizedBraceletCode && normalizedBraceletCode !== normalizeUid(crianca.bracelet_code || '')) {
       // Verificar se outra criança já tem essa pulseira
       const existing = await queryOne(
-        `SELECT id FROM criancas WHERE ${uidSqlExpression('bracelet_code')} = @code AND id != @criancaId`, 
+        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @code AND criancaId != @criancaId`, 
         { code: normalizedBraceletCode, criancaId: crianca_id }
       );
       if (existing) {
@@ -233,7 +233,7 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
       
       // Verificar se pulseira existe
       const pulseira = await queryOne(
-        `SELECT * FROM pulseiras WHERE ${uidSqlExpression('code')} = @code AND empresa_id = @empresaId`,
+        `SELECT * FROM pulseira WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
         { code: normalizedBraceletCode, empresaId: crianca.empresa_id }
       );
       if (!pulseira) {
@@ -245,8 +245,8 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
       if (crianca.bracelet_code) {
         const oldCode = normalizeUid(crianca.bracelet_code);
         await query(
-          `UPDATE pulseiras SET status = @status, crianca_id = NULL
-           WHERE ${uidSqlExpression('code')} = @code AND empresa_id = @empresaId`,
+          `UPDATE pulseira SET status = @status, criancaId = NULL
+           WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
           { status: 'disponivel', code: oldCode, empresaId: crianca.empresa_id }
         );
         console.log(`   → Pulseira anterior ${oldCode} marcada como disponível`);
@@ -254,8 +254,8 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
       
       // Marcar pulseira nova como 'em_uso'
       await query(
-        `UPDATE pulseiras SET status = @status, crianca_id = @criancaId
-         WHERE ${uidSqlExpression('code')} = @code AND empresa_id = @empresaId`,
+        `UPDATE pulseira SET status = @status, criancaId = @criancaId
+         WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
         { status: 'em_uso', criancaId: crianca_id, code: normalizedBraceletCode, empresaId: crianca.empresa_id }
       );
       console.log(`   → Pulseira ${normalizedBraceletCode} marcada como em_uso`);
@@ -263,16 +263,16 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     
     // Atualizar criança
     await query(
-      `UPDATE criancas SET 
-        name = @name, 
-        nickname = @nickname, 
-        age = @age, 
+      `UPDATE crianca SET 
+        nome = @name, 
+        apelido = @nickname, 
+        idade = @age, 
         avatar = @avatar, 
-        bracelet_code = @braceletCode,
-        time_id = @timeId
-       WHERE id = @criancaId 
-       AND evento_id = @eventoId
-       AND empresa_id = @empresaId`,
+        codigoPulseira = @braceletCode,
+        timeId = @timeId
+       WHERE criancaId = @criancaId 
+       AND eventoId = @eventoId
+       AND empresaId = @empresaId`,
       { 
         name: name || crianca.name, 
         nickname: nickname || crianca.nickname, 
@@ -289,9 +289,9 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     const affectedTeamIds = [...new Set([crianca.time_id, nextTimeId].filter(Boolean))];
     for (const affectedTeamId of affectedTeamIds) {
       await query(
-        `UPDATE times
-         SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
-         WHERE id = @timeId`,
+        `UPDATE time
+         SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
+         WHERE timeId = @timeId`,
         { timeId: affectedTeamId }
       );
     }
@@ -314,10 +314,10 @@ router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (re
 
     const { evento_id, crianca_id } = req.params;
     const crianca = await queryOne(
-      `SELECT * FROM criancas
-       WHERE id = @criancaId
-       AND evento_id = @eventoId
-       AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      `SELECT * FROM crianca
+       WHERE criancaId = @criancaId
+       AND eventoId = @eventoId
+       AND (empresaId = @empresaId OR @isMaster = 1)`,
       {
         criancaId: crianca_id,
         eventoId: evento_id,
@@ -332,37 +332,37 @@ router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (re
 
     // Liberar a pulseira antes de remover a criança por causa da FK pulseiras.crianca_id.
     await query(
-      `UPDATE pulseiras
-       SET status = @status, crianca_id = NULL
-       WHERE crianca_id = @criancaId
-       AND empresa_id = @empresaId`,
+      `UPDATE pulseira
+       SET status = @status, criancaId = NULL
+       WHERE criancaId = @criancaId
+       AND empresaId = @empresaId`,
       { status: 'disponivel', criancaId: crianca_id, empresaId: crianca.empresa_id }
     );
 
     // Remover registros que possuem FK obrigatória para a criança.
-    await query('DELETE FROM crianca_conquistas WHERE crianca_id = @criancaId', { criancaId: crianca_id });
-    await query('DELETE FROM caca_tesouro_scans WHERE crianca_id = @criancaId', { criancaId: crianca_id });
-    await query('DELETE FROM pontuacoes WHERE crianca_id = @criancaId', { criancaId: crianca_id });
-    await query('DELETE FROM leituras WHERE crianca_id = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM criancaConquista WHERE criancaId = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM cacaTesourScan WHERE criancaId = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM pontuacao WHERE criancaId = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM leitura WHERE criancaId = @criancaId', { criancaId: crianca_id });
 
     // Manter a pontuação do time consistente com a remoção do participante.
     if (crianca.time_id && crianca.scores) {
       await query(
-        `UPDATE times
-         SET points = CASE
-           WHEN points >= @scores THEN points - @scores
+        `UPDATE time
+         SET pontos = CASE
+           WHEN pontos >= @scores THEN pontos - @scores
            ELSE 0
          END
-         WHERE id = @timeId AND evento_id = @eventoId`,
+         WHERE timeId = @timeId AND eventoId = @eventoId`,
         { scores: crianca.scores, timeId: crianca.time_id, eventoId: evento_id }
       );
     }
 
     await query(
-      `DELETE FROM criancas
-       WHERE id = @criancaId
-       AND evento_id = @eventoId
-       AND empresa_id = @empresaId`,
+      `DELETE FROM crianca
+       WHERE criancaId = @criancaId
+       AND eventoId = @eventoId
+       AND empresaId = @empresaId`,
       { criancaId: crianca_id, eventoId: evento_id, empresaId: crianca.empresa_id }
     );
 
@@ -383,8 +383,8 @@ router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
     }
     const { crianca_id } = req.params;
     const crianca = await queryOne(
-      `SELECT * FROM criancas
-       WHERE id = @id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      `SELECT * FROM crianca
+       WHERE criancaId = @id AND (empresaId = @empresaId OR @isMaster = 1)`,
       { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
     );
     
@@ -399,15 +399,15 @@ router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
     const braceletCode = crianca.bracelet_code;
     
     await query(
-      `UPDATE criancas SET last_bracelet_code = bracelet_code, bracelet_code = NULL
-       WHERE id = @criancaId AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      `UPDATE crianca SET ultimaPulseira = codigoPulseira, codigoPulseira = NULL
+       WHERE criancaId = @criancaId AND (empresaId = @empresaId OR @isMaster = 1)`,
       { criancaId: crianca_id, empresaId: crianca.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
     );
     
     // ✅ NOVO: Atualizar status da pulseira de volta para "disponível"
     await query(
-      `UPDATE pulseiras SET status = @status, crianca_id = NULL
-       WHERE ${uidSqlExpression('code')} = @code AND empresa_id = @empresaId`,
+      `UPDATE pulseira SET status = @status, criancaId = NULL
+       WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
       { status: 'disponivel', code: normalizeUid(braceletCode), empresaId: crianca.empresa_id }
     );
     
@@ -426,8 +426,8 @@ router.post('/:crianca_id/generate-qrcode', verifyToken, async (req, res) => {
     
     // Validar acesso
     const crianca = await queryOne(
-      `SELECT * FROM criancas
-       WHERE id = @id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      `SELECT * FROM crianca
+       WHERE criancaId = @id AND (empresaId = @empresaId OR @isMaster = 1)`,
       { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
     );
     
@@ -440,8 +440,8 @@ router.post('/:crianca_id/generate-qrcode', verifyToken, async (req, res) => {
 
     // Salvar na tabela criancas
     await query(
-      `UPDATE criancas SET qrcode = @qrcode 
-       WHERE id = @crianca_id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      `UPDATE crianca SET codigoQr = @qrcode 
+       WHERE criancaId = @crianca_id AND (empresaId = @empresaId OR @isMaster = 1)`,
       { 
         qrcode: qrCodeData.qrCode, 
         crianca_id, 
@@ -471,8 +471,8 @@ router.get('/:crianca_id/qrcode-image', verifyToken, async (req, res) => {
     
     // Validar acesso
     const crianca = await queryOne(
-      `SELECT * FROM criancas
-       WHERE id = @id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+      `SELECT * FROM crianca
+       WHERE criancaId = @id AND (empresaId = @empresaId OR @isMaster = 1)`,
       { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
     );
     
@@ -488,8 +488,8 @@ router.get('/:crianca_id/qrcode-image', verifyToken, async (req, res) => {
       
       // Salvar na tabela
       await query(
-        `UPDATE criancas SET qrcode = @qrcode 
-         WHERE id = @crianca_id AND (empresa_id = @empresaId OR @isMaster = 1)`,
+        `UPDATE crianca SET codigoQr = @qrcode 
+         WHERE criancaId = @crianca_id AND (empresaId = @empresaId OR @isMaster = 1)`,
         { 
           qrcode: qrCode, 
           crianca_id, 
@@ -526,7 +526,7 @@ router.post('/eventos/:evento_id/generate-qrcodes-batch', verifyToken, async (re
     const { evento_id } = req.params;
 
     // Validar que o evento pertence à empresa
-    const evento = await queryOne('SELECT * FROM eventos WHERE id = @evento_id AND (empresa_id = @empresaId OR @isMaster = 1)', 
+    const evento = await queryOne('SELECT * FROM evento WHERE eventoId = @evento_id AND (empresaId = @empresaId OR @isMaster = 1)', 
       { evento_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 });
     
     if (!evento) {
@@ -535,10 +535,10 @@ router.post('/eventos/:evento_id/generate-qrcodes-batch', verifyToken, async (re
 
     // Buscar todas as crianças sem QR Code
     const criancasSemQR = await allQuery(
-      `SELECT id, name FROM criancas 
-       WHERE evento_id = @evento_id 
-       AND (qrcode IS NULL OR qrcode = '')
-       AND empresa_id = @empresa_id`,
+      `SELECT criancaId, nome FROM crianca 
+       WHERE eventoId = @evento_id 
+       AND (codigoQr IS NULL OR codigoQr = '')
+       AND empresaId = @empresa_id`,
       { evento_id, empresa_id: evento.empresa_id }
     );
 
@@ -558,8 +558,8 @@ router.post('/eventos/:evento_id/generate-qrcodes-batch', verifyToken, async (re
         const qrCodeData = await createQRCodeForChild(crianca.id);
         
         await query(
-          `UPDATE criancas SET qrcode = @qrcode 
-           WHERE id = @crianca_id`,
+          `UPDATE crianca SET codigoQr = @qrcode 
+           WHERE criancaId = @crianca_id`,
           { qrcode: qrCodeData.qrCode, crianca_id: crianca.id }
         );
 

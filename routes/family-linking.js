@@ -69,13 +69,13 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     console.log(`   🔍 Buscando código QR no banco: "${codigoQR}"`);
     // Buscar código QR ativo
     const codigoVinculacao = await queryOne(
-      `SELECT flc.*, c.name, c.nickname, c.age, e.name as evento_nome, e.id as evento_id, c.empresa_id
-       FROM family_linking_codes flc
-       JOIN criancas c ON flc.crianca_id = c.id
-       JOIN eventos e ON flc.evento_id = e.id
-       WHERE flc.qr_code_value = @codigoQR 
+      `SELECT flc.*, c.nome, c.apelido, c.idade, e.nome as evento_nome, e.eventoId as evento_id, c.empresaId
+       FROM codigoVinculoFamiliar flc
+       JOIN crianca c ON flc.criancaId = c.criancaId
+       JOIN evento e ON flc.eventoId = e.eventoId
+       WHERE flc.valorQrCode = @codigoQR 
          AND flc.status = 'active'
-         AND flc.expires_at > CURRENT_TIMESTAMP`,
+         AND flc.expiraEm > CURRENT_TIMESTAMP`,
       { codigoQR }
     );
 
@@ -98,9 +98,9 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     await withTransaction(async (tx) => {
       // ✅ VERIFICAR E INSERIR DENTRO DA TRANSAÇÃO COM LOCK (evita race condition)
       const vinculacaoExistente = await tx.queryOne(
-        `SELECT id, status FROM family_child_links
-         WHERE login_id = @loginId 
-           AND crianca_id = @criancaId
+        `SELECT vinculoId, status FROM vinculoFamiliar
+         WHERE loginId = @loginId 
+           AND criancaId = @criancaId
          FOR UPDATE`,
         { loginId: req.user.id, criancaId: codigoVinculacao.crianca_id }
       );
@@ -110,9 +110,9 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         if (vinculacaoExistente.status === 'inactive') {
           console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.id}`);
           await tx.query(
-            `UPDATE family_child_links
+            `UPDATE vinculoFamiliar
              SET status = 'pending'
-             WHERE id = @linkId`,
+             WHERE vinculoId = @linkId`,
             { linkId: vinculacaoExistente.id }
           );
         } else {
@@ -125,7 +125,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.crianca_id}, empresaId=${codigoVinculacao.empresa_id}`);
         
         await tx.query(
-          `INSERT INTO family_child_links (id, login_id, crianca_id, empresa_id, status, relationship)
+          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento)
            VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
           { 
             linkId: linkId,
@@ -139,8 +139,8 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
 
       // ✅ Marcar QR code como usado
       const updateResult = await tx.query(
-        `UPDATE family_linking_codes
-         SET status = 'used', used_by_login_id = @loginId
+        `UPDATE codigoVinculoFamiliar
+         SET status = 'used', usadoPorLoginId = @loginId
          WHERE id = @codeId`,
         { codeId: codigoVinculacao.id, loginId: req.user.id }
       );
@@ -206,8 +206,8 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
     console.log(`   🔍 Buscando vínculo...`);
     // Verificar se a criança pertence a essa família
     const link = await queryOne(
-      `SELECT l.* FROM family_child_links l
-       WHERE l.crianca_id = @childId AND l.login_id = @loginId`,
+      `SELECT l.* FROM vinculoFamiliar l
+       WHERE l.criancaId = @childId AND l.loginId = @loginId`,
       { childId, loginId: req.user.id }
     );
 
@@ -224,9 +224,9 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
 
     // Desvincullar = marcar como 'inactive'
     await query(
-      `UPDATE family_child_links
+      `UPDATE vinculoFamiliar
        SET status = 'inactive'
-       WHERE id = @linkId`,
+       WHERE vinculoId = @linkId`,
       { linkId: link.id }
     );
 

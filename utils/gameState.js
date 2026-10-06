@@ -3,10 +3,10 @@ const { query, queryOne } = require('../database');
 async function getGameState(eventoId) {
   if (!eventoId) return null;
   return queryOne(
-    `SELECT evento_id, empresa_id, mode, game_type, game_id, game_name,
-            started_at, stopped_at, updated_at
-     FROM event_game_state
-     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+    `SELECT eventoId, empresaId, modo, tipoJogo, brincadeiraId, nomeBrincadeira,
+            iniciadoEm, paradoEm, atualizadoEm
+     FROM estadoJogoEvento
+     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
     { eventoId }
   );
 }
@@ -37,23 +37,23 @@ async function saveGameState({
 
   if (existing) {
     await query(
-      `UPDATE event_game_state SET
-         empresa_id = @empresaId,
-         mode = @mode,
-         game_type = @gameType,
-         game_id = @gameId,
-         game_name = @gameName,
-         started_at = @startedAt,
-         stopped_at = @stoppedAt,
-         updated_at = GETDATE()
-       WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+      `UPDATE estadoJogoEvento SET
+         empresaId = @empresaId,
+         modo = @mode,
+         tipoJogo = @gameType,
+         brincadeiraId = @gameId,
+         nomeBrincadeira = @gameName,
+         iniciadoEm = @startedAt,
+         paradoEm = @stoppedAt,
+         atualizadoEm = GETDATE()
+       WHERE LOWER(eventoId) = LOWER(@eventoId)`,
       params
     );
   } else {
     await query(
-      `INSERT INTO event_game_state
-        (evento_id, empresa_id, mode, game_type, game_id, game_name,
-         started_at, stopped_at, updated_at)
+      `INSERT INTO estadoJogoEvento
+        (eventoId, empresaId, modo, tipoJogo, brincadeiraId, nomeBrincadeira,
+         iniciadoEm, paradoEm, atualizadoEm)
        VALUES (@eventoId, @empresaId, @mode, @gameType, @gameId, @gameName,
                @startedAt, @stoppedAt, GETDATE())`,
       params

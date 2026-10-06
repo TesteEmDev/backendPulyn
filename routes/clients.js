@@ -11,9 +11,9 @@ const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
 // (o cadastro cria os dois). Devolve os ids do registro legado que corresponde
 // (nome + cidade) à empresa, para editar/excluir os dois lados juntos.
 async function legacyClienteIdsFor(empresaId) {
-  const empresa = await queryOne('SELECT nome, cidade FROM empresas WHERE id = @id', { id: empresaId });
+  const empresa = await queryOne('SELECT nome, cidade FROM empresa WHERE empresaId = @id', { id: empresaId });
   if (!empresa) return [];
-  const rows = await allQuery('SELECT id, name, city FROM clientes');
+  const rows = await allQuery('SELECT clienteId, nome, cidade FROM cliente');
   return rows
     .filter((c) => normalizeClientText(c.name) === normalizeClientText(empresa.nome) &&
       normalizeClientText(c.city) === normalizeClientText(empresa.cidade))
@@ -111,26 +111,26 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     if (client.empresaId) {
       const empresaId = client.empresaId;
       const [empresa, users, events, tickets] = await Promise.all([
-        queryOne('SELECT cnpj, data_atualizacao FROM empresas WHERE id = @id', { id: empresaId }),
+        queryOne('SELECT cnpj, dataAtualizacao FROM empresa WHERE empresaId = @id', { id: empresaId }),
         allQuery(
-          `SELECT id, email, role, status, ultimo_acesso, data_criacao
-           FROM logins WHERE empresa_id = @id ORDER BY role, email`,
+          `SELECT loginId, email, perfil, status, ultimoAcesso, dataCriacao
+           FROM login WHERE empresaId = @id ORDER BY perfil, email`,
           { id: empresaId }
         ),
         allQuery(
-          `SELECT e.id, e.name, TO_CHAR(e.date, 'YYYY-MM-DD') AS date_str, e.time, e.duration, e.status,
-                  e.responsible_name, e.started_at, e.ended_at,
-                  (SELECT COUNT(*) FROM criancas c WHERE c.evento_id = e.id) AS children_count,
-                  (SELECT COUNT(*) FROM checkpoints k
-                    WHERE k.evento_id = e.id
-                      AND LOWER(COALESCE(k.checkpoint_purpose, 'game')) <> 'reception') AS checkpoints_count
-           FROM eventos e
-           WHERE e.empresa_id = @id
-           ORDER BY e.date DESC, e.time DESC`,
+          `SELECT e.eventoId, e.nome, TO_CHAR(e.data, 'YYYY-MM-DD') AS date_str, e.hora, e.duracao, e.status,
+                  e.nomeResponsavel, e.iniciadoEm, e.finalizadoEm,
+                  (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS children_count,
+                  (SELECT COUNT(*) FROM pontoVerificacao k
+                    WHERE k.eventoId = e.eventoId
+                      AND LOWER(COALESCE(k.proposito, 'game')) <> 'reception') AS checkpoints_count
+           FROM evento e
+           WHERE e.empresaId = @id
+           ORDER BY e.data DESC, e.hora DESC`,
           { id: empresaId }
         ),
         allQuery(
-          'SELECT status, COUNT(*) AS total FROM support_tickets WHERE empresa_id = @id GROUP BY status',
+          'SELECT status, COUNT(*) AS total FROM chamadoSuport WHERE empresaId = @id GROUP BY status',
           { id: empresaId }
         ),
       ]);
@@ -220,7 +220,7 @@ router.post('/', verifyToken, async (req, res) => {
     try {
       // 1️⃣ Criar EMPRESA
       await query(
-        `INSERT INTO empresas (id, nome, cidade, estado, telefone, plano, status) 
+        `INSERT INTO empresa (empresaId, nome, cidade, estado, telefone, plano, status) 
          VALUES (@id, @nome, @cidade, @estado, @telefone, @plano, @status)`,
         {
           id: empresaId,
@@ -236,7 +236,7 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO logins (id, empresa_id, email, password, status) 
+        `INSERT INTO login (loginId, empresaId, email, senha, status) 
          VALUES (@id, @empresa_id, @email, @password, @status)`,
         {
           id: loginId,
@@ -250,7 +250,7 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO clientes (id, name, city, state, email, phone, plano, status, empresa_id) 
+        `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId) 
          VALUES (@id, @name, @city, @state, @email, @phone, @plano, @status, @empresa_id)`,
         {
           id: clienteId,
@@ -308,9 +308,9 @@ router.put('/:id', verifyToken, async (req, res) => {
 
       // Atualizar EMPRESA
       await query(
-        `UPDATE empresas SET nome = @nome, cidade = @cidade, estado = @estado, 
-         telefone = @telefone, plano = @plano, status = @status, data_atualizacao = GETDATE()
-         WHERE id = @id`,
+        `UPDATE empresa SET nome = @nome, cidade = @cidade, estado = @estado, 
+         telefone = @telefone, plano = @plano, status = @status, dataAtualizacao = GETDATE()
+         WHERE empresaId = @id`,
         {
           nome: name,
           cidade: city,
@@ -326,8 +326,8 @@ router.put('/:id', verifyToken, async (req, res) => {
       // e-mail era gravado em todos os logins da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
-          `UPDATE logins SET email = @email, data_atualizacao = GETDATE()
-           WHERE empresa_id = @empresa_id AND role = 'admin'`,
+          `UPDATE login SET email = @email, dataAtualizacao = GETDATE()
+           WHERE empresaId = @empresa_id AND perfil = 'admin'`,
           {
             email: email,
             empresa_id: req.params.id
@@ -337,10 +337,10 @@ router.put('/:id', verifyToken, async (req, res) => {
 
       for (const legacyId of legacyIds) {
         await query(
-          `UPDATE clientes SET name = COALESCE(@name, name), city = COALESCE(@city, city),
-           state = COALESCE(@state, state), email = COALESCE(@email, email),
-           phone = COALESCE(@phone, phone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
-           WHERE id = @id`,
+          `UPDATE cliente SET nome = COALESCE(@name, nome), cidade = COALESCE(@city, cidade),
+           estado = COALESCE(@state, estado), email = COALESCE(@email, email),
+           telefone = COALESCE(@phone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
+           WHERE clienteId = @id`,
           {
             name: name ?? null, city: city ?? null, state: state ?? null, email: email || null,
             phone: phone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
@@ -371,18 +371,18 @@ router.put('/:id/status', verifyToken, async (req, res) => {
 
     const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
     for (const legacyId of legacyIds) {
-      await query('UPDATE clientes SET status = @status WHERE id = @id', { status, id: legacyId });
+      await query('UPDATE cliente SET status = @status WHERE clienteId = @id', { status, id: legacyId });
     }
 
     // Atualizar status na EMPRESA
     await query(
-      'UPDATE empresas SET status = @status, data_atualizacao = GETDATE() WHERE id = @id',
+      'UPDATE empresa SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
       { status, id: req.params.id }
     );
 
     // Atualizar status no LOGIN também
     await query(
-      'UPDATE logins SET status = @status, data_atualizacao = GETDATE() WHERE empresa_id = @id',
+      'UPDATE login SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
       { status, id: req.params.id }
     );
 
@@ -408,21 +408,21 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
       // 1. Deletar LOGIN
       await query(
-        'DELETE FROM logins WHERE empresa_id = @id',
+        'DELETE FROM login WHERE empresaId = @id',
         { id: req.params.id }
       );
       console.log(`✅ Login deletado`);
 
       // 2. Deletar EMPRESA
       await query(
-        'DELETE FROM empresas WHERE id = @id',
+        'DELETE FROM empresa WHERE empresaId = @id',
         { id: req.params.id }
       );
       console.log(`✅ Empresa deletada`);
 
       // 3. Deletar CLIENTE (compatibilidade)
       for (const legacyId of legacyIds) {
-        await query('DELETE FROM clientes WHERE id = @id', { id: legacyId });
+        await query('DELETE FROM cliente WHERE clienteId = @id', { id: legacyId });
       }
       console.log(`✅ Cliente deletado`);
 

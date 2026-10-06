@@ -74,14 +74,14 @@ router.get('/', verifyToken, async (req, res) => {
     let eventos;
     if (isMaster(req)) {
       eventos = await allQuery(
-        `SELECT * FROM eventos 
-         WHERE empresa_id IS NOT NULL
-           AND empresa_id NOT IN (SELECT id FROM empresas WHERE nome = 'Master Admin')
-         ORDER BY date DESC`
+        `SELECT * FROM evento 
+         WHERE empresaId IS NOT NULL
+           AND empresaId NOT IN (SELECT empresaId FROM empresa WHERE nome = 'Master Admin')
+         ORDER BY data DESC`
       );
     } else {
       eventos = await allQuery(
-        'SELECT * FROM eventos WHERE empresa_id = @empresa_id ORDER BY date DESC',
+        'SELECT * FROM evento WHERE empresaId = @empresa_id ORDER BY data DESC',
         { empresa_id }
       );
     }
@@ -105,7 +105,7 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
 
   for (const gameId of wanted) {
     const game = await queryOne(
-      "SELECT id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
+      "SELECT brincadeiraId, empresaId FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
       { id: gameId }
     );
     if (!game) {
@@ -121,11 +121,11 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
   }
 
   const owned = await allQuery(
-    "SELECT id FROM brincadeiras WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
+    "SELECT brincadeiraId FROM brincadeira WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
     { eventoId }
   );
   const links = await allQuery(
-    'SELECT brincadeira_id FROM evento_brincadeiras WHERE LOWER(evento_id) = LOWER(@eventoId)',
+    'SELECT brincadeiraId FROM eventoBrincadeira WHERE LOWER(eventoId) = LOWER(@eventoId)',
     { eventoId }
   );
   const isWanted = (id) => wanted.some((w) => same(w, id));
@@ -135,7 +135,7 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
   for (const [order, gameId] of wanted.entries()) {
     if (!isOwned(gameId) && !isLinked(gameId)) {
       await query(
-        'INSERT INTO evento_brincadeiras (evento_id, brincadeira_id, ordem) VALUES (@eventoId, @gameId, @order)',
+        'INSERT INTO eventoBrincadeira (eventoId, brincadeiraId, ordem) VALUES (@eventoId, @gameId, @order)',
         { eventoId, gameId, order }
       );
     }
@@ -143,14 +143,14 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
   for (const link of links) {
     if (!isWanted(link.brincadeira_id)) {
       await query(
-        'DELETE FROM evento_brincadeiras WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(brincadeira_id) = LOWER(@gameId)',
+        'DELETE FROM eventoBrincadeira WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(brincadeiraId) = LOWER(@gameId)',
         { eventoId, gameId: link.brincadeira_id }
       );
     }
   }
   for (const game of owned) {
     if (!isWanted(game.id)) {
-      await query('UPDATE brincadeiras SET evento_id = NULL WHERE LOWER(id) = LOWER(@gameId)', { gameId: game.id });
+      await query('UPDATE brincadeira SET eventoId = NULL WHERE LOWER(brincadeiraId) = LOWER(@gameId)', { gameId: game.id });
     }
   }
 }
@@ -185,8 +185,8 @@ router.post('/', verifyToken, async (req, res) => {
     // O evento e os jogos dele são gravados juntos: jogo inválido cancela a criação do evento.
     await withTransaction(async () => {
       await query(
-        `INSERT INTO eventos (id, empresa_id, name, description, date, time, duration, enable_display, enable_location, status,
-                              responsible_name, auto_start, auto_end)
+        `INSERT INTO evento (eventoId, empresaId, nome, descricao, data, hora, duracao, exibirDisplay, exibirLocalizacao, status,
+                              nomeResponsavel, autoInicio, autoFim)
          VALUES (@id, @empresa_id, @name, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
                  @responsibleName, @autoStart, @autoEnd)`,
         {
@@ -230,7 +230,7 @@ router.get('/:evento_id/criancas', verifyToken, async (req, res) => {
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -243,12 +243,12 @@ router.get('/:evento_id/criancas', verifyToken, async (req, res) => {
     }
     
     const criancas = await allQuery(`
-      SELECT c.*, t.name as time_name, t.color as time_color 
-      FROM criancas c
-      LEFT JOIN times t ON c.time_id = t.id
-      WHERE c.evento_id = @evento_id
-      AND c.empresa_id = @empresa_id
-      ORDER BY c.scores DESC
+      SELECT c.*, t.nome as time_name, t.cor as time_color 
+      FROM crianca c
+      LEFT JOIN time t ON c.timeId = t.timeId
+      WHERE c.eventoId = @evento_id
+      AND c.empresaId = @empresa_id
+      ORDER BY c.pontos DESC
     `, { evento_id, empresa_id });
     res.json(criancas);
   } catch (err) {
@@ -270,7 +270,7 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
     }
     
     // 1. Validar evento e verificar permissão
-    const evento = await queryOne('SELECT empresa_id FROM eventos WHERE id = @id', { id: evento_id });
+    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @id', { id: evento_id });
     if (!evento || !evento.empresa_id) {
       return res.status(404).json({ error: 'Evento não encontrado ou sem empresa definida' });
     }
@@ -282,7 +282,7 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
     
     // 2. Validar se pulseira já está vinculada
     if (braceletCode) {
-      const existing = await queryOne('SELECT id FROM criancas WHERE bracelet_code = @code', { code: braceletCode });
+      const existing = await queryOne('SELECT criancaId FROM crianca WHERE codigoPulseira = @code', { code: braceletCode });
       if (existing) {
         return res.status(400).json({ error: 'Pulseira já está vinculada a outra criança' });
       }
@@ -290,7 +290,7 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
     
     // 3. Inserir criança
     await query(
-      `INSERT INTO criancas (id, evento_id, empresa_id, time_id, name, nickname, age, avatar, bracelet_code, scores) 
+      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos) 
        VALUES (@id, @evento_id, @empresa_id, @time_id, @name, @nickname, @age, @avatar, @bracelet_code, 0)`,
       { 
         id, 
@@ -308,7 +308,7 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
     // 4. Atualizar status da pulseira se foi fornecida
     if (braceletCode) {
       await query(
-        'UPDATE pulseiras SET status = @status, crianca_id = @crianca_id WHERE code = @code', 
+        'UPDATE pulseira SET status = @status, criancaId = @crianca_id WHERE codigo = @code', 
         { status: 'em_uso', crianca_id: id, code: braceletCode }
       );
     }
@@ -316,8 +316,8 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
     // 5. Atualizar pontos do time
     if (timeId) {
       await query(
-        `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @time_id) 
-         WHERE id = @time_id`,
+        `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @time_id) 
+         WHERE timeId = @time_id`,
         { time_id: timeId }
       );
     }
@@ -337,7 +337,7 @@ router.get('/:evento_id/times', verifyToken, async (req, res) => {
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -350,10 +350,10 @@ router.get('/:evento_id/times', verifyToken, async (req, res) => {
     }
     
     const times = await allQuery(`
-      SELECT * FROM times 
-      WHERE evento_id = @evento_id
-      AND empresa_id = @empresa_id
-      ORDER BY points DESC
+      SELECT * FROM time 
+      WHERE eventoId = @evento_id
+      AND empresaId = @empresa_id
+      ORDER BY pontos DESC
     `, { evento_id, empresa_id });
     res.json(times);
   } catch (err) {
@@ -370,7 +370,7 @@ router.get('/:evento_id/game-status', verifyToken, async (req, res) => {
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, status, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, status, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -403,7 +403,7 @@ router.get('/:evento_id/active-game', verifyToken, async (req, res) => {
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT e.id, e.empresa_id, e.active_game_type, b.name as game_name, b.type as game_type FROM eventos e LEFT JOIN brincadeiras b ON e.active_brincadeira_id = b.id WHERE e.id = @id',
+      'SELECT e.eventoId, e.empresaId, e.tipoJogoAtivo, b.nome as game_name, b.tipo as game_type FROM evento e LEFT JOIN brincadeira b ON e.brincadeiraAtivaId = b.brincadeiraId WHERE e.eventoId = @id',
       { id: evento_id }
     );
     
@@ -436,7 +436,7 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     const evento_id = req.params.evento_id;
     
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -449,8 +449,8 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
 
     // Buscar a brincadeira para pegar o tipo
     const brincadeira = await queryOne(
-      `SELECT id, name, type, game_type, empresa_id FROM brincadeiras
-       WHERE id = @id
+      `SELECT brincadeiraId, nome, tipo, tipoJogo, empresaId FROM brincadeira
+       WHERE brincadeiraId = @id
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
     );
@@ -475,12 +475,12 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     
     // 🆕 Resetar dados de leituras anteriores (reset dos dados de jogo)
     await query(
-      `DELETE FROM leituras 
-       WHERE crianca_id IN (
-         SELECT id FROM criancas WHERE evento_id = @eventoId
+      `DELETE FROM leitura 
+       WHERE criancaId IN (
+         SELECT criancaId FROM crianca WHERE eventoId = @eventoId
        )
-       AND brincadeira_id NOT IN (
-         SELECT id FROM brincadeiras 
+       AND brincadeiraId NOT IN (
+         SELECT brincadeiraId FROM brincadeira 
          WHERE LOWER(COALESCE(status, 'active')) = 'archived'
        )`,
       { eventoId: evento_id }
@@ -488,69 +488,69 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     
     // 🆕 Resetar dados de Zone Conquest INDIVIDUAL (na ordem correta das foreign keys)
     await query(
-      `DELETE FROM zone_conquest_individual_scans
-       WHERE evento_id = @eventoId`,
+      `DELETE FROM zonaConquistaLeituraIndividual
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     await query(
-      `DELETE FROM zone_conquest_individual_checkpoint_protection
-       WHERE partida_id IN (
-         SELECT id FROM zone_conquest_individual_partidas WHERE evento_id = @eventoId
+      `DELETE FROM zonaConquistaProtecaoCheckpointIndividual
+       WHERE partidaId IN (
+         SELECT id FROM zonaConquistaPartidaIndividual WHERE eventoId = @eventoId
        )`,
       { eventoId: evento_id }
     );
     await query(
-      `DELETE FROM zone_conquest_individual_participant_states
-       WHERE evento_id = @eventoId`,
+      `DELETE FROM zonaConquistaEstadoParticipanteIndividual
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     await query(
-      `DELETE FROM zone_conquest_individual_partidas
-       WHERE evento_id = @eventoId`,
+      `DELETE FROM zonaConquistaPartidaIndividual
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     
     // 🆕 Resetar dados de Zone Conquest TEAM (na ordem correta das foreign keys)
     await query(
-      `DELETE FROM zone_conquest_team_scans
-       WHERE evento_id = @eventoId`,
+      `DELETE FROM zonaConquistaLeituraTime
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     await query(
-      `DELETE FROM zone_conquest_team_tempos
-       WHERE partida_id IN (
-         SELECT id FROM zone_conquest_team_partidas WHERE evento_id = @eventoId
+      `DELETE FROM zonaConquistaTempoTime
+       WHERE partidaId IN (
+         SELECT id FROM zonaConquistaPartidaTime WHERE eventoId = @eventoId
        )`,
       { eventoId: evento_id }
     );
     await query(
-      `DELETE FROM zone_conquest_team_partidas
-       WHERE evento_id = @eventoId`,
+      `DELETE FROM zonaConquistaPartidaTime
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     
     // 🆕 Resetar scores dos participantes
     await query(
-      `UPDATE criancas SET scores = 0 
-       WHERE evento_id = @eventoId`,
+      `UPDATE crianca SET pontos = 0 
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     
     // 🆕 Resetar pontos dos times
     await query(
-      `UPDATE times SET points = 0 
-       WHERE evento_id = @eventoId`,
+      `UPDATE time SET pontos = 0 
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     
     // 🆕 Resetar domínio dos checkpoints (zona-equipe)
     await query(
-      `UPDATE checkpoints 
-       SET territory_owner_time_id = NULL,
-           territory_locked_until = NULL,
-           territory_cooldown_until = NULL,
-           last_conquered_at = NULL
-       WHERE evento_id = @eventoId`,
+      `UPDATE pontoVerificacao 
+       SET territorioDonoTimeId = NULL,
+           territorioTravadoAte = NULL,
+           territorioCooldownAte = NULL,
+           ultimoConquistadoEm = NULL
+       WHERE eventoId = @eventoId`,
       { eventoId: evento_id }
     );
     
@@ -590,10 +590,10 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     // Registrar o jogo ativo. O status do evento não é mexido aqui: iniciar um
     // jogo só garante que o evento (se ainda agendado) passe a ativo.
     await query(
-      `UPDATE eventos
-       SET active_brincadeira_id = @brincadeiraId,
-           active_game_type = @gameType
-       WHERE id = @id`,
+      `UPDATE evento
+       SET brincadeiraAtivaId = @brincadeiraId,
+           tipoJogoAtivo = @gameType
+       WHERE eventoId = @id`,
       {
         brincadeiraId,
         gameType,
@@ -641,7 +641,7 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
 router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const evento_id = req.params.evento_id;
-    const evento = await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @id', { id: evento_id });
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @id', { id: evento_id });
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
@@ -655,10 +655,10 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
     
     // Parar o jogo não desativa o evento: só limpa o jogo ativo.
     await query(
-      `UPDATE eventos
-       SET active_brincadeira_id = NULL,
-           active_game_type = 'none'
-       WHERE id = @id`,
+      `UPDATE evento
+       SET brincadeiraAtivaId = NULL,
+           tipoJogoAtivo = 'none'
+       WHERE eventoId = @id`,
       { id: evento_id }
     );
     
@@ -695,7 +695,7 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -708,11 +708,11 @@ router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
     }
     
     const checkpoints = await allQuery(`
-      SELECT * FROM checkpoints 
-      WHERE evento_id = @evento_id
-      AND empresa_id = @empresa_id
-      AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
-      ORDER BY name ASC
+      SELECT * FROM pontoVerificacao 
+      WHERE eventoId = @evento_id
+      AND empresaId = @empresa_id
+      AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+      ORDER BY nome ASC
     `, { evento_id, empresa_id });
     res.json(checkpoints);
   } catch (err) {
@@ -728,19 +728,19 @@ router.get('/:id/floor-plan', verifyToken, async (req, res) => {
     console.log(`   👤 User: ${req.user.email} (role: ${req.user.role})`);
     console.log(`   🎯 evento_id: ${id}`);
     
-    let query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+    let query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id';
     let params = { id };
     
     if (isMaster(req)) {
       // Master: acesso total
-      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+      query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id';
     } else if (req.user.role === 'family') {
       // Family: acesso à qualquer evento (para visualizar o mapa/zonas/checkpoints)
       // Permissão mais granular é feita em outros endpoints (pontuação, etc)
-      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id';
+      query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id';
     } else {
       // Admin/Reception/Game Master/Display: vê eventos da sua empresa
-      query = 'SELECT id, empresa_id, floor_plan_data, floor_plan_name, floor_plan_type FROM eventos WHERE id = @id AND empresa_id = @empresa_id';
+      query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id AND empresaId = @empresa_id';
       params.empresa_id = req.user.empresa_id;
     }
     
@@ -779,7 +779,7 @@ router.post('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), asyn
     }
 
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -788,11 +788,11 @@ router.post('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), asyn
     }
 
     await query(
-      `UPDATE eventos
-       SET floor_plan_data = @dataUrl,
-           floor_plan_name = @name,
-           floor_plan_type = @type
-       WHERE id = @id AND empresa_id = @empresa_id`,
+      `UPDATE evento
+       SET dadosPlanoPiso = @dataUrl,
+           nomePlanoPiso = @name,
+           tipoPlanoPiso = @type
+       WHERE eventoId = @id AND empresaId = @empresa_id`,
       {
         dataUrl,
         name: String(name || 'planta-do-evento').slice(0, 255),
@@ -812,7 +812,7 @@ router.post('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), asyn
 router.delete('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -821,11 +821,11 @@ router.delete('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), as
     }
 
     await query(
-      `UPDATE eventos
-       SET floor_plan_data = NULL,
-           floor_plan_name = NULL,
-           floor_plan_type = NULL
-       WHERE id = @id AND empresa_id = @empresa_id`,
+      `UPDATE evento
+       SET dadosPlanoPiso = NULL,
+           nomePlanoPiso = NULL,
+           tipoPlanoPiso = NULL
+       WHERE eventoId = @id AND empresaId = @empresa_id`,
       { id: evento.id, empresa_id: evento.empresa_id }
     );
     res.json({ success: true, eventId: evento.id });
@@ -846,13 +846,13 @@ router.get('/:id', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master pode ver qualquer evento
       evento = await queryOne(
-        'SELECT * FROM eventos WHERE id = @id', 
+        'SELECT * FROM evento WHERE eventoId = @id', 
         { id: req.params.id }
       );
     } else {
       // Usuário regular vê apenas eventos da sua empresa
       evento = await queryOne(
-        'SELECT * FROM eventos WHERE id = @id AND empresa_id = @empresa_id', 
+        'SELECT * FROM evento WHERE eventoId = @id AND empresaId = @empresa_id', 
         { id: req.params.id, empresa_id }
       );
     }
@@ -872,7 +872,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // Verificar que o evento pertence à empresa (ou user é master)
     const evento = await queryOne(
-      'SELECT empresa_id FROM eventos WHERE id = @id',
+      'SELECT empresaId FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
 
@@ -901,18 +901,18 @@ router.put('/:id', verifyToken, async (req, res) => {
     const flag = (value) => (value === undefined ? null : (value ? 1 : 0));
     await withTransaction(async () => {
       await query(
-        `UPDATE eventos SET
-           name = COALESCE(@name, name),
-           description = COALESCE(@description, description),
-           date = COALESCE(@date, date),
-           time = COALESCE(@time, time),
-           duration = COALESCE(@duration, duration),
-           enable_display = COALESCE(@enableDisplay, enable_display),
-           enable_location = COALESCE(@enableLocation, enable_location),
-           responsible_name = COALESCE(@responsibleName, responsible_name),
-           auto_start = COALESCE(@autoStart, auto_start),
-           auto_end = COALESCE(@autoEnd, auto_end)
-         WHERE id = @id`,
+        `UPDATE evento SET
+           nome = COALESCE(@name, nome),
+           descricao = COALESCE(@description, descricao),
+           data = COALESCE(@date, data),
+           hora = COALESCE(@time, hora),
+           duracao = COALESCE(@duration, duracao),
+           exibirDisplay = COALESCE(@enableDisplay, exibirDisplay),
+           exibirLocalizacao = COALESCE(@enableLocation, exibirLocalizacao),
+           nomeResponsavel = COALESCE(@responsibleName, nomeResponsavel),
+           autoInicio = COALESCE(@autoStart, autoInicio),
+           autoFim = COALESCE(@autoEnd, autoFim)
+         WHERE eventoId = @id`,
         {
           name: name || null,
           description: description ?? null,
@@ -942,7 +942,7 @@ router.put('/:id', verifyToken, async (req, res) => {
 router.post('/:id/start', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -956,7 +956,7 @@ router.post('/:id/start', verifyToken, requireRole('admin', 'master'), async (re
     const changed = await startEvent(evento.id, { source: 'manual' });
     if (!changed) return res.status(409).json({ error: 'Este evento já está ativo.' });
 
-    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
     res.json({ started: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao iniciar evento:', err);
@@ -968,7 +968,7 @@ router.post('/:id/start', verifyToken, requireRole('admin', 'master'), async (re
 router.post('/:id/finish', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -985,7 +985,7 @@ router.post('/:id/finish', verifyToken, requireRole('admin', 'master'), async (r
     const result = await finishEvent(evento.id, { source: 'manual', stopGame: global.stopGameForEvento });
     if (!result.changed) return res.status(409).json({ error: 'Este evento já foi encerrado.' });
 
-    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
     res.json({ finished: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao encerrar evento:', err);
@@ -1017,7 +1017,7 @@ function parseSchedule({ date, time, duration }) {
 router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -1041,9 +1041,9 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
     }
 
     const result = await query(
-      `UPDATE eventos
-       SET date = @date, time = @time, duration = COALESCE(@duration, duration)
-       WHERE id = @id AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
+      `UPDATE evento
+       SET data = @date, hora = @time, duracao = COALESCE(@duration, duracao)
+       WHERE eventoId = @id AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
       { date: schedule.date, time: schedule.time, duration: schedule.duration, id: evento.id }
     );
     if (!Number(result?.rowsAffected?.[0] || 0)) {
@@ -1051,7 +1051,7 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
     }
 
     console.log(`📅 [EVENTO] ${evento.id} reagendado para ${schedule.date} ${schedule.time}`);
-    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
     res.json({ rescheduled: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao reagendar evento:', err);
@@ -1063,7 +1063,7 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
 router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -1087,7 +1087,7 @@ router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (r
       return res.status(409).json({ error: 'O evento mudou de situação e não pode ser reaberto agora.' });
     }
 
-    const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
     res.json({ reopened: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao reabrir evento:', err);
@@ -1102,7 +1102,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
     // Verificar que o evento pertence à empresa (ou user é master)
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
 
@@ -1115,7 +1115,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
     }
 
     // Deletar evento
-    await query('DELETE FROM eventos WHERE id = @id', { id: req.params.id });
+    await query('DELETE FROM evento WHERE eventoId = @id', { id: req.params.id });
 
     res.json({ deleted: true });
   } catch (err) {
@@ -1139,8 +1139,8 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
     // 1️⃣ Validar evento existe e pertence à empresa
     const evento = await queryOne(
       isMaster(req)
-        ? 'SELECT id, empresa_id, name, status FROM eventos WHERE id = @id'
-        : 'SELECT id, empresa_id, name, status FROM eventos WHERE id = @id AND empresa_id = @empresa_id',
+        ? 'SELECT eventoId, empresaId, nome, status FROM evento WHERE eventoId = @id'
+        : 'SELECT eventoId, empresaId, nome, status FROM evento WHERE eventoId = @id AND empresaId = @empresa_id',
       isMaster(req)
         ? { id: evento_id }
         : { id: evento_id, empresa_id: req.user.empresa_id }
@@ -1162,7 +1162,7 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
       const newBrincadeiraId = require('uuid').v4().toString();
       
       await query(`
-        INSERT INTO brincadeiras (id, name, description, type, game_type, status, default_points, empresa_id, duration)
+        INSERT INTO brincadeira (brincadeiraId, nome, descricao, tipo, tipoJogo, status, pontosPadrao, empresaId, duracao)
         VALUES (@id, @name, @description, @type, @gameType, @status, @points, @empresa_id, @duration)
       `, {
         id: newBrincadeiraId,
@@ -1182,7 +1182,7 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
 
     // 3️⃣ Validar que a brincadeira existe e pertence à empresa
     const brincadeira = await queryOne(
-      'SELECT id, name, game_type FROM brincadeiras WHERE id = @id AND empresa_id = @empresa_id',
+      'SELECT brincadeiraId, nome, tipoJogo FROM brincadeira WHERE brincadeiraId = @id AND empresaId = @empresa_id',
       { id: finalBrincadeiraId, empresa_id: evento.empresa_id }
     );
 
@@ -1192,11 +1192,11 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
 
     // 4️⃣ Atualizar evento
     await query(`
-      UPDATE eventos
+      UPDATE evento
       SET
-        active_brincadeira_id = @brincadeiraId,
-        active_game_type = @gameType
-      WHERE id = @id
+        brincadeiraAtivaId = @brincadeiraId,
+        tipoJogoAtivo = @gameType
+      WHERE eventoId = @id
     `, {
       id: evento_id,
       brincadeiraId: finalBrincadeiraId,
@@ -1237,7 +1237,7 @@ router.get('/:id/zones', verifyToken, async (req, res) => {
     
     // Verificar que o evento existe
     const evento = await queryOne(
-      'SELECT empresa_id FROM eventos WHERE id = @id',
+      'SELECT empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -1252,7 +1252,7 @@ router.get('/:id/zones', verifyToken, async (req, res) => {
     
     // Carregar zonas do evento
     const zonesData = await queryOne(
-      'SELECT zones_data FROM eventos WHERE id = @id',
+      'SELECT dadosZonas FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -1282,7 +1282,7 @@ router.post('/:id/zones', verifyToken, async (req, res) => {
     
     // Verificar que o evento pertence à empresa (ou user é master)
     const evento = await queryOne(
-      'SELECT empresa_id FROM eventos WHERE id = @id',
+      'SELECT empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -1301,7 +1301,7 @@ router.post('/:id/zones', verifyToken, async (req, res) => {
     // Salvar zonas em JSON
     const zonesJson = JSON.stringify(zones);
     await query(
-      'UPDATE eventos SET zones_data = @zones_data WHERE id = @id',
+      'UPDATE evento SET dadosZonas = @zones_data WHERE eventoId = @id',
       { zones_data: zonesJson, id: evento_id }
     );
     

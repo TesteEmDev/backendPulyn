@@ -19,10 +19,10 @@ router.post('/login', async (req, res) => {
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.id, l.email, l.password, l.status, l.role, l.family_name,
-              e.id as empresa_id, e.nome as empresa_nome, e.[plano]
-       FROM logins l
-       JOIN empresas e ON l.empresa_id = e.id
+      `SELECT l.loginId, l.email, l.senha, l.status, l.perfil, l.nomeFamilia,
+              e.empresaId as empresa_id, e.nome as empresa_nome, e.[plano]
+       FROM login l
+       JOIN empresa e ON l.empresaId = e.empresaId
        WHERE LOWER(l.email) = LOWER(@email)`,
       { email: String(email).trim() }
     );
@@ -66,7 +66,7 @@ router.post('/login', async (req, res) => {
 
     // Atualizar último acesso
     await query(
-      'UPDATE logins SET ultimo_acesso = GETDATE() WHERE id = @id',
+      'UPDATE login SET ultimoAcesso = GETDATE() WHERE loginId = @id',
       { id: login.id }
     );
 
@@ -131,7 +131,7 @@ router.post('/register', async (req, res) => {
     
     // Verificar se email já existe
     const existingLogin = await queryOne(
-      'SELECT id, role, status FROM logins WHERE LOWER(email) = @email',
+      'SELECT loginId, perfil, status FROM login WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
 
@@ -156,7 +156,7 @@ router.post('/register', async (req, res) => {
     const empresaId = crypto.randomUUID();
     
     await query(
-      `INSERT INTO empresas (id, nome, plano, status, data_criacao)
+      `INSERT INTO empresa (empresaId, nome, plano, status, dataCriacao)
        VALUES (@id, @nome, 'family', 'active', GETDATE())`,
       { 
         id: empresaId, 
@@ -171,7 +171,7 @@ router.post('/register', async (req, res) => {
     console.log('📝 Criando login para família...');
     
     await query(
-      `INSERT INTO logins (id, empresa_id, email, password, family_name, role, status, data_criacao)
+      `INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
        VALUES (@id, @empresaId, @email, @password, @familyName, 'family', 'active', GETDATE())`,
       {
         id: loginId,

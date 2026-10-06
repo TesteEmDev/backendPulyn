@@ -41,7 +41,7 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
     const now = new Date();
     
     const checkpoint = await queryOne(
-      'SELECT id FROM checkpoints WHERE id = @id',
+      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpoint_id }
     );
     if (!checkpoint) {
@@ -52,14 +52,14 @@ router.post('/:checkpoint_id/heartbeat', async (req, res) => {
     // validada para não aceitar IDs arbitrários.
     try {
       await query(
-        `UPDATE checkpoints SET status = 'online', last_seen = @now WHERE id = @id`,
+        `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now WHERE checkpointId = @id`,
         { id: checkpoint_id, now }
       );
     } catch (err) {
       // Se coluna last_seen não existe, só atualiza o status
       if (err.message.includes('last_seen')) {
         await query(
-          `UPDATE checkpoints SET status = 'online' WHERE id = @id`,
+          `UPDATE pontoVerificacao SET status = 'online' WHERE checkpointId = @id`,
           { id: checkpoint_id }
         );
       } else {
@@ -81,18 +81,18 @@ router.get('/resumo', verifyToken, async (req, res) => {
   try {
     const rows = await allQuery(`
       SELECT
-        c.evento_id,
-        e.name AS evento_name,
+        c.eventoId,
+        e.nome AS evento_name,
         e.status AS evento_status,
-        e.date AS evento_date,
+        e.data AS evento_date,
         COUNT(*) AS total,
         SUM(CASE WHEN c.status = 'online' THEN 1 ELSE 0 END) AS online
-      FROM checkpoints c
-      INNER JOIN eventos e ON e.id = c.evento_id
-      WHERE e.empresa_id = @empresa_id
-        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
-      GROUP BY c.evento_id, e.name, e.status, e.date
-      ORDER BY e.date DESC
+      FROM pontoVerificacao c
+      INNER JOIN evento e ON e.eventoId = c.eventoId
+      WHERE e.empresaId = @empresa_id
+        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
+      GROUP BY c.eventoId, e.nome, e.status, e.data
+      ORDER BY e.data DESC
     `, { empresa_id: req.user.empresa_id });
 
     res.json(rows.map((row) => {
@@ -122,7 +122,7 @@ router.get('/evento/:evento_id', verifyToken, async (req, res) => {
     console.log(`   🎯 evento_id: ${evento_id}`);
     
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id',
       { evento_id }
     );
 
@@ -140,11 +140,11 @@ router.get('/evento/:evento_id', verifyToken, async (req, res) => {
     }
 
     const checkpoints = await allQuery(
-      `SELECT * FROM checkpoints
-       WHERE evento_id = @evento_id
-         AND empresa_id = @empresa_id
-         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
-       ORDER BY name`,
+      `SELECT * FROM pontoVerificacao
+       WHERE eventoId = @evento_id
+         AND empresaId = @empresa_id
+         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+       ORDER BY nome`,
       { evento_id, empresa_id: evento.empresa_id }
     );
 
@@ -159,8 +159,8 @@ router.get('/evento/:evento_id', verifyToken, async (req, res) => {
 router.get('/:id/config', verifyToken, async (req, res) => {
   try {
     const checkpoint = await queryOne(
-      `SELECT * FROM checkpoints 
-       WHERE id = @id AND empresa_id = @empresa_id`,
+      `SELECT * FROM pontoVerificacao 
+       WHERE checkpointId = @id AND empresaId = @empresa_id`,
       { id: req.params.id, empresa_id: req.user.empresa_id }
     );
 
@@ -170,7 +170,7 @@ router.get('/:id/config', verifyToken, async (req, res) => {
 
     // Buscar tags autorizadas
     const tags = await allQuery(
-      'SELECT tag_uid FROM checkpoint_tags WHERE checkpoint_id = @id',
+      'SELECT tagUid FROM etiquetaCheckpoint WHERE checkpointId = @id',
       { id: req.params.id }
     );
 
@@ -189,12 +189,12 @@ router.get('/:id/territory', async (req, res) => {
   try {
     const checkpoint = await queryOne(
       `SELECT 
-        id,
-        territory_locked_until,
-        territory_cooldown_until,
-        territory_owner_time_id,
-        checkpoint_purpose
-      FROM checkpoints WHERE id = @id`,
+        checkpointId,
+        territorioTravadoAte,
+        territorioCooldownAte,
+        territorioDonoTimeId,
+        proposito
+      FROM pontoVerificacao WHERE checkpointId = @id`,
       { id: req.params.id }
     );
 
@@ -213,7 +213,7 @@ router.get('/:id/territory', async (req, res) => {
     let ownerTeam = null;
     if (checkpoint.territory_owner_time_id) {
       ownerTeam = await queryOne(
-        `SELECT id, name, color FROM times WHERE id = @id`,
+        `SELECT timeId, nome, cor FROM time WHERE timeId = @id`,
         { id: checkpoint.territory_owner_time_id }
       );
     }
@@ -263,7 +263,7 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
 
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
 
@@ -277,7 +277,7 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
 
     // Verificar se checkpoint já existe
     const existing = await queryOne(
-      'SELECT id FROM checkpoints WHERE id = @id AND evento_id = @evento_id',
+      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id AND eventoId = @evento_id',
       { id, evento_id }
     );
 
@@ -287,7 +287,7 @@ router.post('/evento/:evento_id', verifyToken, async (req, res) => {
 
     // ✅ Inserir novo checkpoint COM empresa_id
     await query(`
-      INSERT INTO checkpoints (id, evento_id, empresa_id, name, type, checkpoint_purpose, zone, ip, points, status, authorized_tags, map_x, map_y)
+      INSERT INTO pontoVerificacao (checkpointId, eventoId, empresaId, nome, tipo, proposito, zona, ip, pontos, status, tagsAutorizadas, mapaX, mapaY)
       VALUES (@id, @evento_id, @empresa_id, @name, @type, @checkpoint_purpose, @zone, @ip, @points, @status, @authorized_tags, @map_x, @map_y)
     `, {
       id,
@@ -327,7 +327,7 @@ router.post('/:checkpoint_id/authorize-tags', async (req, res) => {
 
     // ✅ Verificar se checkpoint existe (sem validação de empresa - é Arduino)
     const checkpoint = await queryOne(
-      'SELECT id FROM checkpoints WHERE id = @id',
+      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpoint_id }
     );
 
@@ -336,13 +336,13 @@ router.post('/:checkpoint_id/authorize-tags', async (req, res) => {
     }
 
     // Limpar tags antigas
-    await query('DELETE FROM checkpoint_tags WHERE checkpoint_id = @id', { id: checkpoint_id });
+    await query('DELETE FROM etiquetaCheckpoint WHERE checkpointId = @id', { id: checkpoint_id });
 
     // Inserir novas tags
     for (const tag of tags) {
       if (tag && tag.trim()) {
         await query(
-          'INSERT INTO checkpoint_tags (checkpoint_id, tag_uid) VALUES (@checkpointId, @tagUid)',
+          'INSERT INTO etiquetaCheckpoint (checkpointId, tagUid) VALUES (@checkpointId, @tagUid)',
           { checkpointId: checkpoint_id, tagUid: tag.trim().toUpperCase() }
         );
       }
@@ -363,7 +363,7 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
     const empresa_id = req.user.empresa_id;
 
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@id)',
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@id)',
       { id: evento_id }
     );
 
@@ -376,10 +376,10 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
     }
 
     const checkpoint = await queryOne(
-      `SELECT id, checkpoint_purpose FROM checkpoints
-       WHERE LOWER(id) = LOWER(@id)
-         AND LOWER(evento_id) = LOWER(@evento_id)
-         AND LOWER(empresa_id) = LOWER(@empresa_id)`,
+      `SELECT checkpointId, proposito FROM pontoVerificacao
+       WHERE LOWER(checkpointId) = LOWER(@id)
+         AND LOWER(eventoId) = LOWER(@evento_id)
+         AND LOWER(empresaId) = LOWER(@empresa_id)`,
       { id: checkpoint_id, evento_id, empresa_id }
     );
 
@@ -393,8 +393,8 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
 
     // Não alterar a estrutura de uma partida enquanto o jogo está ativo.
     const activeTreasure = await queryOne(
-      `SELECT id FROM caca_tesouro_partidas
-       WHERE LOWER(evento_id) = LOWER(@evento_id) AND status = 'active'`,
+      `SELECT partidaId FROM cacaTesourPartida
+       WHERE LOWER(eventoId) = LOWER(@evento_id) AND status = 'active'`,
       { evento_id }
     );
     if (activeTreasure) {
@@ -404,8 +404,8 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
     }
 
     const activeMonster = await queryOne(
-      `SELECT id FROM monster_hunt_partidas
-       WHERE LOWER(evento_id) = LOWER(@evento_id) AND status = 'active'`,
+      `SELECT id FROM monsterCacaPartida
+       WHERE LOWER(eventoId) = LOWER(@evento_id) AND status = 'active'`,
       { evento_id }
     );
     if (activeMonster) {
@@ -416,9 +416,9 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
 
     // Remover o checkpoint de históricos JSON de partidas encerradas.
     const treasureSessions = await allQuery(
-      `SELECT id, target_checkpoint_id, completed_checkpoint_ids
-       FROM caca_tesouro_partidas
-       WHERE LOWER(evento_id) = LOWER(@evento_id)`,
+      `SELECT partidaId, checkpointAlvoId, checkpointsCompletadosIds
+       FROM cacaTesourPartida
+       WHERE LOWER(eventoId) = LOWER(@evento_id)`,
       { evento_id }
     );
     for (const session of treasureSessions) {
@@ -426,10 +426,10 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
       const targetWasDeleted = sameId(session.target_checkpoint_id, checkpoint_id);
       if (completed.changed || targetWasDeleted) {
         await query(
-          `UPDATE caca_tesouro_partidas
-           SET target_checkpoint_id = @targetCheckpointId,
-               completed_checkpoint_ids = @completedCheckpointIds
-           WHERE LOWER(id) = LOWER(@partidaId)`,
+          `UPDATE cacaTesourPartida
+           SET checkpointAlvoId = @targetCheckpointId,
+               checkpointsCompletadosIds = @completedCheckpointIds
+           WHERE LOWER(partidaId) = LOWER(@partidaId)`,
           {
             partidaId: session.id,
             targetCheckpointId: targetWasDeleted ? null : session.target_checkpoint_id,
@@ -443,16 +443,16 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
 
     // Remover referências serializadas da configuração dos jogos do evento.
     const brincadeiras = await allQuery(
-      `SELECT id, checkpoints
-       FROM brincadeiras
-       WHERE LOWER(empresa_id) = LOWER(@empresa_id)
+      `SELECT brincadeiraId, checkpoints
+       FROM brincadeira
+       WHERE LOWER(empresaId) = LOWER(@empresa_id)
          AND LOWER(COALESCE(status, 'active')) <> 'archived'
          AND (
-           LOWER(evento_id) = LOWER(@evento_id)
+           LOWER(eventoId) = LOWER(@evento_id)
            OR EXISTS (
-             SELECT 1 FROM evento_brincadeiras eb
-             WHERE LOWER(eb.brincadeira_id) = LOWER(brincadeiras.id)
-               AND LOWER(eb.evento_id) = LOWER(@evento_id)
+             SELECT 1 FROM eventoBrincadeira eb
+             WHERE LOWER(eb.brincadeiraId) = LOWER(brincadeira.brincadeiraId)
+               AND LOWER(eb.eventoId) = LOWER(@evento_id)
            )
          )`,
       { empresa_id: evento.empresa_id, evento_id }
@@ -461,8 +461,8 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
       const cleaned = removeCheckpointFromJson(brincadeira.checkpoints, checkpoint_id);
       if (cleaned.changed) {
         await query(
-          `UPDATE brincadeiras SET checkpoints = @checkpoints
-           WHERE LOWER(id) = LOWER(@brincadeiraId)`,
+          `UPDATE brincadeira SET checkpoints = @checkpoints
+           WHERE LOWER(brincadeiraId) = LOWER(@brincadeiraId)`,
           { brincadeiraId: brincadeira.id, checkpoints: cleaned.value }
         );
       }
@@ -471,38 +471,38 @@ router.delete('/evento/:evento_id/:checkpoint_id', verifyToken, async (req, res)
     // As FKs do schema não usam ON DELETE CASCADE; limpar dependências antes
     // do registro principal evita a violação de FK sem afetar outros eventos.
     await query(
-      `DELETE FROM monster_hunt_scans
-       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)
-         AND LOWER(evento_id) = LOWER(@evento_id)`,
+      `DELETE FROM monsterCacaLeitura
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+         AND LOWER(eventoId) = LOWER(@evento_id)`,
       { checkpointId: checkpoint.id, evento_id }
     );
     await query(
-      `DELETE FROM caca_tesouro_scans
-       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)
-         AND LOWER(evento_id) = LOWER(@evento_id)`,
+      `DELETE FROM cacaTesourScan
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+         AND LOWER(eventoId) = LOWER(@evento_id)`,
       { checkpointId: checkpoint.id, evento_id }
     );
     await query(
-      `DELETE FROM pontuacoes
-       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)
-         AND LOWER(evento_id) = LOWER(@evento_id)`,
+      `DELETE FROM pontuacao
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+         AND LOWER(eventoId) = LOWER(@evento_id)`,
       { checkpointId: checkpoint.id, evento_id }
     );
     await query(
-      `DELETE FROM leituras
-       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)`,
+      `DELETE FROM leitura
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
       { checkpointId: checkpoint.id }
     );
     await query(
-      `DELETE FROM checkpoint_tags
-       WHERE LOWER(checkpoint_id) = LOWER(@checkpointId)`,
+      `DELETE FROM etiquetaCheckpoint
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
       { checkpointId: checkpoint.id }
     );
     await query(
-      `DELETE FROM checkpoints
-       WHERE LOWER(id) = LOWER(@checkpointId)
-         AND LOWER(evento_id) = LOWER(@evento_id)
-         AND LOWER(empresa_id) = LOWER(@empresa_id)`,
+      `DELETE FROM pontoVerificacao
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+         AND LOWER(eventoId) = LOWER(@evento_id)
+         AND LOWER(empresaId) = LOWER(@empresa_id)`,
       { checkpointId: checkpoint.id, evento_id, empresa_id }
     );
 
@@ -521,7 +521,7 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
 
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
 
@@ -538,7 +538,7 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
     let params = { id, evento_id };
 
     if (name !== undefined) {
-      updateFields.push('name = @name');
+      updateFields.push('nome = @name');
       params.name = name;
     }
     if (status !== undefined) {
@@ -546,15 +546,15 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
       params.status = status;
     }
     if (location !== undefined) {
-      updateFields.push('location = @location');
+      updateFields.push('localizacao = @location');
       params.location = location;
     }
     if (type !== undefined) {
-      updateFields.push('type = @type');
+      updateFields.push('tipo = @type');
       params.type = type;
     }
     if (zone !== undefined) {
-      updateFields.push('zone = @zone');
+      updateFields.push('zona = @zone');
       params.zone = zone;
     }
     if (ip !== undefined) {
@@ -562,19 +562,19 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
       params.ip = ip;
     }
     if (points !== undefined) {
-      updateFields.push('points = @points');
+      updateFields.push('pontos = @points');
       params.points = points;
     }
     if (authorizedTags !== undefined) {
-      updateFields.push('authorized_tags = @authorized_tags');
+      updateFields.push('tagsAutorizadas = @authorized_tags');
       params.authorized_tags = authorizedTags ? JSON.stringify(authorizedTags) : null;
     }
     if (mapX !== undefined) {
-      updateFields.push('map_x = @map_x');
+      updateFields.push('mapaX = @map_x');
       params.map_x = Number.isFinite(Number(mapX)) ? Math.round(Number(mapX)) : null;
     }
     if (mapY !== undefined) {
-      updateFields.push('map_y = @map_y');
+      updateFields.push('mapaY = @map_y');
       params.map_y = Number.isFinite(Number(mapY)) ? Math.round(Number(mapY)) : null;
     }
 
@@ -583,9 +583,9 @@ router.post('/evento/:evento_id/config/:id', verifyToken, async (req, res) => {
     }
 
     const updateQuery = `
-      UPDATE checkpoints 
+      UPDATE pontoVerificacao 
       SET ${updateFields.join(', ')}
-      WHERE id = @id AND evento_id = @evento_id AND empresa_id = @empresa_id
+      WHERE checkpointId = @id AND eventoId = @evento_id AND empresaId = @empresa_id
     `;
     
     params.empresa_id = empresa_id; // ✅ Validar empresa_id

@@ -20,39 +20,39 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     
     // Eventos em andamento (com empresa_id e não da Master)
     const activeEvents = await queryOne(`
-      SELECT COUNT(*) as count FROM eventos e
-      LEFT JOIN empresas emp ON e.empresa_id = emp.id
+      SELECT COUNT(*) as count FROM evento e
+      LEFT JOIN empresa emp ON e.empresaId = emp.empresaId
       WHERE (e.status = 'active' OR e.status = 'scheduled')
-        AND e.empresa_id IS NOT NULL
+        AND e.empresaId IS NOT NULL
         AND emp.nome != 'Master Admin'
     `);
     
     // Checkpoints online
     const onlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
-      FROM checkpoints c
-      LEFT JOIN empresas emp ON c.empresa_id = emp.id
+      FROM pontoVerificacao c
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE c.status = 'online'
-        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
+        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
         AND emp.nome != 'Master Admin'
     `);
     
     // Crianças ativas hoje
     const activeChildren = await queryOne(`
       SELECT COUNT(*) as count
-      FROM criancas c
-      LEFT JOIN empresas emp ON c.empresa_id = emp.id
-      WHERE CAST(GETDATE() AS DATE) = CAST(c.created_at AS DATE)
+      FROM crianca c
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
+      WHERE CAST(GETDATE() AS DATE) = CAST(c.criadoEm AS DATE)
         AND emp.nome != 'Master Admin'
     `);
     
     // Checkpoints offline
     const offlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
-      FROM checkpoints c
-      LEFT JOIN empresas emp ON c.empresa_id = emp.id
+      FROM pontoVerificacao c
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE (c.status = 'offline' OR c.status IS NULL)
-        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
+        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
         AND emp.nome != 'Master Admin'
     `);
     
@@ -118,20 +118,20 @@ router.get('/active-events', verifyToken, async (req, res) => {
     // minúsculo do Postgres, então childrenCount chegava undefined).
     const rows = await allQuery(`
       SELECT TOP 10
-        e.id,
-        e.name,
-        e.empresa_id,
+        e.eventoId,
+        e.nome,
+        e.empresaId,
         e2.nome as client,
-        (SELECT COUNT(*) FROM criancas WHERE evento_id = e.id) as children_count,
+        (SELECT COUNT(*) FROM crianca WHERE eventoId = e.eventoId) as children_count,
         e.status,
-        e.date as event_date,
-        e.created_at
-      FROM eventos e
-      LEFT JOIN empresas e2 ON e.empresa_id = e2.id
+        e.data as event_date,
+        e.criadoEm
+      FROM evento e
+      LEFT JOIN empresa e2 ON e.empresaId = e2.empresaId
       WHERE e.status IN ('active', 'scheduled')
-        AND e.empresa_id IS NOT NULL
+        AND e.empresaId IS NOT NULL
         AND e2.nome != 'Master Admin'
-      ORDER BY e.date DESC
+      ORDER BY e.data DESC
     `);
 
     const now = Date.now();
@@ -174,16 +174,16 @@ router.get('/alerts', verifyToken, async (req, res) => {
     // SQL Server e Postgres).
     const offlineCheckpoints = await allQuery(`
       SELECT TOP 5
-        c.id,
-        c.name,
-        c.zone,
-        c.last_seen,
+        c.checkpointId,
+        c.nome,
+        c.zona,
+        c.ultimoVisto,
         emp.nome as empresa_nome
-      FROM checkpoints c
-      LEFT JOIN empresas emp ON c.empresa_id = emp.id
+      FROM pontoVerificacao c
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE c.status = 'offline'
-        AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
-      ORDER BY c.last_seen DESC
+        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
+      ORDER BY c.ultimoVisto DESC
     `);
 
     const alerts = offlineCheckpoints.map((cp) => ({

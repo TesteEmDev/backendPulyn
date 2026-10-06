@@ -23,22 +23,22 @@ router.get('/', verifyToken, async (req, res) => {
         ? listPlatformClients().then((list) =>
             list.map((c) => ({ id: c.id, empresa_nome: c.name, data_criacao: c.createdAt })))
         : allQuery(`
-            SELECT id, nome as empresa_nome, data_criacao
-            FROM empresas
-            WHERE nome <> 'Master Admin' AND id = @empresa_id
+            SELECT empresaId, nome as empresa_nome, dataCriacao
+            FROM empresa
+            WHERE nome <> 'Master Admin' AND empresaId = @empresa_id
           `, { empresa_id }),
       allQuery(`
-        SELECT id, client as empresa_nome, subject, status, created_at
-        FROM support_tickets
-        WHERE 1=1 ${master ? '' : 'AND empresa_id = @empresa_id'}
+        SELECT ticketId, cliente as empresa_nome, assunto, status, criadoEm
+        FROM chamadoSuport
+        WHERE 1=1 ${master ? '' : 'AND empresaId = @empresa_id'}
       `, { empresa_id }),
       allQuery(`
-        SELECT c.id, c.name, c.zone, c.last_seen, emp.nome as empresa_nome
-        FROM checkpoints c
-        LEFT JOIN empresas emp ON c.empresa_id = emp.id
+        SELECT c.checkpointId, c.nome, c.zona, c.ultimoVisto, emp.nome as empresa_nome
+        FROM pontoVerificacao c
+        LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
         WHERE c.status = 'offline'
-          AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
-          ${master ? '' : 'AND c.empresa_id = @empresa_id'}
+          AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
+          ${master ? '' : 'AND c.empresaId = @empresa_id'}
       `, { empresa_id }),
     ]);
 
@@ -86,7 +86,7 @@ router.post('/', verifyToken, async (req, res) => {
     const empresa_id = req.user.empresa_id;
     
     await query(
-      `INSERT INTO logs (tipo, cliente_id, evento_id, message, details, empresa_id) 
+      `INSERT INTO log (tipo, clienteId, eventoId, mensagem, detalhes, empresaId) 
        VALUES (@tipo, @cliente_id, @evento_id, @message, @details, @empresa_id)`,
       { tipo, cliente_id, evento_id, message, details, empresa_id }
     );

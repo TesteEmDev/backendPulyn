@@ -16,25 +16,25 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
   if (!eventoId || !partidaId || !gameType || !teamId) return { awarded: false, reason: 'missing-data' };
 
   const already = await queryOne(
-    'SELECT id FROM game_winner_bonuses WHERE LOWER(partida_id) = LOWER(@partidaId) AND game_type = @gameType',
+    'SELECT id FROM bonusVencedorJogo WHERE LOWER(partidaId) = LOWER(@partidaId) AND tipoJogo = @gameType',
     { partidaId, gameType }
   );
   if (already) return { awarded: false, reason: 'already-awarded' };
 
   const team = await queryOne(
-    'SELECT id, name, color, empresa_id FROM times WHERE LOWER(id) = LOWER(@teamId) AND LOWER(evento_id) = LOWER(@eventoId)',
+    'SELECT timeId, nome, cor, empresaId FROM time WHERE LOWER(timeId) = LOWER(@teamId) AND LOWER(eventoId) = LOWER(@eventoId)',
     { teamId, eventoId }
   );
   if (!team) return { awarded: false, reason: 'team-not-found' };
 
   const members = await allQuery(
-    'SELECT id FROM criancas WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(time_id) = LOWER(@teamId)',
+    'SELECT criancaId FROM crianca WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(timeId) = LOWER(@teamId)',
     { eventoId, teamId: team.id }
   );
 
   await query(
-    `INSERT INTO game_winner_bonuses
-       (id, empresa_id, evento_id, partida_id, game_type, time_id, points_per_member, members_awarded)
+    `INSERT INTO bonusVencedorJogo
+       (id, empresaId, eventoId, partidaId, tipoJogo, timeId, pontosPorMembro, membrosPremiados)
      VALUES (@id, @empresaId, @eventoId, @partidaId, @gameType, @teamId, @points, @members)`,
     {
       id: uuidv4(),
@@ -50,13 +50,13 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
 
   if (members.length > 0) {
     await query(
-      `UPDATE criancas SET scores = COALESCE(scores, 0) + @points
-       WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(time_id) = LOWER(@teamId)`,
+      `UPDATE crianca SET pontos = COALESCE(pontos, 0) + @points
+       WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(timeId) = LOWER(@teamId)`,
       { points, eventoId, teamId: team.id }
     );
     await query(
-      `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @teamId)
-       WHERE id = @teamId`,
+      `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @teamId)
+       WHERE timeId = @teamId`,
       { teamId: team.id }
     );
   }

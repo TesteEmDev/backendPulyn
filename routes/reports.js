@@ -21,48 +21,48 @@ router.get('/overview', async (req, res) => {
 
     const [eventRows, topParticipants, topTeams, topCheckpoints, topGames] = await Promise.all([
       allQuery(`
-        SELECT e.id, e.name, CAST(e.date AS VARCHAR(10)) AS date, e.status,
-          (SELECT COUNT(*) FROM criancas c WHERE c.evento_id = e.id) AS participants,
-          (SELECT COALESCE(SUM(c.scores), 0) FROM criancas c WHERE c.evento_id = e.id) AS total_points,
-          (SELECT COUNT(*) FROM times t WHERE t.evento_id = e.id) AS teams,
-          (SELECT COUNT(*) FROM pontuacoes p WHERE p.evento_id = e.id) AS scorings
-        FROM eventos e
-        WHERE e.empresa_id = @empresaId
-        ORDER BY e.date DESC, e.created_at DESC
+        SELECT e.eventoId, e.nome, CAST(e.data AS VARCHAR(10)) AS date, e.status,
+          (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS participants,
+          (SELECT COALESCE(SUM(c.pontos), 0) FROM crianca c WHERE c.eventoId = e.eventoId) AS total_points,
+          (SELECT COUNT(*) FROM time t WHERE t.eventoId = e.eventoId) AS teams,
+          (SELECT COUNT(*) FROM pontuacao p WHERE p.eventoId = e.eventoId) AS scorings
+        FROM evento e
+        WHERE e.empresaId = @empresaId
+        ORDER BY e.data DESC, e.criadoEm DESC
       `, params),
       allQuery(`
-        SELECT TOP 10 c.id, c.name, c.nickname, c.age, c.scores,
-          COALESCE(c.bracelet_code, c.last_bracelet_code) AS bracelet_code,
-          e.name AS event_name, t.name AS team_name, t.color AS team_color
-        FROM criancas c
-        JOIN eventos e ON e.id = c.evento_id
-        LEFT JOIN times t ON t.id = c.time_id
-        WHERE e.empresa_id = @empresaId AND c.status = 'active'
-        ORDER BY c.scores DESC
+        SELECT TOP 10 c.criancaId, c.nome, c.apelido, c.idade, c.pontos,
+          COALESCE(c.codigoPulseira, c.ultimaPulseira) AS bracelet_code,
+          e.nome AS event_name, t.nome AS team_name, t.cor AS team_color
+        FROM crianca c
+        JOIN evento e ON e.eventoId = c.eventoId
+        LEFT JOIN time t ON t.timeId = c.timeId
+        WHERE e.empresaId = @empresaId AND c.status = 'active'
+        ORDER BY c.pontos DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 t.id, t.name, t.color, t.points, e.name AS event_name
-        FROM times t
-        JOIN eventos e ON e.id = t.evento_id
-        WHERE e.empresa_id = @empresaId
-        ORDER BY t.points DESC
+        SELECT TOP 5 t.timeId, t.nome, t.cor, t.pontos, e.nome AS event_name
+        FROM time t
+        JOIN evento e ON e.eventoId = t.eventoId
+        WHERE e.empresaId = @empresaId
+        ORDER BY t.pontos DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 cp.id, cp.name, cp.zone, e.name AS event_name, COUNT(p.id) AS readings
-        FROM pontuacoes p
-        JOIN checkpoints cp ON cp.id = p.checkpoint_id
-        JOIN eventos e ON e.id = p.evento_id
-        WHERE e.empresa_id = @empresaId
-        GROUP BY cp.id, cp.name, cp.zone, e.name
+        SELECT TOP 5 cp.checkpointId, cp.nome, cp.zona, e.nome AS event_name, COUNT(p.pontuacaoId) AS readings
+        FROM pontuacao p
+        JOIN pontoVerificacao cp ON cp.checkpointId = p.checkpointId
+        JOIN evento e ON e.eventoId = p.eventoId
+        WHERE e.empresaId = @empresaId
+        GROUP BY cp.checkpointId, cp.nome, cp.zona, e.nome
         ORDER BY readings DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 b.id, b.name, COUNT(p.id) AS plays
-        FROM pontuacoes p
-        JOIN brincadeiras b ON b.id = CAST(p.brincadeira_id AS VARCHAR(36))
-        JOIN eventos e ON e.id = p.evento_id
-        WHERE e.empresa_id = @empresaId
-        GROUP BY b.id, b.name
+        SELECT TOP 5 b.brincadeiraId, b.nome, COUNT(p.pontuacaoId) AS plays
+        FROM pontuacao p
+        JOIN brincadeira b ON b.brincadeiraId = CAST(p.brincadeiraId AS VARCHAR(36))
+        JOIN evento e ON e.eventoId = p.eventoId
+        WHERE e.empresaId = @empresaId
+        GROUP BY b.brincadeiraId, b.nome
         ORDER BY plays DESC
       `, params),
     ]);

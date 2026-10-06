@@ -57,8 +57,8 @@ const round1 = (value) => Math.round(value * 10) / 10;
 const sumMrr = (clients) => clients.filter(isActive).reduce((sum, c) => sum + planPrice(c), 0);
 
 // Escopo "de clientes": eventos de empresas (não os de teste sem empresa nem da conta Master).
-const CUSTOMER_EVENTS = `e.empresa_id IS NOT NULL
-  AND e.empresa_id NOT IN (SELECT id FROM empresas WHERE nome = 'Master Admin')`;
+const CUSTOMER_EVENTS = `e.empresaId IS NOT NULL
+  AND e.empresaId NOT IN (SELECT empresaId FROM empresa WHERE nome = 'Master Admin')`;
 
 // ✅ Indicadores gerais
 router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master pode ver métricas globais'), async (req, res) => {
@@ -71,24 +71,24 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           SUM(CASE WHEN LOWER(COALESCE(e.status, '')) IN ('active', 'ongoing') THEN 1 ELSE 0 END) AS active,
           SUM(CASE WHEN LOWER(COALESCE(e.status, '')) = 'scheduled' THEN 1 ELSE 0 END) AS scheduled,
           SUM(CASE WHEN LOWER(COALESCE(e.status, '')) IN ('finished', 'completed') THEN 1 ELSE 0 END) AS finished
-        FROM eventos e
+        FROM evento e
         WHERE ${CUSTOMER_EVENTS}
       `),
       queryOne(`
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(k.status, '')) = 'online' THEN 1 ELSE 0 END) AS online
-        FROM checkpoints k
-        JOIN eventos e ON e.id = k.evento_id
-        WHERE LOWER(COALESCE(k.checkpoint_purpose, 'game')) <> 'reception'
+        FROM pontoVerificacao k
+        JOIN evento e ON e.eventoId = k.eventoId
+        WHERE LOWER(COALESCE(k.proposito, 'game')) <> 'reception'
           AND ${CUSTOMER_EVENTS}
       `),
       queryOne(`
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(c.status, 'active')) = 'active' THEN 1 ELSE 0 END) AS active
-        FROM criancas c
-        JOIN eventos e ON e.id = c.evento_id
+        FROM crianca c
+        JOIN evento e ON e.eventoId = c.eventoId
         WHERE ${CUSTOMER_EVENTS}
       `),
     ]);
@@ -157,9 +157,9 @@ router.get('/client-growth', verifyToken, requireMaster('Acesso negado: apenas m
 router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apenas master pode ver eventos globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
-      SELECT TO_CHAR(e.date, 'YYYY-MM') AS month, LOWER(COALESCE(e.status, '')) AS status
-      FROM eventos e
-      WHERE e.date IS NOT NULL AND ${CUSTOMER_EVENTS}
+      SELECT TO_CHAR(e.data, 'YYYY-MM') AS month, LOWER(COALESCE(e.status, '')) AS status
+      FROM evento e
+      WHERE e.data IS NOT NULL AND ${CUSTOMER_EVENTS}
     `);
     if (!rows.length) return res.json([]);
 
@@ -196,10 +196,10 @@ router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apena
 router.get('/checkpoints-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver checkpoints globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
-      SELECT k.created_at
-      FROM checkpoints k
-      JOIN eventos e ON e.id = k.evento_id
-      WHERE LOWER(COALESCE(k.checkpoint_purpose, 'game')) <> 'reception'
+      SELECT k.criadoEm
+      FROM pontoVerificacao k
+      JOIN evento e ON e.eventoId = k.eventoId
+      WHERE LOWER(COALESCE(k.proposito, 'game')) <> 'reception'
         AND ${CUSTOMER_EVENTS}
     `);
 

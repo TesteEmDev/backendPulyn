@@ -39,9 +39,9 @@ router.post('/readings', async (req, res) => {
     }
 
     const event = await queryOne(
-      `SELECT id, empresa_id, status
-       FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
+      `SELECT eventoId, empresaId, status
+       FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId, empresaId: req.user.empresa_id }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -70,8 +70,8 @@ router.post('/readings', async (req, res) => {
 router.get('/events/:eventId/score-readings', async (req, res) => {
   try {
     const event = await queryOne(
-      `SELECT id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
+      `SELECT eventoId, status FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresa_id }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -90,11 +90,11 @@ router.get('/events/:eventId/score-readings', async (req, res) => {
 router.get('/events', async (req, res) => {
   try {
     const events = await allQuery(
-      `SELECT id, name, date, time, duration, status
-       FROM eventos
-       WHERE empresa_id = @empresaId
+      `SELECT eventoId, nome, data, hora, duracao, status
+       FROM evento
+       WHERE empresaId = @empresaId
          AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
-       ORDER BY date DESC`,
+       ORDER BY data DESC`,
       { empresaId: req.user.empresa_id }
     );
     res.json(events || []);
@@ -107,8 +107,8 @@ router.get('/events', async (req, res) => {
 router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const event = await queryOne(
-      `SELECT id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
+      `SELECT eventoId, status FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresa_id }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -130,42 +130,42 @@ router.get('/events/:eventId/bracelets/:code/score', async (req, res) => {
     if (!code) return res.status(400).json({ error: 'Código da pulseira inválido' });
 
     const event = await queryOne(
-      `SELECT id, empresa_id, name, status
-       FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
+      `SELECT eventoId, empresaId, nome, status
+       FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresa_id }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const child = await queryOne(
-      `SELECT c.id, c.name, c.nickname, c.avatar, c.scores, c.evento_id,
-              t.name AS team_name, t.color AS team_color
-       FROM pulseiras p
-       JOIN criancas c ON c.id = p.crianca_id
-         AND c.empresa_id = p.empresa_id
-         AND c.evento_id = @eventId
-         AND ${uidSqlExpression('c.bracelet_code')} = @code
-       LEFT JOIN times t ON t.id = c.time_id
-         AND t.evento_id = c.evento_id
-         AND t.empresa_id = c.empresa_id
-       WHERE ${uidSqlExpression('p.code')} = @code
-         AND p.empresa_id = @empresaId
+      `SELECT c.criancaId, c.nome, c.apelido, c.avatar, c.pontos, c.eventoId,
+              t.nome AS team_name, t.cor AS team_color
+       FROM pulseira p
+       JOIN crianca c ON c.criancaId = p.criancaId
+         AND c.empresaId = p.empresaId
+         AND c.eventoId = @eventId
+         AND ${uidSqlExpression('c.codigoPulseira')} = @code
+       LEFT JOIN time t ON t.timeId = c.timeId
+         AND t.eventoId = c.eventoId
+         AND t.empresaId = c.empresaId
+       WHERE ${uidSqlExpression('p.codigo')} = @code
+         AND p.empresaId = @empresaId
          AND LOWER(COALESCE(p.status, '')) = 'em_uso'
-         AND p.crianca_id IS NOT NULL`,
+         AND p.criancaId IS NOT NULL`,
       { code, eventId: event.id, empresaId: event.empresa_id }
     );
     if (!child) return res.status(404).json({ error: 'Pulseira não vinculada a uma criança deste evento' });
 
     const scores = await allQuery(
-      `SELECT TOP 5 p.id, p.points, p.created_at,
-              cp.name AS checkpoint_name
-       FROM pontuacoes p
-       LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
-       WHERE p.crianca_id = @childId
-         AND p.evento_id = @eventId
-         AND p.empresa_id = @empresaId
-       ORDER BY p.created_at DESC`,
+      `SELECT TOP 5 p.pontuacaoId, p.pontos, p.criadoEm,
+              cp.nome AS checkpoint_name
+       FROM pontuacao p
+       LEFT JOIN pontoVerificacao cp ON cp.checkpointId = p.checkpointId
+       WHERE p.criancaId = @childId
+         AND p.eventoId = @eventId
+         AND p.empresaId = @empresaId
+       ORDER BY p.criadoEm DESC`,
       { childId: child.id, eventId: event.id, empresaId: event.empresa_id }
     );
 

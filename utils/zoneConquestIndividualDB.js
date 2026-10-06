@@ -34,7 +34,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
     // 1. Validar brincadeira
     const brincadeira = await queryOne(
-      `SELECT id, name, type, empresa_id FROM brincadeiras WHERE id = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
+      `SELECT brincadeiraId, nome, tipo, empresaId FROM brincadeira WHERE brincadeiraId = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
     );
 
@@ -44,7 +44,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
     // 2. Buscar evento
     const evento = await queryOne(
-      `SELECT id, empresa_id FROM eventos WHERE id = @id`,
+      `SELECT eventoId, empresaId FROM evento WHERE eventoId = @id`,
       { id: eventoId }
     );
 
@@ -69,8 +69,8 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
     const agora = new Date();
 
     await query(
-      `INSERT INTO zone_conquest_individual_partidas
-       (id, empresa_id, evento_id, brincadeira_id, status, started_at, created_at, updated_at)
+      `INSERT INTO zonaConquistaPartidaIndividual
+       (id, empresaId, eventoId, brincadeiraId, status, iniciadoEm, criadoEm, atualizadoEm)
        VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', @startedAt, @startedAt, @startedAt)`,
       {
         id: partidaId,
@@ -123,10 +123,10 @@ async function processZoneConquestIndividualScan({
 
     // 1. Obter partida ativa
     const partida = await queryOne(
-      `SELECT * FROM zone_conquest_individual_partidas
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
+      `SELECT * FROM zonaConquistaPartidaIndividual
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
-       ORDER BY started_at DESC`,
+       ORDER BY iniciadoEm DESC`,
       { eventoId }
     );
 
@@ -143,9 +143,9 @@ async function processZoneConquestIndividualScan({
     // 2. Obter participant state com VERSIONNING (para optimistic locking)
     // Se não existir, criar sob demanda
     let participantState = await queryOne(
-      `SELECT * FROM zone_conquest_individual_participant_states
-       WHERE partida_id = @partidaId
-         AND crianca_id = @criancaId`,
+      `SELECT * FROM zonaConquistaEstadoParticipanteIndividual
+       WHERE partidaId = @partidaId
+         AND criancaId = @criancaId`,
       {
         partidaId: partida.id,
         criancaId: crianca.id,
@@ -158,8 +158,8 @@ async function processZoneConquestIndividualScan({
       const participantId = uuidv4();
       const participantColor = generateColorFromId(crianca.id);
       await query(
-        `INSERT INTO zone_conquest_individual_participant_states
-         (id, partida_id, empresa_id, evento_id, crianca_id, status, checkpoints_read, total_points, ranking, color, version, started_at, created_at, updated_at)
+        `INSERT INTO zonaConquistaEstadoParticipanteIndividual
+         (id, partidaId, empresaId, eventoId, criancaId, status, checkpointsLidos, pontosTotais, ranking, cor, versao, iniciadoEm, criadoEm, atualizadoEm)
          VALUES (@id, @partidaId, @empresaId, @eventoId, @criancaId, 'active', 0, 0, NULL, @color, 0, @agora, @agora, @agora)`,
         {
           id: participantId,
@@ -175,7 +175,7 @@ async function processZoneConquestIndividualScan({
       
       // Recarregar o state
       participantState = await queryOne(
-        `SELECT * FROM zone_conquest_individual_participant_states
+        `SELECT * FROM zonaConquistaEstadoParticipanteIndividual
          WHERE id = @id`,
         { id: participantId }
       );
@@ -183,8 +183,8 @@ async function processZoneConquestIndividualScan({
 
     // 3. Validar se leitura já foi processada (CONSTRAINT UNIQUE em leitura_id)
     const existingLeitura = await queryOne(
-      `SELECT id FROM zone_conquest_individual_scans
-       WHERE leitura_id = @leituraId`,
+      `SELECT id FROM zonaConquistaLeituraIndividual
+       WHERE leituraId = @leituraId`,
       { leituraId }
     );
 
@@ -202,9 +202,9 @@ async function processZoneConquestIndividualScan({
     // deste participante nesta partida — se este checkpoint aparecer entre
     // elas, ainda não passou tempo/leituras suficientes.
     const recentScans = await allQuery(
-      `SELECT checkpoint_id FROM zone_conquest_individual_scans
-       WHERE partida_id = @partidaId AND crianca_id = @criancaId
-       ORDER BY scanned_at DESC
+      `SELECT checkpointId FROM zonaConquistaLeituraIndividual
+       WHERE partidaId = @partidaId AND criancaId = @criancaId
+       ORDER BY lidoEm DESC
        LIMIT 3`,
       { partidaId: partida.id, criancaId: crianca.id }
     );
@@ -238,9 +238,9 @@ async function processZoneConquestIndividualScan({
 
       // INSERT scan
       await tx.query(
-        `INSERT INTO zone_conquest_individual_scans
-         (id, partida_id, empresa_id, evento_id, brincadeira_id, checkpoint_id,
-          crianca_id, uid, leitura_id, points_awarded, version, scanned_at)
+        `INSERT INTO zonaConquistaLeituraIndividual
+         (id, partidaId, empresaId, eventoId, brincadeiraId, checkpointId,
+          criancaId, uid, leituraId, pontosAtribuidos, versao, lidoEm)
          VALUES (@id, @partidaId, @empresaId, @eventoId, @brincadeiraId, @checkpointId,
                  @criancaId, @uid, @leituraId, @pontos, @version, @agora)`,
         {
@@ -261,9 +261,9 @@ async function processZoneConquestIndividualScan({
 
       // 🆕 INSERT também em leituras para que scoreLog funcione
       await tx.query(
-        `INSERT INTO leituras
-          (id, checkpoint_id, crianca_id, uid, brincadeira_id, authorized,
-           points_awarded, signal_strength, empresa_id, session_id)
+        `INSERT INTO leitura
+          (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+           pontosAtribuidos, forcaSinal, empresaId, sessaoId)
          VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                  @points, @signal, @empresaId, @sessionId)`,
         {
@@ -282,13 +282,13 @@ async function processZoneConquestIndividualScan({
       // UPDATE participant state com OPTIMISTIC LOCKING
       // Só atualiza se version combina (previne race condition)
       const updateResult = await tx.query(
-        `UPDATE zone_conquest_individual_participant_states SET
-           checkpoints_read = @novosCheckpoints,
-           total_points = @novosPontos,
-           version = @nextVersion,
-           updated_at = @agora
+        `UPDATE zonaConquistaEstadoParticipanteIndividual SET
+           checkpointsLidos = @novosCheckpoints,
+           pontosTotais = @novosPontos,
+           versao = @nextVersion,
+           atualizadoEm = @agora
          WHERE id = @id
-           AND version = @currentVersion`,
+           AND versao = @currentVersion`,
         {
           id: participantState.id,
           novosCheckpoints,
@@ -313,17 +313,17 @@ async function processZoneConquestIndividualScan({
       // nunca em criancas.scores — que é o que o ranking geral do telão
       // ("Top Participantes"), o card de Pontuação e o app da família leem.
       await tx.query(
-        'UPDATE criancas SET scores = scores + @points WHERE id = @criancaId',
+        'UPDATE crianca SET pontos = pontos + @points WHERE criancaId = @criancaId',
         { points: pontos, criancaId: crianca.id }
       );
 
       // UPDATE checkpoint: marcar como dominado pelo participante
       // Em modo INDIVIDUAL, usamos territory_owner_crianca_id (novo campo)
       await tx.query(
-        `UPDATE checkpoints SET
-           territory_owner_crianca_id = @criancaId,
-           last_conquered_at = @agora
-         WHERE id = @checkpointId`,
+        `UPDATE pontoVerificacao SET
+           territorioDonosCriancaId = @criancaId,
+           ultimoConquistadoEm = @agora
+         WHERE checkpointId = @checkpointId`,
         {
           checkpointId,
           criancaId: crianca.id,
@@ -387,16 +387,16 @@ async function recalculateRanking(txOrDb, partidaId) {
 
     // Buscar todos os participantes ordenados por pontos
     const participantes = await allQueryFn(
-      `SELECT id FROM zone_conquest_individual_participant_states
-       WHERE partida_id = @partidaId
-       ORDER BY total_points DESC`,
+      `SELECT id FROM zonaConquistaEstadoParticipanteIndividual
+       WHERE partidaId = @partidaId
+       ORDER BY pontosTotais DESC`,
       { partidaId }
     );
 
     // Atualizar ranking
     for (let i = 0; i < participantes.length; i++) {
       await queryFn(
-        `UPDATE zone_conquest_individual_participant_states SET
+        `UPDATE zonaConquistaEstadoParticipanteIndividual SET
            ranking = @ranking
          WHERE id = @id`,
         {
@@ -420,10 +420,10 @@ async function getActiveZoneConquestIndividualGame(eventoId) {
   try {
     console.log(`   🔍 [ZONE-INDIVIDUAL] Buscando partida ativa para evento: ${eventoId}`);
     const partida = await queryOne(
-      `SELECT * FROM zone_conquest_individual_partidas
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
+      `SELECT * FROM zonaConquistaPartidaIndividual
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
-       ORDER BY started_at DESC`,
+       ORDER BY iniciadoEm DESC`,
       { eventoId }
     );
 
@@ -447,15 +447,15 @@ async function getZoneConquestIndividualRanking(partidaId) {
     const ranking = await allQuery(
       `SELECT 
          ps.id,
-         ps.crianca_id,
-         c.name,
-         ps.total_points,
-         ps.checkpoints_read,
+         ps.criancaId,
+         c.nome,
+         ps.pontosTotais,
+         ps.checkpointsLidos,
          ps.ranking,
          ps.status
-       FROM zone_conquest_individual_participant_states ps
-       INNER JOIN criancas c ON c.id = ps.crianca_id
-       WHERE ps.partida_id = @partidaId
+       FROM zonaConquistaEstadoParticipanteIndividual ps
+       INNER JOIN crianca c ON c.criancaId = ps.criancaId
+       WHERE ps.partidaId = @partidaId
        ORDER BY ps.ranking ASC`,
       { partidaId }
     );
@@ -488,11 +488,11 @@ async function getZoneConquestIndividualStatus(eventoId) {
 
     // 3. Obter checkpoints dominados
     const allCheckpoints = await allQuery(
-      `SELECT c.id, c.name, c.territory_owner_crianca_id AS owner_crianca_id, cr.name AS owner_name, ps.color AS owner_color
-       FROM checkpoints c
-       LEFT JOIN criancas cr ON cr.id = c.territory_owner_crianca_id
-       LEFT JOIN zone_conquest_individual_participant_states ps ON ps.crianca_id = c.territory_owner_crianca_id
-       WHERE c.evento_id = @eventoId`,
+      `SELECT c.checkpointId, c.nome, c.territorioDonosCriancaId AS owner_crianca_id, cr.nome AS owner_name, ps.cor AS owner_color
+       FROM pontoVerificacao c
+       LEFT JOIN crianca cr ON cr.criancaId = c.territorioDonosCriancaId
+       LEFT JOIN zonaConquistaEstadoParticipanteIndividual ps ON ps.criancaId = c.territorioDonosCriancaId
+       WHERE c.eventoId = @eventoId`,
       { eventoId }
     );
 
@@ -551,10 +551,10 @@ async function stopZoneConquestIndividual(eventoId) {
     const resultado = await withTransaction(async (tx) => {
       // UPDATE partida
       await tx.query(
-        `UPDATE zone_conquest_individual_partidas SET
+        `UPDATE zonaConquistaPartidaIndividual SET
            status = 'finished',
-           finished_at = @agora
-         WHERE LOWER(evento_id) = LOWER(@eventoId)
+           finalizadoEm = @agora
+         WHERE LOWER(eventoId) = LOWER(@eventoId)
            AND status = 'active'`,
         {
           eventoId,
@@ -564,12 +564,12 @@ async function stopZoneConquestIndividual(eventoId) {
 
       // UPDATE participant states
       await tx.query(
-        `UPDATE zone_conquest_individual_participant_states SET
+        `UPDATE zonaConquistaEstadoParticipanteIndividual SET
            status = 'finished',
-           finished_at = @agora
-         WHERE partida_id IN (
-           SELECT id FROM zone_conquest_individual_partidas
-           WHERE LOWER(evento_id) = LOWER(@eventoId)
+           finalizadoEm = @agora
+         WHERE partidaId IN (
+           SELECT id FROM zonaConquistaPartidaIndividual
+           WHERE LOWER(eventoId) = LOWER(@eventoId)
          )
          AND status <> 'finished'`,
         {
@@ -580,11 +580,11 @@ async function stopZoneConquestIndividual(eventoId) {
 
       // LIMPAR territory_owner_crianca_id dos checkpoints
       await tx.query(
-        `UPDATE checkpoints SET
-           territory_owner_crianca_id = NULL,
-           territory_locked_until = NULL,
-           territory_cooldown_until = NULL
-         WHERE evento_id = @eventoId`,
+        `UPDATE pontoVerificacao SET
+           territorioDonosCriancaId = NULL,
+           territorioTravadoAte = NULL,
+           territorioCooldownAte = NULL
+         WHERE eventoId = @eventoId`,
         { eventoId }
       );
 

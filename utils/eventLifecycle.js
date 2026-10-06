@@ -79,18 +79,18 @@ function broadcastCompany(empresaId, message) {
 // agendado -> ativo. Retorna true se realmente mudou (false se já não estava agendado).
 async function startEvent(eventoId, { source = 'manual' } = {}) {
   const result = await query(
-    `UPDATE eventos
+    `UPDATE evento
      SET status = 'active',
-         started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
-         ended_at = NULL
-     WHERE LOWER(id) = LOWER(@eventoId)
+         iniciadoEm = COALESCE(iniciadoEm, CURRENT_TIMESTAMP),
+         finalizadoEm = NULL
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
     { eventoId }
   );
   const changed = Number(result?.rowsAffected?.[0] || 0) > 0;
   if (!changed) return false;
 
-  const evento = await queryOne('SELECT id, empresa_id, started_at FROM eventos WHERE LOWER(id) = LOWER(@eventoId)', { eventoId });
+  const evento = await queryOne('SELECT eventoId, empresaId, iniciadoEm FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)', { eventoId });
   console.log(`▶️ [EVENTO] ${eventoId} iniciado (${source})`);
   broadcastCompany(evento?.empresa_id, {
     type: 'EVENT_STATUS_CHANGED',
@@ -108,7 +108,7 @@ async function ensureEventActive(eventoId) {
 // ativo/agendado -> encerrado. `stopGame(eventoId)` para o jogo em andamento antes.
 async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
   const evento = await queryOne(
-    'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+    'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return { changed: false, reason: 'not_found' };
@@ -123,12 +123,12 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
   }
 
   const result = await query(
-    `UPDATE eventos
+    `UPDATE evento
      SET status = 'finished',
-         ended_at = CURRENT_TIMESTAMP,
-         active_brincadeira_id = NULL,
-         active_game_type = 'none'
-     WHERE LOWER(id) = LOWER(@eventoId)
+         finalizadoEm = CURRENT_TIMESTAMP,
+         brincadeiraAtivaId = NULL,
+         tipoJogoAtivo = 'none'
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('finished', 'completed', 'cancelled', 'canceled')`,
     { eventoId: evento.id }
   );
@@ -137,8 +137,8 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
   // Recepção/kiosk deixam de ter este evento selecionado (getActiveEvent já ignora
   // eventos encerrados; aqui os telas abertas são avisadas na hora).
   const unselected = await query(
-    `UPDATE empresa_event_control SET evento_id = NULL, updated_at = CURRENT_TIMESTAMP
-     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+    `UPDATE controleEventoEmpresa SET eventoId = NULL, atualizadoEm = CURRENT_TIMESTAMP
+     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
     { eventoId: evento.id }
   );
   if (Number(unselected?.rowsAffected?.[0] || 0) > 0) {
@@ -161,23 +161,23 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
 // O início/encerramento automáticos seguem as opções que o evento já tinha.
 async function reopenEvent(eventoId, { date, time, duration } = {}) {
   const evento = await queryOne(
-    'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+    'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return { changed: false, reason: 'not_found' };
   if (!isClosedStatus(evento.status)) return { changed: false, reason: 'not_finished' };
 
   const result = await query(
-    `UPDATE eventos
+    `UPDATE evento
      SET status = 'scheduled',
-         date = @date,
-         time = @time,
-         duration = COALESCE(@duration, duration),
-         started_at = NULL,
-         ended_at = NULL,
-         active_brincadeira_id = NULL,
-         active_game_type = 'none'
-     WHERE LOWER(id) = LOWER(@eventoId)
+         data = @date,
+         hora = @time,
+         duracao = COALESCE(@duration, duracao),
+         iniciadoEm = NULL,
+         finalizadoEm = NULL,
+         brincadeiraAtivaId = NULL,
+         tipoJogoAtivo = 'none'
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND LOWER(COALESCE(status, 'scheduled')) IN ('finished', 'completed', 'cancelled', 'canceled')`,
     { eventoId: evento.id, date, time, duration: duration ?? null }
   );
@@ -194,12 +194,12 @@ async function reopenEvent(eventoId, { date, time, duration } = {}) {
 // Uma varredura: inicia e encerra os eventos que chegaram na hora.
 async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
   const rows = await allQuery(`
-    SELECT id, empresa_id, status, duration, started_at, auto_start, auto_end,
-           CAST([date] AS VARCHAR(10)) AS date_str,
-           CAST([time] AS VARCHAR(5)) AS time_str
-    FROM eventos
-    WHERE (auto_start = 1 AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled')
-       OR (auto_end = 1 AND LOWER(COALESCE(status, '')) = 'active')
+    SELECT eventoId, empresaId, status, duracao, iniciadoEm, autoInicio, autoFim,
+           CAST([data] AS VARCHAR(10)) AS date_str,
+           CAST([hora] AS VARCHAR(5)) AS time_str
+    FROM evento
+    WHERE (autoInicio = 1 AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled')
+       OR (autoFim = 1 AND LOWER(COALESCE(status, '')) = 'active')
   `);
 
   const actions = [];

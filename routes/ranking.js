@@ -16,7 +16,7 @@ router.get('/eventos/:evento_id/ranking/criancas', verifyToken, async (req, res)
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -30,14 +30,14 @@ router.get('/eventos/:evento_id/ranking/criancas', verifyToken, async (req, res)
     }
     
     const ranking = await allQuery(`
-      SELECT c.id, c.name, c.nickname, c.avatar, c.scores, 
-             t.name as time_name, t.color as time_color
-      FROM criancas c
-      LEFT JOIN times t ON c.time_id = t.id
-      WHERE c.evento_id = @evento_id 
-        AND (c.empresa_id = @empresa_id OR @isMaster = 1)
+      SELECT c.criancaId, c.nome, c.apelido, c.avatar, c.pontos, 
+             t.nome as time_name, t.cor as time_color
+      FROM crianca c
+      LEFT JOIN time t ON c.timeId = t.timeId
+      WHERE c.eventoId = @evento_id 
+        AND (c.empresaId = @empresa_id OR @isMaster = 1)
         AND c.status = 'active'
-      ORDER BY c.scores DESC
+      ORDER BY c.pontos DESC
     `, { evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);
@@ -54,7 +54,7 @@ router.get('/eventos/:evento_id/ranking/times', verifyToken, async (req, res) =>
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: evento_id }
     );
     
@@ -68,13 +68,13 @@ router.get('/eventos/:evento_id/ranking/times', verifyToken, async (req, res) =>
     }
     
     const ranking = await allQuery(`
-      SELECT t.*, COUNT(c.id) as membros_count
-      FROM times t
-      LEFT JOIN criancas c ON c.time_id = t.id AND c.status = 'active'
-      WHERE t.evento_id = @evento_id
-        AND (t.empresa_id = @empresa_id OR @isMaster = 1)
-      GROUP BY t.id, t.name, t.color, t.points, t.created_at, t.evento_id, t.empresa_id
-      ORDER BY t.points DESC
+      SELECT t.*, COUNT(c.criancaId) as membros_count
+      FROM time t
+      LEFT JOIN crianca c ON c.timeId = t.timeId AND c.status = 'active'
+      WHERE t.eventoId = @evento_id
+        AND (t.empresaId = @empresa_id OR @isMaster = 1)
+      GROUP BY t.timeId, t.nome, t.cor, t.pontos, t.criadoEm, t.eventoId, t.empresaId
+      ORDER BY t.pontos DESC
     `, { evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);

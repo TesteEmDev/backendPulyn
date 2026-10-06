@@ -23,31 +23,31 @@ async function listPlatformClients({ includeFamily = false } = {}) {
   const [empresas, finishedEvents, clientes] = await Promise.all([
     allQuery(`
       SELECT
-        e.id,
+        e.empresaId,
         e.nome,
         e.cidade,
         e.estado,
         e.telefone,
         e.plano,
         e.status,
-        e.data_criacao,
-        COALESCE(MIN(CASE WHEN l.role = 'admin' THEN l.email END), MIN(l.email)) AS email,
-        MAX(l.ultimo_acesso) AS last_access
-      FROM empresas e
-      LEFT JOIN logins l ON e.id = l.empresa_id
+        e.dataCriacao,
+        COALESCE(MIN(CASE WHEN l.perfil = 'admin' THEN l.email END), MIN(l.email)) AS email,
+        MAX(l.ultimoAcesso) AS last_access
+      FROM empresa e
+      LEFT JOIN login l ON e.empresaId = l.empresaId
       WHERE e.nome <> 'Master Admin'
         ${includeFamily ? '' : "AND LOWER(COALESCE(e.plano, '')) <> 'family'"}
-      GROUP BY e.id, e.nome, e.cidade, e.estado, e.telefone, e.plano, e.status, e.data_criacao
+      GROUP BY e.empresaId, e.nome, e.cidade, e.estado, e.telefone, e.plano, e.status, e.dataCriacao
     `),
     allQuery(`
-      SELECT empresa_id, COUNT(*) AS total
-      FROM eventos
+      SELECT empresaId, COUNT(*) AS total
+      FROM evento
       WHERE LOWER(COALESCE(status, '')) IN ('finished', 'completed')
-      GROUP BY empresa_id
+      GROUP BY empresaId
     `),
     allQuery(`
-      SELECT id, name, city, state, email, phone, plano, status, events_done, last_access, created_at
-      FROM clientes
+      SELECT clienteId, nome, cidade, estado, email, telefone, plano, status, eventosRealizados, ultimoAcesso, criadoEm
+      FROM cliente
     `),
   ]);
 
