@@ -24,12 +24,12 @@ async function ensureSupportTable() {
         CREATE TABLE IF NOT EXISTS support_tickets (
           id varchar(36) PRIMARY KEY,
           empresaId varchar(36),
-          client varchar(255) NOT NULL,
+          cliente varchar(255) NOT NULL,
           subject varchar(255) NOT NULL,
           status varchar(20) NOT NULL DEFAULT 'aberto',
           priority varchar(20) NOT NULL DEFAULT 'media',
-          description text,
-          assignee varchar(255),
+          description texto,
+          atribuidoPara varchar(255),
           criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
           atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
@@ -41,12 +41,12 @@ async function ensureSupportTable() {
           CREATE TABLE support_tickets (
             id varchar(36) NOT NULL PRIMARY KEY,
             empresaId varchar(36) NULL,
-            client varchar(255) NOT NULL,
+            cliente varchar(255) NOT NULL,
             subject varchar(255) NOT NULL,
             status varchar(20) NOT NULL DEFAULT 'aberto',
             priority varchar(20) NOT NULL DEFAULT 'media',
             description nvarchar(max) NULL,
-            assignee varchar(255) NULL,
+            atribuidoPara varchar(255) NULL,
             criadoEm datetime2 NOT NULL DEFAULT GETDATE(),
             atualizadoEm datetime2 NOT NULL DEFAULT GETDATE()
           )
@@ -65,12 +65,12 @@ function serializeTicket(ticket) {
   return {
     id: ticket.id,
     empresaId: ticket.empresaId || null,
-    client: ticket.client,
+    cliente: ticket.cliente,
     subject: ticket.subject,
     status: ticket.status,
     priority: ticket.priority,
     description: ticket.description || '',
-    assignee: ticket.assignee || 'Atribuir',
+    atribuidoPara: ticket.atribuidoPara || 'Atribuir',
     date: ticket.criadoEm,
     createdAt: ticket.criadoEm,
     updatedAt: ticket.atualizadoEm,
@@ -117,8 +117,8 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
     await ensureSupportTable();
     const tickets = await allQuery(`
       SELECT TOP (@limit)
-        id, empresaId, client, subject, status, priority, description,
-        assignee, criadoEm, atualizadoEm
+        id, empresaId, cliente, subject, status, priority, description,
+        atribuidoPara, criadoEm, atualizadoEm
       FROM support_tickets
       ORDER BY criadoEm DESC
     `, { limit: parseLimit(req.query.limit) });
@@ -132,9 +132,9 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
 router.post('/', verifyToken, requireMaster, async (req, res) => {
   try {
     await ensureSupportTable();
-    const { client, subject, priority, description, assignee, empresaId } = req.body || {};
-    if (!String(client || '').trim() || !String(subject || '').trim()) {
-      return res.status(400).json({ error: 'client e subject são obrigatórios' });
+    const { cliente, subject, priority, description, atribuidoPara, empresaId } = req.body || {};
+    if (!String(cliente || '').trim() || !String(subject || '').trim()) {
+      return res.status(400).json({ error: 'cliente e subject são obrigatórios' });
     }
     const normalizedPriority = String(priority || 'media').toLowerCase();
     if (!VALID_PRIORITIES.has(normalizedPriority)) {
@@ -144,18 +144,18 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
     const id = uuidv4();
     await query(`
       INSERT INTO support_tickets
-        (id, empresaId, client, subject, status, priority, description, assignee)
+        (id, empresaId, cliente, subject, status, priority, description, atribuidoPara)
       VALUES
-        (@id, @empresaId, @client, @subject, @status, @priority, @description, @assignee)
+        (@id, @empresaId, @cliente, @subject, @status, @priority, @description, @atribuidoPara)
     `, {
       id,
       empresaId: empresaId || null,
-      client: String(client).trim(),
+      cliente: String(cliente).trim(),
       subject: String(subject).trim(),
       status: 'aberto',
       priority: normalizedPriority,
       description: description ? String(description) : null,
-      assignee: assignee ? String(assignee) : 'Atribuir',
+      atribuidoPara: atribuidoPara ? String(atribuidoPara) : 'Atribuir',
     });
 
     const ticket = await queryOne('SELECT * FROM support_tickets WHERE id = @id', { id });

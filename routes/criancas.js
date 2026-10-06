@@ -101,9 +101,9 @@ router.post('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
 
     if (normalizedBraceletCode) {
       const pulseira = await queryOne(
-        `SELECT code, status FROM pulseiras
-         WHERE ${uidSqlExpression('code')} = @code AND empresaId = @empresaId`,
-        { code: normalizedBraceletCode, empresaId }
+        `SELECT codigo, status FROM pulseiras
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { codigo: normalizedBraceletCode, empresaId }
       );
       if (!pulseira) return res.status(400).json({ error: 'Pulseira não encontrada nesta empresa' });
       if (pulseira.status !== 'disponivel') return res.status(400).json({ error: 'Pulseira não está disponível' });
@@ -111,8 +111,8 @@ router.post('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
     
     if (normalizedBraceletCode) {
       const existing = await queryOne(
-        `SELECT id FROM criancas WHERE ${uidSqlExpression('codigoPulseira')} = @code`,
-        { code: normalizedBraceletCode }
+        `SELECT id FROM criancas WHERE ${uidSqlExpression('codigoPulseira')} = @codigo`,
+        { codigo: normalizedBraceletCode }
       );
       if (existing) {
         return res.status(400).json({ error: 'Pulseira já está vinculada a outra criança' });
@@ -129,8 +129,8 @@ router.post('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
     if (normalizedBraceletCode) {
       await query(
         `UPDATE pulseiras SET status = @status, criancaId = @criancaId
-         WHERE ${uidSqlExpression('code')} = @code AND empresaId = @empresaId`,
-        { status: 'em_uso', criancaId: id, code: normalizedBraceletCode, empresaId: empresaId }
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { status: 'em_uso', criancaId: id, codigo: normalizedBraceletCode, empresaId: empresaId }
       );
     }
     
@@ -147,9 +147,9 @@ router.post('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
 });
 
 // Buscar criança por pulseira
-router.get('/criancas/by-bracelet/:code', verifyToken, async (req, res) => {
+router.get('/criancas/by-bracelet/:codigo', verifyToken, async (req, res) => {
   try {
-    const normalizedCode = normalizeUid(req.params.code);
+    const normalizedCode = normalizeUid(req.params.codigo);
     if (!normalizedCode) {
       return res.status(400).json({ error: 'Código da pulseira inválido' });
     }
@@ -159,9 +159,9 @@ router.get('/criancas/by-bracelet/:code', verifyToken, async (req, res) => {
       SELECT c.*, t.name as time_name, t.color as time_color 
       FROM criancas c
       LEFT JOIN times t ON c.timeId = t.id
-      WHERE ${uidSqlExpression('c.codigoPulseira')} = @code
+      WHERE ${uidSqlExpression('c.codigoPulseira')} = @codigo
         AND (c.empresaId = @empresaId OR @isMaster = 1)
-    `, { code: normalizedCode, empresaId, isMaster: isMaster(req) ? 1 : 0 });
+    `, { codigo: normalizedCode, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     if (!crianca) {
       return res.status(404).json({ error: 'Criança não encontrada' });
@@ -223,8 +223,8 @@ router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, re
     if (normalizedBraceletCode && normalizedBraceletCode !== normalizeUid(crianca.codigoPulseira || '')) {
       // Verificar se outra criança já tem essa pulseira
       const existing = await queryOne(
-        `SELECT id FROM criancas WHERE ${uidSqlExpression('codigoPulseira')} = @code AND id != @criancaId`, 
-        { code: normalizedBraceletCode, criancaId: criancaId }
+        `SELECT id FROM criancas WHERE ${uidSqlExpression('codigoPulseira')} = @codigo AND id != @criancaId`, 
+        { codigo: normalizedBraceletCode, criancaId: criancaId }
       );
       if (existing) {
         console.error(`❌ Pulseira ${normalizedBraceletCode} já vinculada a outra criança`);
@@ -233,8 +233,8 @@ router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, re
       
       // Verificar se pulseira existe
       const pulseira = await queryOne(
-        `SELECT * FROM pulseiras WHERE ${uidSqlExpression('code')} = @code AND empresaId = @empresaId`,
-        { code: normalizedBraceletCode, empresaId: crianca.empresaId }
+        `SELECT * FROM pulseiras WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { codigo: normalizedBraceletCode, empresaId: crianca.empresaId }
       );
       if (!pulseira) {
         console.error(`❌ Pulseira ${normalizedBraceletCode} não encontrada`);
@@ -246,8 +246,8 @@ router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, re
         const oldCode = normalizeUid(crianca.codigoPulseira);
         await query(
           `UPDATE pulseiras SET status = @status, criancaId = NULL
-           WHERE ${uidSqlExpression('code')} = @code AND empresaId = @empresaId`,
-          { status: 'disponivel', code: oldCode, empresaId: crianca.empresaId }
+           WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+          { status: 'disponivel', codigo: oldCode, empresaId: crianca.empresaId }
         );
         console.log(`   → Pulseira anterior ${oldCode} marcada como disponível`);
       }
@@ -255,8 +255,8 @@ router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, re
       // Marcar pulseira nova como 'em_uso'
       await query(
         `UPDATE pulseiras SET status = @status, criancaId = @criancaId
-         WHERE ${uidSqlExpression('code')} = @code AND empresaId = @empresaId`,
-        { status: 'em_uso', criancaId: criancaId, code: normalizedBraceletCode, empresaId: crianca.empresaId }
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { status: 'em_uso', criancaId: criancaId, codigo: normalizedBraceletCode, empresaId: crianca.empresaId }
       );
       console.log(`   → Pulseira ${normalizedBraceletCode} marcada como em_uso`);
     }
@@ -407,8 +407,8 @@ router.post('/:criancaId/unassign-bracelet', verifyToken, async (req, res) => {
     // ✅ NOVO: Atualizar status da pulseira de volta para "disponível"
     await query(
       `UPDATE pulseiras SET status = @status, criancaId = NULL
-       WHERE ${uidSqlExpression('code')} = @code AND empresaId = @empresaId`,
-      { status: 'disponivel', code: normalizeUid(braceletCode), empresaId: crianca.empresaId }
+       WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+      { status: 'disponivel', codigo: normalizeUid(braceletCode), empresaId: crianca.empresaId }
     );
     
     console.log(`✅ Pulseira ${braceletCode} desvinculada de ${crianca.name} e marcada como disponível`);

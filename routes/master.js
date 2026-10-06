@@ -121,7 +121,7 @@ router.get('/active-events', verifyToken, async (req, res) => {
         e.id,
         e.name,
         e.empresaId,
-        e2.nome as client,
+        e2.nome as cliente,
         (SELECT COUNT(*) FROM criancas WHERE eventoId = e.id) as children_count,
         e.status,
         e.date as event_date,
@@ -141,7 +141,7 @@ router.get('/active-events', verifyToken, async (req, res) => {
         id: e.id,
         name: e.name,
         clientId: e.empresaId,
-        client: e.client,
+        cliente: e.cliente,
         childrenCount: Number(e.children_count) || 0,
         status: e.status,
         date: e.event_date,
@@ -190,7 +190,7 @@ router.get('/alerts', verifyToken, async (req, res) => {
       id: cp.id,
       type: 'offline',
       message: `Checkpoint "${cp.name || cp.id}" offline${cp.zone ? ` (${cp.zone})` : ''}`,
-      client: cp.empresa_nome || 'Sem empresa',
+      cliente: cp.empresa_nome || 'Sem empresa',
       time: cp.ultimoVisto
         ? new Date(cp.ultimoVisto).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
         : '—',

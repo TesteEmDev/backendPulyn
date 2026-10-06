@@ -13,20 +13,20 @@ router.get('/', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master vê todas as pulseiras (exceto as da Master Admin)
       pulseiras = await allQuery(`
-        SELECT p.code, p.status, p.criancaId, c.name as crianca_name, p.empresaId
+        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_name, p.empresaId
         FROM pulseiras p
         LEFT JOIN criancas c ON p.criancaId = c.id
         LEFT JOIN empresas e ON p.empresaId = e.id
         WHERE e.nome != 'Master Admin'
-        ORDER BY p.code
+        ORDER BY p.codigo
       `);
     } else {
       pulseiras = await allQuery(`
-        SELECT p.code, p.status, p.criancaId, c.name as crianca_name, p.empresaId
+        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_name, p.empresaId
         FROM pulseiras p
         LEFT JOIN criancas c ON p.criancaId = c.id
         WHERE p.empresaId = @empresaId
-        ORDER BY p.code
+        ORDER BY p.codigo
       `, { empresaId });
     }
     
@@ -40,26 +40,26 @@ router.get('/', verifyToken, async (req, res) => {
 // Cadastrar pulseira
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { code } = req.body;
+    const { codigo } = req.body;
     const empresaId = req.user.empresaId;
-    const codeUpper = normalizeUid(code);
+    const codeUpper = normalizeUid(codigo);
     
     if (!codeUpper) {
       return res.status(400).json({ error: 'Código da pulseira é obrigatório' });
     }
     
     const existing = await queryOne(
-      `SELECT code FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
-      { code: codeUpper }
+      `SELECT codigo FROM pulseiras WHERE ${uidSqlExpression('codigo')} = @codigo`,
+      { codigo: codeUpper }
     );
     if (existing) {
       return res.status(400).json({ error: 'Pulseira já cadastrada!' });
     }
     
-    await query('INSERT INTO pulseiras (code, status, empresaId, criadoEm) VALUES (@code, @status, @empresaId, GETDATE())', 
-      { code: codeUpper, status: 'disponivel', empresaId });
+    await query('INSERT INTO pulseiras (codigo, status, empresaId, criadoEm) VALUES (@codigo, @status, @empresaId, GETDATE())', 
+      { codigo: codeUpper, status: 'disponivel', empresaId });
     
-    res.json({ code: codeUpper, status: 'disponivel', empresaId, criancaId: null, crianca_name: null });
+    res.json({ codigo: codeUpper, status: 'disponivel', empresaId, criancaId: null, crianca_name: null });
   } catch (err) {
     console.error('❌ Erro ao cadastrar pulseira:', err.message);
     res.status(500).json({ error: err.message });
@@ -67,9 +67,9 @@ router.post('/', verifyToken, async (req, res) => {
 });
 
 // Atualizar status da pulseira
-router.put('/:code/status', verifyToken, async (req, res) => {
+router.put('/:codigo/status', verifyToken, async (req, res) => {
   try {
-    const { code } = req.params;
+    const { codigo } = req.params;
     const { status } = req.body;
     const empresaId = req.user.empresaId;
     const allowedStatuses = ['disponivel', 'em_uso', 'perdida', 'bloqueada'];
@@ -83,10 +83,10 @@ router.put('/:code/status', verifyToken, async (req, res) => {
     }
     
     // Verificar que a pulseira pertence à empresa (ou master)
-    const normalizedCode = normalizeUid(code);
+    const normalizedCode = normalizeUid(codigo);
     const pulseira = await queryOne(
-      `SELECT empresaId, criancaId FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
-      { code: normalizedCode }
+      `SELECT empresaId, criancaId FROM pulseiras WHERE ${uidSqlExpression('codigo')} = @codigo`,
+      { codigo: normalizedCode }
     );
     
     if (!pulseira) {
@@ -109,10 +109,10 @@ router.put('/:code/status', verifyToken, async (req, res) => {
     await query(
       `UPDATE pulseiras SET status = @status,
        criancaId = @criancaId
-       WHERE ${uidSqlExpression('code')} = @code
+       WHERE ${uidSqlExpression('codigo')} = @codigo
        AND empresaId = @empresaId`,
       {
-        code: normalizedCode,
+        codigo: normalizedCode,
         status,
         criancaId: status === 'em_uso' ? pulseira.criancaId : null,
         empresaId: pulseira.empresaId,
@@ -132,14 +132,14 @@ router.put('/:code/status', verifyToken, async (req, res) => {
 // A validação real acontece em /api/leituras (que valida empresaId + crianca)
 router.post('/detectar', async (req, res) => {
   try {
-    const { code, checkpointId, timestamp } = req.body;
-    console.log(`\n📖 [PULSEIRAS-DETECTAR] POST recebido: code=${code}, checkpointId=${checkpointId}`);
+    const { codigo, checkpointId, timestamp } = req.body;
+    console.log(`\n📖 [PULSEIRAS-DETECTAR] POST recebido: codigo=${codigo}, checkpointId=${checkpointId}`);
     
-    if (!code) {
+    if (!codigo) {
       return res.status(400).json({ error: 'Código da pulseira é obrigatório' });
     }
     
-    const normalizedCode = normalizeUid(code);
+    const normalizedCode = normalizeUid(codigo);
     if (!normalizedCode) {
       return res.status(400).json({ error: 'Código da pulseira inválido' });
     }
@@ -151,7 +151,7 @@ router.post('/detectar', async (req, res) => {
       global.broadcast({
         type: 'BRACELET_DETECTED',
         payload: {
-          code: normalizedCode,
+          codigo: normalizedCode,
           braceletCode: normalizedCode,
           timestamp: timestamp || new Date().toISOString(),
           checkpointId
@@ -162,7 +162,7 @@ router.post('/detectar', async (req, res) => {
     res.json({
       success: true,
       message: 'Código da pulseira detectado e enviado para o frontend',
-      code: normalizedCode
+      codigo: normalizedCode
     });
     
   } catch (err) {

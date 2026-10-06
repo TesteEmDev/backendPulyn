@@ -19,7 +19,7 @@ function httpError(message, statusCode) {
 }
 
 function isDuplicateKeyError(error) {
-  return error?.code === '23505' || error?.number === 2601 || error?.number === 2627;
+  return error?.codigo === '23505' || error?.number === 2601 || error?.number === 2627;
 }
 
 // O kiosk tem uma superfície de API própria e não recebe acesso às rotas administrativas.
@@ -100,28 +100,28 @@ router.get('/events/:eventId/teams', async (req, res) => {
 });
 
 // Consulta mínima de uma pulseira; não expõe inventário ou dados de crianças.
-router.get('/bracelets/:code', async (req, res) => {
+router.get('/bracelets/:codigo', async (req, res) => {
   try {
-    const code = normalizeUid(req.params.code);
-    if (!code) return res.status(400).json({ error: 'Código da pulseira inválido' });
+    const codigo = normalizeUid(req.params.codigo);
+    if (!codigo) return res.status(400).json({ error: 'Código da pulseira inválido' });
 
     const { queryOne } = require('../database');
     const bracelet = await queryOne(
-      `SELECT code, status, criancaId, empresaId
+      `SELECT codigo, status, criancaId, empresaId
        FROM pulseiras
-       WHERE ${uidSqlExpression('code')} = @code`,
-      { code }
+       WHERE ${uidSqlExpression('codigo')} = @codigo`,
+      { codigo }
     );
 
     if (!bracelet) {
-      return res.json({ code, exists: false, status: null, available: true });
+      return res.json({ codigo, exists: false, status: null, available: true });
     }
     if (String(bracelet.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
       return res.status(403).json({ error: 'Esta pulseira não pertence a esta empresa' });
     }
 
     const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.criancaId;
-    res.json({ code: bracelet.code, exists: true, status: bracelet.status, available });
+    res.json({ codigo: bracelet.codigo, exists: true, status: bracelet.status, available });
   } catch (error) {
     console.error('❌ Kiosk: erro ao consultar pulseira:', error.message);
     res.status(500).json({ error: 'Não foi possível verificar a pulseira' });
@@ -132,7 +132,7 @@ router.get('/bracelets/:code', async (req, res) => {
 router.post('/participants', async (req, res) => {
   try {
     const { eventId, name, nickname, age, avatar, braceletCode, timeId } = req.body || {};
-    const code = normalizeUid(braceletCode);
+    const codigo = normalizeUid(braceletCode);
     const cleanName = String(name || '').trim();
     const avatarValue = getAvatarForCreate(avatar);
 
@@ -141,7 +141,7 @@ router.post('/participants', async (req, res) => {
     }
 
     // O time é opcional: o recreacionista define (ou sorteia) os times depois do cadastro.
-    if (!eventId || !cleanName || !code) {
+    if (!eventId || !cleanName || !codigo) {
       return res.status(400).json({ error: 'Evento, nome e pulseira são obrigatórios' });
     }
     if (cleanName.length > 100 || String(nickname || '').trim().length > 100) {
@@ -168,10 +168,10 @@ router.post('/participants', async (req, res) => {
       }
 
       let bracelet = await tx.queryOne(
-        `SELECT code, status, criancaId, empresaId
+        `SELECT codigo, status, criancaId, empresaId
          FROM pulseiras
-         WHERE ${uidSqlExpression('code')} = @code`,
-        { code }
+         WHERE ${uidSqlExpression('codigo')} = @codigo`,
+        { codigo }
       );
 
       if (bracelet && String(bracelet.empresaId).trim().toLowerCase() !== String(event.empresaId).trim().toLowerCase()) {
@@ -179,11 +179,11 @@ router.post('/participants', async (req, res) => {
       }
       if (!bracelet) {
         await tx.query(
-          `INSERT INTO pulseiras (code, status, empresaId, criadoEm)
-           VALUES (@code, 'disponivel', @empresaId, GETDATE())`,
-          { code, empresaId: event.empresaId }
+          `INSERT INTO pulseiras (codigo, status, empresaId, criadoEm)
+           VALUES (@codigo, 'disponivel', @empresaId, GETDATE())`,
+          { codigo, empresaId: event.empresaId }
         );
-        bracelet = { code, status: 'disponivel', criancaId: null, empresaId: event.empresaId };
+        bracelet = { codigo, status: 'disponivel', criancaId: null, empresaId: event.empresaId };
       }
 
       if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.criancaId) {
@@ -194,7 +194,7 @@ router.post('/participants', async (req, res) => {
       await tx.query(
         `INSERT INTO criancas
           (id, eventoId, empresaId, timeId, name, nickname, age, avatar, codigoPulseira, scores)
-         VALUES (@id, @eventId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @code, 0)`,
+         VALUES (@id, @eventId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @codigo, 0)`,
         {
           id: childId,
           eventId: event.id,
@@ -204,18 +204,18 @@ router.post('/participants', async (req, res) => {
           nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
           age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
           avatar: avatarValue,
-          code,
+          codigo,
         }
       );
 
       const braceletUpdate = await tx.query(
         `UPDATE pulseiras
          SET status = 'em_uso', criancaId = @childId
-         WHERE ${uidSqlExpression('code')} = @code
+         WHERE ${uidSqlExpression('codigo')} = @codigo
            AND empresaId = @empresaId
            AND status = 'disponivel'
            AND criancaId IS NULL`,
-        { code, childId, empresaId: event.empresaId }
+        { codigo, childId, empresaId: event.empresaId }
       );
       if ((braceletUpdate.rowsAffected?.[0] || 0) === 0) {
         throw httpError('Esta pulseira acabou de ser vinculada. Aproxime outra pulseira', 409);
@@ -227,7 +227,7 @@ router.post('/participants', async (req, res) => {
         nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
         age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
         avatar: avatarValue,
-        braceletCode: code,
+        braceletCode: codigo,
         timeId: team ? team.id : null,
         teamName: team ? team.name : null,
         scores: 0,

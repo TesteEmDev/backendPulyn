@@ -14,7 +14,7 @@ const braceletAttempts = createAttemptLimiter();
 
 /**
  * MOBILE: POST /api/family/qrcode/validate
- * Valida um QR code e vincula o pais/responsável à criança
+ * Valida um QR codigo e vincula o pais/responsável à criança
  * Chamado quando pais escaneia o código no app
  */
 router.post('/qrcode/validate', verifyToken, async (req, res) => {
@@ -70,7 +70,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   ❌ Não consegui extrair código válido de: ${qrCodeValue}`);
         return res.status(400).json({
           error: 'Formato de QR Code inválido. Esperado: URL ou PULYN-XXXXXXXX',
-          code: 'INVALID_QR_FORMAT'
+          codigo: 'INVALID_QR_FORMAT'
         });
       }
     }
@@ -94,7 +94,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       console.log(`   ❌ Código QR não encontrado ou expirado`);
       return res.status(404).json({
         error: 'Código QR inválido ou expirado',
-        code: 'INVALID_QR_CODE'
+        codigo: 'INVALID_QR_CODE'
       });
     }
 
@@ -134,7 +134,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.criancaId}, empresaId=${codigoVinculacao.empresaId}`);
         
         await tx.query(
-          `INSERT INTO family_child_links (id, loginId, criancaId, empresaId, status, relationship)
+          `INSERT INTO family_child_links (id, loginId, criancaId, empresaId, status, relacionamento)
            VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
           { 
             linkId: linkId,
@@ -146,7 +146,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   ✅ Link criado com sucesso`);
       }
 
-      // ✅ Marcar QR code como usado
+      // ✅ Marcar QR codigo como usado
       const updateResult = await tx.query(
         `UPDATE family_linking_codes
          SET status = 'used', used_by_login_id = @loginId
@@ -154,7 +154,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         { codeId: codigoVinculacao.id, loginId: req.user.id }
       );
       
-      console.log(`   ✅ QR code marcado como usado. Rows affected: ${updateResult.rowsAffected[0]}`);
+      console.log(`   ✅ QR codigo marcado como usado. Rows affected: ${updateResult.rowsAffected[0]}`);
     });
 
     console.log(`✅ Pais/Responsável ${req.user.email} vinculado à criança ${codigoVinculacao.nickname}`);
@@ -177,13 +177,13 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       console.log(`   ❌ Já vinculado (status ativo)`);
       return res.status(400).json({
         error: 'Você já está vinculado a esta criança',
-        code: 'ALREADY_LINKED'
+        codigo: 'ALREADY_LINKED'
       });
     }
 
-    console.error('❌ ERRO na validação de QR code:', error.message);
+    console.error('❌ ERRO na validação de QR codigo:', error.message);
     console.error('   Stack:', error.stack);
-    res.status(500).json({ error: 'Erro ao validar QR code', details: error.message });
+    res.status(500).json({ error: 'Erro ao validar QR codigo', details: error.message });
   }
 });
 
@@ -207,33 +207,33 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       res.set('Retry-After', String(attempt.retryAfterSec));
       return res.status(429).json({
         error: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
-        code: 'TOO_MANY_ATTEMPTS',
+        codigo: 'TOO_MANY_ATTEMPTS',
         retryAfterSec: attempt.retryAfterSec,
       });
     }
 
     const parsed = parseBraceletUid(req.body?.uid);
     if (!parsed.uid) {
-      return res.status(400).json({ error: parsed.error, code: parsed.code });
+      return res.status(400).json({ error: parsed.error, codigo: parsed.codigo });
     }
 
     // A busca já filtra pela empresa do responsável: pulseira de outra empresa é
     // indistinguível de pulseira que não existe.
     const row = await queryOne(
-      `SELECT p.code, p.status, p.criancaId, p.empresaId,
+      `SELECT p.codigo, p.status, p.criancaId, p.empresaId,
               c.name, c.nickname, c.age, c.eventoId,
               e.name AS evento_nome, e.status AS evento_status
        FROM pulseiras p
        JOIN criancas c ON c.id = p.criancaId
        LEFT JOIN eventos e ON e.id = c.eventoId
-       WHERE ${uidSqlExpression('p.code')} = @uid
+       WHERE ${uidSqlExpression('p.codigo')} = @uid
          AND LOWER(p.empresaId) = LOWER(@empresaId)`,
       { uid: parsed.uid, empresaId: req.user.empresaId }
     );
 
     const decision = checkBraceletLinkable(row);
     if (!decision.ok) {
-      return res.status(404).json({ error: decision.error, code: decision.code });
+      return res.status(404).json({ error: decision.error, codigo: decision.codigo });
     }
 
     const { v4: uuidv4 } = require('uuid');
@@ -258,7 +258,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
         }
       } else {
         await tx.query(
-          `INSERT INTO family_child_links (id, loginId, criancaId, empresaId, status, relationship)
+          `INSERT INTO family_child_links (id, loginId, criancaId, empresaId, status, relacionamento)
            VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
           {
             linkId: uuidv4(),
@@ -287,7 +287,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
     if (error.message === 'ALREADY_LINKED') {
       return res.status(400).json({
         error: 'Você já está vinculado a esta criança',
-        code: 'ALREADY_LINKED',
+        codigo: 'ALREADY_LINKED',
       });
     }
 
@@ -333,7 +333,7 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
       console.log(`   ❌ Vínculo não encontrado`);
       return res.status(404).json({
         error: 'Criança não vinculada a sua família',
-        code: 'LINK_NOT_FOUND'
+        codigo: 'LINK_NOT_FOUND'
       });
     }
 

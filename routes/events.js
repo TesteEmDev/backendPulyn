@@ -274,7 +274,7 @@ router.post('/:eventoId/criancas', verifyToken, async (req, res) => {
     
     // 2. Validar se pulseira já está vinculada
     if (braceletCode) {
-      const existing = await queryOne('SELECT id FROM criancas WHERE codigoPulseira = @code', { code: braceletCode });
+      const existing = await queryOne('SELECT id FROM criancas WHERE codigoPulseira = @codigo', { codigo: braceletCode });
       if (existing) {
         return res.status(400).json({ error: 'Pulseira já está vinculada a outra criança' });
       }
@@ -300,8 +300,8 @@ router.post('/:eventoId/criancas', verifyToken, async (req, res) => {
     // 4. Atualizar status da pulseira se foi fornecida
     if (braceletCode) {
       await query(
-        'UPDATE pulseiras SET status = @status, criancaId = @criancaId WHERE code = @code', 
-        { status: 'em_uso', criancaId: id, code: braceletCode }
+        'UPDATE pulseiras SET status = @status, criancaId = @criancaId WHERE codigo = @codigo', 
+        { status: 'em_uso', criancaId: id, codigo: braceletCode }
       );
     }
     

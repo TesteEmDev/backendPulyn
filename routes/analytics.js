@@ -49,8 +49,8 @@ function monthRange(start, end) {
   return keys;
 }
 
-const isActive = (client) => String(client.status || '').toLowerCase() === 'active';
-const planPrice = (client) => PLAN_DEFINITIONS[String(client.plan || '').trim().toLowerCase()]?.price || 0;
+const isActive = (cliente) => String(cliente.status || '').toLowerCase() === 'active';
+const planPrice = (cliente) => PLAN_DEFINITIONS[String(cliente.plan || '').trim().toLowerCase()]?.price || 0;
 const round1 = (value) => Math.round(value * 10) / 10;
 
 // Receita mensal recorrente: só clientes ativos pagam (trial e bloqueado não entram).
@@ -131,11 +131,11 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
 });
 
 // ✅ Crescimento de clientes: novos no mês e total acumulado, sem meses faltando
-router.get('/client-growth', verifyToken, requireMaster('Acesso negado: apenas master pode ver crescimento de clientes'), async (req, res) => {
+router.get('/cliente-growth', verifyToken, requireMaster('Acesso negado: apenas master pode ver crescimento de clientes'), async (req, res) => {
   try {
     const perMonth = new Map();
-    (await listPlatformClients()).forEach((client) => {
-      const key = monthKeyOf(client.createdAt);
+    (await listPlatformClients()).forEach((cliente) => {
+      const key = monthKeyOf(cliente.createdAt);
       if (key) perMonth.set(key, (perMonth.get(key) || 0) + 1);
     });
     if (perMonth.size === 0) return res.json([]);
@@ -228,8 +228,8 @@ router.get('/revenue-by-plan', verifyToken, requireMaster('Acesso negado: apenas
   try {
     const active = (await listPlatformClients()).filter(isActive);
     const byPlan = new Map();
-    active.forEach((client) => {
-      const plan = String(client.plan || 'starter').trim().toLowerCase();
+    active.forEach((cliente) => {
+      const plan = String(cliente.plan || 'starter').trim().toLowerCase();
       if (!PLAN_DEFINITIONS[plan]) return; // sem plano pago conhecido não gera receita
       byPlan.set(plan, (byPlan.get(plan) || 0) + 1);
     });

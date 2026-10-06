@@ -42,7 +42,7 @@ async function findProcessedReading(readingId, checkpoint) {
   if (!readingId) return null;
 
   const existing = await queryOne(
-    `SELECT l.id, l.checkpointId, l.authorized, l.pontosAtribuidos,
+    `SELECT l.id, l.checkpointId, l.autorizado, l.pontosAtribuidos,
             l.uid, l.criancaId, l.brincadeiraId, c.eventoId,
             c.name AS crianca_name, c.timeId, t.name AS team_name, t.color AS team_color,
             ms.attack_type AS monster_attack_type, ms.damage AS monster_damage,
@@ -79,7 +79,7 @@ async function sendProcessedReading(res, reading) {
   return res.json({
     ok: true,
     registered: true,
-    authorized: Boolean(reading.authorized),
+    autorizado: Boolean(reading.autorizado),
     idempotent: true,
     readingId: reading.id,
     braceletCode: reading.uid,
@@ -88,7 +88,7 @@ async function sendProcessedReading(res, reading) {
     teamColor: reading.team_color || '',
     points: Number(reading.pontosAtribuidos || 0),
     treasure: isTreasure,
-    treasureAccepted: isTreasure && Boolean(reading.authorized),
+    treasureAccepted: isTreasure && Boolean(reading.autorizado),
     treasureTeamComplete: false,
     monster: isMonster,
     monsterAccepted: false,
@@ -116,9 +116,9 @@ function broadcast(data) {
     global.broadcastToEvent(data.payload.eventoId, data);
   } else if (global.wsServer) {
     // Fallback: broadcast global
-    global.wsServer.clients.forEach((client) => {
-      if (client.readyState === 1) {
-        client.send(JSON.stringify(data));
+    global.wsServer.clients.forEach((cliente) => {
+      if (cliente.readyState === 1) {
+        cliente.send(JSON.stringify(data));
       }
     });
   }
@@ -206,11 +206,11 @@ router.post('/reception', async (req, res) => {
     // cada ida ao banco remoto soma na demora entre passar a pulseira e a luz acender.
     const checkpoint = await queryOne(
       `SELECT c.id, c.empresaId, c.eventoId, c.propositoCheckpoint,
-              p.code AS pulseira_code, p.status AS pulseira_status
+              p.codigo AS pulseira_code, p.status AS pulseira_status
        FROM checkpoints c
        LEFT JOIN pulseiras p
          ON LOWER(p.empresaId) = LOWER(c.empresaId)
-        AND ${uidSqlExpression('p.code')} = @uid
+        AND ${uidSqlExpression('p.codigo')} = @uid
        WHERE c.id = @id
          AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) = 'reception'`,
       { id: checkpointId, uid: normalizedUid }
@@ -221,7 +221,7 @@ router.post('/reception', async (req, res) => {
     }
 
     const pulseira = checkpoint.pulseira_code
-      ? { code: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
+      ? { codigo: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
       : null;
 
     const registered = Boolean(pulseira);
@@ -344,9 +344,9 @@ router.post('/', async (req, res) => {
     // A pulseira precisa existir, pertencer à mesma empresa e estar ativa.
     // Isso evita processar uma criança cujo vínculo foi removido ou bloqueado.
     const pulseira = await queryOne(
-      `SELECT code, empresaId, status, criancaId
+      `SELECT codigo, empresaId, status, criancaId
        FROM pulseiras
-       WHERE ${uidSqlExpression('code')} = @uid`,
+       WHERE ${uidSqlExpression('codigo')} = @uid`,
       { uid: normalizedUid }
     );
 
@@ -408,7 +408,7 @@ router.post('/', async (req, res) => {
         ok: true,
         registered: true,
         braceletCode: normalizedUid,
-        authorized: false,
+        autorizado: false,
         message: 'Pulseira cadastrada em outro evento'
       });
     }
@@ -437,7 +437,7 @@ router.post('/', async (req, res) => {
             if (result?.accepted && !result.alreadyScanned) {
               await tx.query(
                 `INSERT INTO leituras
-                  (id, checkpointId, criancaId, uid, brincadeiraId, authorized,
+                  (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
                    pontosAtribuidos, forcaSinal, empresaId, session_id)
                  VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                          0, @signal, @empresaId, @sessionId)`,
@@ -457,7 +457,7 @@ router.post('/', async (req, res) => {
           });
           break;
         } catch (error) {
-          if (error.code === 'MONSTER_VERSION_CONFLICT') {
+          if (error.codigo === 'MONSTER_VERSION_CONFLICT') {
             // Outra tentativa pode ter confirmado a mesma leitura enquanto
             // esta transação aguardava o lock/índice único.
             const processedAfterConflict = await findProcessedReading(leituraId, checkpoint);
@@ -474,7 +474,7 @@ router.post('/', async (req, res) => {
         return res.json({
           ok: true,
           registered: true,
-          authorized: false,
+          autorizado: false,
           braceletCode: normalizedUid,
           readingId: leituraId,
           monster: true,
@@ -562,7 +562,7 @@ router.post('/', async (req, res) => {
         return res.json({
           ok: true,
           registered: true,
-          authorized: Boolean(monsterResult.accepted),
+          autorizado: Boolean(monsterResult.accepted),
           braceletCode: normalizedUid,
           readingId: leituraId,
           monster: true,
@@ -599,7 +599,7 @@ router.post('/', async (req, res) => {
         return res.json({
           ok: true,
           registered: true,
-          authorized: false,
+          autorizado: false,
           treasure: true,
           treasureAccepted: false,
           error: offlineMessage,
@@ -620,7 +620,7 @@ router.post('/', async (req, res) => {
         if (result?.accepted && !result.duplicate) {
           await tx.query(
             `INSERT INTO leituras
-              (id, checkpointId, criancaId, uid, brincadeiraId, authorized,
+              (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
                pontosAtribuidos, forcaSinal, empresaId, session_id)
              VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                      0, @signal, @empresaId, @sessionId)`,
@@ -715,7 +715,7 @@ router.post('/', async (req, res) => {
         return res.json({
           ok: true,
           registered: true,
-          authorized: Boolean(treasureResult.teamComplete),
+          autorizado: Boolean(treasureResult.teamComplete),
           treasure: true,
           treasureAccepted: Boolean(treasureResult.accepted),
           treasureTeamComplete: Boolean(treasureResult.teamComplete),
@@ -760,7 +760,7 @@ router.post('/', async (req, res) => {
         if (result?.accepted) {
           await tx.query(
             `INSERT INTO leituras
-              (id, checkpointId, criancaId, uid, brincadeiraId, authorized,
+              (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
                pontosAtribuidos, forcaSinal, empresaId)
              VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                      0, @signal, @empresaId)`,
@@ -802,7 +802,7 @@ router.post('/', async (req, res) => {
         return res.json({
           ok: true,
           registered: true,
-          authorized: Boolean(zoneResult.accepted),
+          autorizado: Boolean(zoneResult.accepted),
           zone: true,
           zoneAccepted: Boolean(zoneResult.accepted),
           readingId: leituraId,
@@ -864,7 +864,7 @@ router.post('/', async (req, res) => {
         return res.json({
           ok: true,
           registered: true,
-          authorized: false,
+          autorizado: false,
           braceletCode: normalizedUid,
           gameMode: 'zone_conquest_team',
           error: scanResult.error,
@@ -895,7 +895,7 @@ router.post('/', async (req, res) => {
       return res.json({
         ok: true,
         registered: true,
-        authorized: true,
+        autorizado: true,
         braceletCode: normalizedUid,
         readingId: leituraId,
         gameMode: 'zone_conquest_team',
@@ -924,7 +924,7 @@ router.post('/', async (req, res) => {
         return res.json({
           ok: true,
           registered: true,
-          authorized: false,
+          autorizado: false,
           braceletCode: normalizedUid,
           gameMode: 'zone_conquest_individual',
           error: scanResult.error,
@@ -966,7 +966,7 @@ router.post('/', async (req, res) => {
       return res.json({
         ok: true,
         registered: true,
-        authorized: true,
+        autorizado: true,
         braceletCode: normalizedUid,
         readingId: leituraId,
         gameMode: 'zone_conquest_individual',
@@ -997,7 +997,7 @@ router.post('/', async (req, res) => {
       return res.json({
         ok: true,
         registered: true,
-        authorized: false,
+        autorizado: false,
         braceletCode: normalizedUid,
         error: 'Criança sem time associado',
         message: 'Atribua a criança a um time antes de iniciar o jogo'
@@ -1011,7 +1011,7 @@ router.post('/', async (req, res) => {
     if (ownerIsSameTeam && isCooldown) {
       const remainingSeconds = Math.ceil((new Date(checkpointData.territorioCooldownAte) - now) / 1000);
       return res.json({
-        ok: true, registered: true, authorized: false,
+        ok: true, registered: true, autorizado: false,
         braceletCode: normalizedUid,
         teamAlreadyOwns: true,
         remainingSeconds,
@@ -1073,7 +1073,7 @@ router.post('/', async (req, res) => {
 
       await tx.query(
         `INSERT INTO leituras
-          (id, checkpointId, criancaId, uid, brincadeiraId, authorized,
+          (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
            pontosAtribuidos, forcaSinal, empresaId, session_id)
          VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                  @points, @signal, @empresaId, @sessionId)`,
@@ -1132,7 +1132,7 @@ router.post('/', async (req, res) => {
       return res.json({
         ok: true,
         registered: true,
-        authorized: false,
+        autorizado: false,
         braceletCode: normalizedUid,
         territoryLocked: Boolean(currentLocked),
         teamAlreadyOwns: Boolean(currentOwnerIsSame && currentCooldown),
@@ -1211,7 +1211,7 @@ router.post('/', async (req, res) => {
     res.json({ 
       ok: true, 
       registered: true,
-      authorized: true,
+      autorizado: true,
       teamColor, 
       points: pointsAwarded,
       criancaName: crianca.name, 
@@ -1223,7 +1223,7 @@ router.post('/', async (req, res) => {
     console.error('❌ [LEITURA] Erro ao processar leitura:', err);
     console.error('   Stack:', err.stack);
     console.error('   Message:', err.message);
-    console.error('   Code:', err.code);
+    console.error('   Code:', err.codigo);
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
@@ -1365,7 +1365,7 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
           LEFT JOIN checkpoints cp ON cp.id = l.checkpointId
           LEFT JOIN times t ON t.id = c.timeId
           WHERE LOWER(c.eventoId) = LOWER(@eventoId)
-            AND l.authorized = 1
+            AND l.autorizado = 1
             AND (l.empresaId = @empresaId OR @master = 1)
             AND NOT EXISTS (SELECT 1 FROM pontuacoes p WHERE p.leituraId = l.id)
           ORDER BY l.criadoEm DESC

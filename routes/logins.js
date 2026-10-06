@@ -44,17 +44,17 @@ router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, re
 // POST /api/logins
 router.post('/', requireRole('admin', 'master'), async (req, res) => {
   try {
-    const { password, role } = req.body;
+    const { senha, role } = req.body;
     let email = typeof req.body.email === 'string' ? req.body.email.trim() : req.body.email;
     const empresaId = req.user.empresaId;
     const user_role = req.user.role;
 
     // Validações
-    if (!email || !password || !role) {
+    if (!email || !senha || !role) {
       return res.status(400).json({ error: 'Email, senha e role são obrigatórios' });
     }
 
-    if (password.length < 6) {
+    if (senha.length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
 
@@ -89,17 +89,17 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     }
 
     // Hash da senha (base64 - em produção usar bcrypt)
-    const hashedPassword = Buffer.from(password).toString('base64');
+    const hashedPassword = Buffer.from(senha).toString('base64');
 
     // Criar usuário com empresaId do token
     const id = require('crypto').randomUUID();
     await query(
-      `INSERT INTO logins (id, email, password, role, empresaId, status, dataCriacao)
-       VALUES (@id, @email, @password, @role, @empresaId, @status, GETDATE())`,
+      `INSERT INTO logins (id, email, senha, role, empresaId, status, dataCriacao)
+       VALUES (@id, @email, @senha, @role, @empresaId, @status, GETDATE())`,
       {
         id,
         email,
-        password: hashedPassword,
+        senha: hashedPassword,
         role,
         empresaId,
         status: 'active'

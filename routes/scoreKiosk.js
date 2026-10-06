@@ -27,9 +27,9 @@ router.use(verifyToken, requireRole('kiosk', 'score_kiosk'));
 // A recepção continua sendo a única fonte que seleciona o evento operacional.
 router.post('/readings', async (req, res) => {
   try {
-    const code = normalizeUid(req.body?.uid);
+    const codigo = normalizeUid(req.body?.uid);
     const eventId = String(req.body?.eventId || '').trim();
-    if (!code || !eventId) {
+    if (!codigo || !eventId) {
       return res.status(400).json({ error: 'eventId e uid são obrigatórios' });
     }
 
@@ -49,7 +49,7 @@ router.post('/readings', async (req, res) => {
 
     const reading = {
       readingId: uuidv4(),
-      braceletCode: code,
+      braceletCode: codigo,
       timestamp: new Date().toISOString(),
       receivedAt: Date.now(),
       eventoId: event.id,
@@ -124,10 +124,10 @@ router.get('/events/:eventId/reception-readings', async (req, res) => {
   }
 });
 
-router.get('/events/:eventId/bracelets/:code/score', async (req, res) => {
+router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
   try {
-    const code = normalizeUid(req.params.code);
-    if (!code) return res.status(400).json({ error: 'Código da pulseira inválido' });
+    const codigo = normalizeUid(req.params.codigo);
+    if (!codigo) return res.status(400).json({ error: 'Código da pulseira inválido' });
 
     const event = await queryOne(
       `SELECT id, empresaId, name, status
@@ -145,15 +145,15 @@ router.get('/events/:eventId/bracelets/:code/score', async (req, res) => {
        JOIN criancas c ON c.id = p.criancaId
          AND c.empresaId = p.empresaId
          AND c.eventoId = @eventId
-         AND ${uidSqlExpression('c.codigoPulseira')} = @code
+         AND ${uidSqlExpression('c.codigoPulseira')} = @codigo
        LEFT JOIN times t ON t.id = c.timeId
          AND t.eventoId = c.eventoId
          AND t.empresaId = c.empresaId
-       WHERE ${uidSqlExpression('p.code')} = @code
+       WHERE ${uidSqlExpression('p.codigo')} = @codigo
          AND p.empresaId = @empresaId
          AND LOWER(COALESCE(p.status, '')) = 'em_uso'
          AND p.criancaId IS NOT NULL`,
-      { code, eventId: event.id, empresaId: event.empresaId }
+      { codigo, eventId: event.id, empresaId: event.empresaId }
     );
     if (!child) return res.status(404).json({ error: 'Pulseira não vinculada a uma criança deste evento' });
 

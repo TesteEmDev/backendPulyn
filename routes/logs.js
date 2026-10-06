@@ -28,7 +28,7 @@ router.get('/', verifyToken, async (req, res) => {
             WHERE nome <> 'Master Admin' AND id = @empresaId
           `, { empresaId }),
       allQuery(`
-        SELECT id, client as empresa_nome, subject, status, criadoEm
+        SELECT id, cliente as empresa_nome, subject, status, criadoEm
         FROM support_tickets
         WHERE 1=1 ${master ? '' : 'AND empresaId = @empresaId'}
       `, { empresaId }),
@@ -44,9 +44,9 @@ router.get('/', verifyToken, async (req, res) => {
 
     const logs = [
       ...clientRows.map((c) => ({
-        id: `client-${c.id}`,
+        id: `cliente-${c.id}`,
         timestamp: c.dataCriacao,
-        client: c.empresa_nome,
+        cliente: c.empresa_nome,
         type: 'info',
         message: `Cliente cadastrado: ${c.empresa_nome}`,
         details: '',
@@ -54,7 +54,7 @@ router.get('/', verifyToken, async (req, res) => {
       ...ticketRows.map((t) => ({
         id: `ticket-${t.id}`,
         timestamp: t.criadoEm,
-        client: t.empresa_nome,
+        cliente: t.empresa_nome,
         type: t.status === 'resolvido' ? 'info' : 'warning',
         message: `Ticket de suporte: ${t.subject}`,
         details: `Status: ${t.status}`,
@@ -62,7 +62,7 @@ router.get('/', verifyToken, async (req, res) => {
       ...checkpointRows.map((cp) => ({
         id: `checkpoint-${cp.id}`,
         timestamp: cp.ultimoVisto,
-        client: cp.empresa_nome || 'Sem empresa',
+        cliente: cp.empresa_nome || 'Sem empresa',
         type: 'error',
         message: `Checkpoint "${cp.name || cp.id}" está offline`,
         details: cp.zone ? `Zona: ${cp.zone}` : '',

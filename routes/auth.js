@@ -10,16 +10,16 @@ const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'fa
 // Login: validar email + senha contra tabela logins
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, senha } = req.body;
 
-    if (!email || !password) {
+    if (!email || !senha) {
       console.log('❌ Email ou senha não fornecidos');
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     }
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.id, l.email, l.password, l.status, l.role, l.nomeFamilia,
+      `SELECT l.id, l.email, l.senha, l.status, l.role, l.nomeFamilia,
               e.id as empresaId, e.nome as empresa_nome, e.[plano]
        FROM logins l
        JOIN empresas e ON l.empresaId = e.id
@@ -32,12 +32,12 @@ router.post('/login', async (req, res) => {
     }
 
     // Comparar senha (base64)
-    const hashedPassword = Buffer.from(password).toString('base64');
-    if (login.password !== hashedPassword) {
+    const hashedPassword = Buffer.from(senha).toString('base64');
+    if (login.senha !== hashedPassword) {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
     }
     if (login.status === 'pending') {
-      return res.status(403).json({ error: 'Sua conta familiar aguarda aprovação da recepção', code: 'FAMILY_PENDING' });
+      return res.status(403).json({ error: 'Sua conta familiar aguarda aprovação da recepção', codigo: 'FAMILY_PENDING' });
     }
     if (login.status !== 'active') {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
@@ -167,15 +167,15 @@ router.get('/check-email', async (req, res) => {
 // POST /auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name, nomeFamilia } = req.body;
+    const { email, senha, name, nomeFamilia } = req.body;
 
-    if (!email || !password || !name) {
+    if (!email || !senha || !name) {
       console.log('❌ Email, senha ou nome não fornecidos');
       return res.status(400).json({ error: 'Email, senha e nome são obrigatórios' });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const hashedPassword = Buffer.from(String(password)).toString('base64');
+    const hashedPassword = Buffer.from(String(senha)).toString('base64');
 
     console.log('🔍 Verificando se email já existe:', normalizedEmail);
     
@@ -191,7 +191,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Validações
-    if (String(password).length < 6) {
+    if (String(senha).length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
 
@@ -221,13 +221,13 @@ router.post('/register', async (req, res) => {
     console.log('📝 Criando login para família...');
     
     await query(
-      `INSERT INTO logins (id, empresaId, email, password, nomeFamilia, role, status, dataCriacao)
-       VALUES (@id, @empresaId, @email, @password, @familyName, 'family', 'active', GETDATE())`,
+      `INSERT INTO logins (id, empresaId, email, senha, nomeFamilia, role, status, dataCriacao)
+       VALUES (@id, @empresaId, @email, @senha, @familyName, 'family', 'active', GETDATE())`,
       {
         id: loginId,
         empresaId: empresaId,
         email: normalizedEmail,
-        password: hashedPassword,
+        senha: hashedPassword,
         familyName: nomeFamilia || name
       }
     );

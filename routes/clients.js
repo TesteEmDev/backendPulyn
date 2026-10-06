@@ -76,28 +76,28 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     }
 
     const platformClients = await listPlatformClients({ includeFamily: true });
-    const client = platformClients.find((c) => String(c.id) === String(req.params.id));
-    if (!client) {
+    const cliente = platformClients.find((c) => String(c.id) === String(req.params.id));
+    if (!cliente) {
       return res.status(404).json({ error: 'Cliente não encontrado' });
     }
 
-    const planId = String(client.plan || 'starter').trim().toLowerCase();
+    const planId = String(cliente.plan || 'starter').trim().toLowerCase();
     const planDefinition = PLAN_DEFINITIONS[planId] || null;
 
     const details = {
-      id: client.id,
-      origin: client.origin,
-      name: client.name,
+      id: cliente.id,
+      origin: cliente.origin,
+      name: cliente.name,
       cnpj: null,
-      city: client.city,
-      state: client.state,
-      email: client.email,
-      phone: client.phone,
+      city: cliente.city,
+      state: cliente.state,
+      email: cliente.email,
+      phone: cliente.phone,
       plan: planId,
-      status: client.status,
-      createdAt: toIso(client.createdAt),
+      status: cliente.status,
+      createdAt: toIso(cliente.createdAt),
       updatedAt: null,
-      lastAccess: toIso(client.lastAccess),
+      lastAccess: toIso(cliente.lastAccess),
       planInfo: planDefinition ? { id: planId, ...planDefinition } : null,
       usage: {
         eventsTotal: 0, eventsActive: 0, eventsScheduled: 0, eventsFinished: 0, eventsThisMonth: 0,
@@ -108,8 +108,8 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       support: { open: 0, total: 0 },
     };
 
-    if (client.empresaId) {
-      const empresaId = client.empresaId;
+    if (cliente.empresaId) {
+      const empresaId = cliente.empresaId;
       const [empresa, users, events, tickets] = await Promise.all([
         queryOne('SELECT cnpj, dataAtualizacao FROM empresas WHERE id = @id', { id: empresaId }),
         allQuery(
@@ -200,13 +200,13 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode criar clientes' });
     }
 
-    const { name, city, state, email, password, phone, plan } = req.body;
+    const { name, city, state, email, senha, phone, plan } = req.body;
     
-    if (!email || !password) {
+    if (!email || !senha) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     }
 
-    if (password.length < 6) {
+    if (senha.length < 6) {
       return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
     }
 
@@ -215,7 +215,7 @@ router.post('/', verifyToken, async (req, res) => {
     const loginId = uuidv4();
     
     // Hash simples da senha (em produção, usar bcrypt)
-    const hashedPassword = Buffer.from(password).toString('base64');
+    const hashedPassword = Buffer.from(senha).toString('base64');
     
     try {
       // 1️⃣ Criar EMPRESA
@@ -236,13 +236,13 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO logins (id, empresaId, email, password, status) 
-         VALUES (@id, @empresaId, @email, @password, @status)`,
+        `INSERT INTO logins (id, empresaId, email, senha, status) 
+         VALUES (@id, @empresaId, @email, @senha, @status)`,
         {
           id: loginId,
           empresaId: empresaId,
           email: email,
-          password: hashedPassword,
+          senha: hashedPassword,
           status: 'active'
         }
       );

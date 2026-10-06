@@ -34,9 +34,9 @@ function serializeMessage(message) {
   return {
     id: message.id,
     eventoId: message.eventoId,
-    text: message.text,
+    texto: message.texto,
     type: message.type,
-    sender: message.sender || null,
+    remetente: message.remetente || null,
     timestamp: message.enviadoEm,
     enviadoEm: message.enviadoEm,
   };
@@ -51,7 +51,7 @@ router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (re
     const rawLimit = Number.parseInt(req.query.limit, 10);
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
     const messages = await allQuery(`
-      SELECT TOP (@limit) id, eventoId, text, type, sender, enviadoEm
+      SELECT TOP (@limit) id, eventoId, texto, type, remetente, enviadoEm
       FROM mensagens_display
       WHERE eventoId = @eventoId
       ORDER BY enviadoEm DESC
@@ -69,26 +69,26 @@ router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (
     if (event === null) return res.status(404).json({ error: 'Evento não encontrado' });
     if (event === false) return res.status(403).json({ error: 'Acesso negado ao evento' });
 
-    const text = String(req.body?.text || '').trim();
+    const texto = String(req.body?.texto || '').trim();
     const type = String(req.body?.type || 'custom').toLowerCase();
-    if (!text) return res.status(400).json({ error: 'text é obrigatório' });
-    if (text.length > 500) return res.status(400).json({ error: 'text excede 500 caracteres' });
+    if (!texto) return res.status(400).json({ error: 'texto é obrigatório' });
+    if (texto.length > 500) return res.status(400).json({ error: 'texto excede 500 caracteres' });
     if (!MESSAGE_TYPES.has(type)) return res.status(400).json({ error: 'type inválido' });
 
     const messageId = uuidv4();
     await query(`
-      INSERT INTO mensagens_display (id, eventoId, text, type, sender, enviadoEm)
-      VALUES (@id, @eventoId, @text, @type, @sender, CURRENT_TIMESTAMP)
+      INSERT INTO mensagens_display (id, eventoId, texto, type, remetente, enviadoEm)
+      VALUES (@id, @eventoId, @texto, @type, @remetente, CURRENT_TIMESTAMP)
     `, {
       id: messageId,
       eventoId: req.params.eventoId,
-      text,
+      texto,
       type,
-      sender: req.user.email || req.user.id || null,
+      remetente: req.user.email || req.user.id || null,
     });
 
     const message = await queryOne(
-      'SELECT id, eventoId, text, type, sender, enviadoEm FROM mensagens_display WHERE id = @id',
+      'SELECT id, eventoId, texto, type, remetente, enviadoEm FROM mensagens_display WHERE id = @id',
       { id: messageId }
     );
     const serialized = serializeMessage(message);

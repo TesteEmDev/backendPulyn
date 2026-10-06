@@ -132,19 +132,19 @@ router.post('/invites/:token/register', async (req, res) => {
       return res.status(410).json({ error: invite.status === 'expired' ? 'Convite expirado' : 'Convite já utilizado', status: invite.status });
     }
 
-    const { name, parentName, email, password, relationship = 'responsável', child, children: requestedChildren } = req.body;
+    const { name, parentName, email, senha, relacionamento = 'responsável', child, children: requestedChildren } = req.body;
     const familyName = String(parentName || name || '').trim();
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const childrenPayload = Array.isArray(requestedChildren)
       ? requestedChildren
       : (child ? [child] : []);
-    if (!familyName || !normalizedEmail || !password) {
+    if (!familyName || !normalizedEmail || !senha) {
       return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios' });
     }
     if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
       return res.status(400).json({ error: 'E-mail inválido' });
     }
-    if (String(password).length < 6) {
+    if (String(senha).length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
     // O responsável pode se cadastrar sem crianças (vincula depois pelo QR Code no app)
@@ -154,7 +154,7 @@ router.post('/invites/:token/register', async (req, res) => {
     }
 
     const existingLogin = await queryOne(
-      'SELECT id, role, empresaId, status, password FROM logins WHERE LOWER(email) = @email',
+      'SELECT id, role, empresaId, status, senha FROM logins WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
     if (existingLogin && (existingLogin.role !== 'family' || String(existingLogin.empresaId) !== String(invite.empresaId))) {
@@ -163,7 +163,7 @@ router.post('/invites/:token/register', async (req, res) => {
     if (existingLogin && !['active', 'pending'].includes(existingLogin.status)) {
       return res.status(409).json({ error: 'Esta conta familiar não está disponível para novos vínculos.' });
     }
-    if (existingLogin && existingLogin.password !== Buffer.from(String(password)).toString('base64')) {
+    if (existingLogin && existingLogin.senha !== Buffer.from(String(senha)).toString('base64')) {
       return res.status(409).json({ error: 'A senha informada não confere com a conta familiar existente.' });
     }
 
@@ -179,13 +179,13 @@ router.post('/invites/:token/register', async (req, res) => {
       const loginId = existingLogin?.id || crypto.randomUUID();
       if (!existingLogin) {
         await query(`
-          INSERT INTO logins (id, empresaId, email, password, nomeFamilia, role, status, dataCriacao)
-          VALUES (@id, @empresaId, @email, @password, @familyName, 'family', @loginStatus, GETDATE())
+          INSERT INTO logins (id, empresaId, email, senha, nomeFamilia, role, status, dataCriacao)
+          VALUES (@id, @empresaId, @email, @senha, @familyName, 'family', @loginStatus, GETDATE())
         `, {
           id: loginId,
           empresaId: invite.empresaId,
           email: normalizedEmail,
-          password: Buffer.from(String(password)).toString('base64'),
+          senha: Buffer.from(String(senha)).toString('base64'),
           familyName,
           loginStatus: plan.loginStatus,
         });
@@ -217,14 +217,14 @@ router.post('/invites/:token/register', async (req, res) => {
         const linkId = crypto.randomUUID();
         await query(`
           INSERT INTO family_child_links
-            (id, loginId, criancaId, empresaId, relationship, status)
-          VALUES (@id, @loginId, @childId, @empresaId, @relationship, 'pending')
+            (id, loginId, criancaId, empresaId, relacionamento, status)
+          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'pending')
         `, {
           id: linkId,
           loginId,
           childId,
           empresaId: invite.empresaId,
-          relationship: String(relationship).trim().slice(0, 50) || 'responsável',
+          relacionamento: String(relacionamento).trim().slice(0, 50) || 'responsável',
         });
       }
 
@@ -259,7 +259,7 @@ router.post('/invites/:token/register', async (req, res) => {
 // Pendências visíveis apenas para recepção/admin/master.
 async function listFamilyLinks(status, eventoId, req) {
   return allQuery(`
-    SELECT l.id as link_id, l.status as link_status, l.relationship, l.criadoEm as requested_at,
+    SELECT l.id as link_id, l.status as link_status, l.relacionamento, l.criadoEm as requested_at,
            u.id as loginId, u.email, u.nomeFamilia,
            c.id as criancaId, c.name as crianca_name, c.nickname, c.age, c.avatar,
            c.codigoPulseira, c.scores, c.status as crianca_status,
@@ -402,7 +402,7 @@ router.get('/children', verifyToken, async (req, res) => {
       SELECT c.id, c.eventoId, c.name, c.nickname, c.age, c.avatar as "profileImage", c.codigoPulseira,
              COALESCE(c.scores, 0) as "currentScore",
              COALESCE(c.scores, 0) as "totalScore",
-             l.relationship, l.status as link_status,
+             l.relacionamento, l.status as link_status,
              t.id as "teamId", t.name as "teamName", t.color as "teamColor", t.points as team_points
       FROM family_child_links l
       JOIN criancas c ON c.id = l.criancaId
