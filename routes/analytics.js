@@ -57,8 +57,8 @@ const round1 = (value) => Math.round(value * 10) / 10;
 const sumMrr = (clients) => clients.filter(isActive).reduce((sum, c) => sum + planPrice(c), 0);
 
 // Escopo "de clientes": eventos de empresas (não os de teste sem empresa nem da conta Master).
-const CUSTOMER_EVENTS = `e.empresa_id IS NOT NULL
-  AND e.empresa_id NOT IN (SELECT id FROM empresas WHERE nome = 'Master Admin')`;
+const CUSTOMER_EVENTS = `e.empresaId IS NOT NULL
+  AND e.empresaId NOT IN (SELECT id FROM empresas WHERE nome = 'Master Admin')`;
 
 // ✅ Indicadores gerais
 router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master pode ver métricas globais'), async (req, res) => {
@@ -79,8 +79,8 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(k.status, '')) = 'online' THEN 1 ELSE 0 END) AS online
         FROM checkpoints k
-        JOIN eventos e ON e.id = k.evento_id
-        WHERE LOWER(COALESCE(k.checkpoint_purpose, 'game')) <> 'reception'
+        JOIN eventos e ON e.id = k.eventoId
+        WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
           AND ${CUSTOMER_EVENTS}
       `),
       queryOne(`
@@ -88,7 +88,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(c.status, 'active')) = 'active' THEN 1 ELSE 0 END) AS active
         FROM criancas c
-        JOIN eventos e ON e.id = c.evento_id
+        JOIN eventos e ON e.id = c.eventoId
         WHERE ${CUSTOMER_EVENTS}
       `),
     ]);
@@ -196,16 +196,16 @@ router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apena
 router.get('/checkpoints-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver checkpoints globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
-      SELECT k.created_at
+      SELECT k.criadoEm
       FROM checkpoints k
-      JOIN eventos e ON e.id = k.evento_id
-      WHERE LOWER(COALESCE(k.checkpoint_purpose, 'game')) <> 'reception'
+      JOIN eventos e ON e.id = k.eventoId
+      WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
         AND ${CUSTOMER_EVENTS}
     `);
 
     const perMonth = new Map();
     rows.forEach((row) => {
-      const key = monthKeyOf(row.created_at);
+      const key = monthKeyOf(row.criadoEm);
       if (key) perMonth.set(key, (perMonth.get(key) || 0) + 1);
     });
     if (perMonth.size === 0) return res.json([]);

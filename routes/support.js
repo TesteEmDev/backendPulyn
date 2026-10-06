@@ -23,15 +23,15 @@ async function ensureSupportTable() {
       await query(`
         CREATE TABLE IF NOT EXISTS support_tickets (
           id varchar(36) PRIMARY KEY,
-          empresa_id varchar(36),
+          empresaId varchar(36),
           client varchar(255) NOT NULL,
           subject varchar(255) NOT NULL,
           status varchar(20) NOT NULL DEFAULT 'aberto',
           priority varchar(20) NOT NULL DEFAULT 'media',
           description text,
           assignee varchar(255),
-          created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-          updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+          criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
       `);
     } else {
@@ -40,15 +40,15 @@ async function ensureSupportTable() {
         BEGIN
           CREATE TABLE support_tickets (
             id varchar(36) NOT NULL PRIMARY KEY,
-            empresa_id varchar(36) NULL,
+            empresaId varchar(36) NULL,
             client varchar(255) NOT NULL,
             subject varchar(255) NOT NULL,
             status varchar(20) NOT NULL DEFAULT 'aberto',
             priority varchar(20) NOT NULL DEFAULT 'media',
             description nvarchar(max) NULL,
             assignee varchar(255) NULL,
-            created_at datetime2 NOT NULL DEFAULT GETDATE(),
-            updated_at datetime2 NOT NULL DEFAULT GETDATE()
+            criadoEm datetime2 NOT NULL DEFAULT GETDATE(),
+            atualizadoEm datetime2 NOT NULL DEFAULT GETDATE()
           )
         END
       `);
@@ -64,16 +64,16 @@ function serializeTicket(ticket) {
   if (!ticket) return null;
   return {
     id: ticket.id,
-    empresa_id: ticket.empresa_id || null,
+    empresaId: ticket.empresaId || null,
     client: ticket.client,
     subject: ticket.subject,
     status: ticket.status,
     priority: ticket.priority,
     description: ticket.description || '',
     assignee: ticket.assignee || 'Atribuir',
-    date: ticket.created_at,
-    createdAt: ticket.created_at,
-    updatedAt: ticket.updated_at,
+    date: ticket.criadoEm,
+    createdAt: ticket.criadoEm,
+    updatedAt: ticket.atualizadoEm,
   };
 }
 
@@ -117,10 +117,10 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
     await ensureSupportTable();
     const tickets = await allQuery(`
       SELECT TOP (@limit)
-        id, empresa_id, client, subject, status, priority, description,
-        assignee, created_at, updated_at
+        id, empresaId, client, subject, status, priority, description,
+        assignee, criadoEm, atualizadoEm
       FROM support_tickets
-      ORDER BY created_at DESC
+      ORDER BY criadoEm DESC
     `, { limit: parseLimit(req.query.limit) });
     return res.json(tickets.map(serializeTicket));
   } catch (err) {
@@ -132,7 +132,7 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
 router.post('/', verifyToken, requireMaster, async (req, res) => {
   try {
     await ensureSupportTable();
-    const { client, subject, priority, description, assignee, empresa_id } = req.body || {};
+    const { client, subject, priority, description, assignee, empresaId } = req.body || {};
     if (!String(client || '').trim() || !String(subject || '').trim()) {
       return res.status(400).json({ error: 'client e subject são obrigatórios' });
     }
@@ -144,12 +144,12 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
     const id = uuidv4();
     await query(`
       INSERT INTO support_tickets
-        (id, empresa_id, client, subject, status, priority, description, assignee)
+        (id, empresaId, client, subject, status, priority, description, assignee)
       VALUES
-        (@id, @empresa_id, @client, @subject, @status, @priority, @description, @assignee)
+        (@id, @empresaId, @client, @subject, @status, @priority, @description, @assignee)
     `, {
       id,
-      empresa_id: empresa_id || null,
+      empresaId: empresaId || null,
       client: String(client).trim(),
       subject: String(subject).trim(),
       status: 'aberto',
@@ -179,7 +179,7 @@ router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
 
     await query(`
       UPDATE support_tickets
-      SET status = @status, updated_at = CURRENT_TIMESTAMP
+      SET status = @status, atualizadoEm = CURRENT_TIMESTAMP
       WHERE id = @id
     `, { id: req.params.id, status });
     const ticket = await queryOne('SELECT * FROM support_tickets WHERE id = @id', { id: req.params.id });

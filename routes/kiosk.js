@@ -33,14 +33,14 @@ router.get('/events', async (req, res) => {
               CASE WHEN EXISTS (
                 SELECT 1
                 FROM checkpoints c
-                WHERE c.evento_id = e.id
-                  AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) = 'reception'
+                WHERE c.eventoId = e.id
+                  AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) = 'reception'
               ) THEN 1 ELSE 0 END AS has_reception_checkpoint
        FROM eventos e
-       WHERE e.empresa_id = @empresaId
+       WHERE e.empresaId = @empresaId
          AND LOWER(COALESCE(e.status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
        ORDER BY e.date DESC`,
-      { empresaId: req.user.empresa_id }
+      { empresaId: req.user.empresaId }
     );
     res.json(events || []);
   } catch (error) {
@@ -55,9 +55,9 @@ router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const { queryOne } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+      `SELECT id, empresaId, status FROM eventos
+       WHERE id = @eventId AND empresaId = @empresaId`,
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
@@ -78,9 +78,9 @@ router.get('/events/:eventId/teams', async (req, res) => {
   try {
     const { queryOne, allQuery } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+      `SELECT id, empresaId, status FROM eventos
+       WHERE id = @eventId AND empresaId = @empresaId`,
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
@@ -88,9 +88,9 @@ router.get('/events/:eventId/teams', async (req, res) => {
     const teams = await allQuery(
       `SELECT id, name, color, points
        FROM times
-       WHERE evento_id = @eventId AND empresa_id = @empresaId
+       WHERE eventoId = @eventId AND empresaId = @empresaId
        ORDER BY name`,
-      { eventId: event.id, empresaId: req.user.empresa_id }
+      { eventId: event.id, empresaId: req.user.empresaId }
     );
     res.json(teams || []);
   } catch (error) {
@@ -107,7 +107,7 @@ router.get('/bracelets/:code', async (req, res) => {
 
     const { queryOne } = require('../database');
     const bracelet = await queryOne(
-      `SELECT code, status, crianca_id, empresa_id
+      `SELECT code, status, criancaId, empresaId
        FROM pulseiras
        WHERE ${uidSqlExpression('code')} = @code`,
       { code }
@@ -116,11 +116,11 @@ router.get('/bracelets/:code', async (req, res) => {
     if (!bracelet) {
       return res.json({ code, exists: false, status: null, available: true });
     }
-    if (String(bracelet.empresa_id).trim().toLowerCase() !== String(req.user.empresa_id).trim().toLowerCase()) {
+    if (String(bracelet.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
       return res.status(403).json({ error: 'Esta pulseira não pertence a esta empresa' });
     }
 
-    const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.crianca_id;
+    const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.criancaId;
     res.json({ code: bracelet.code, exists: true, status: bracelet.status, available });
   } catch (error) {
     console.error('❌ Kiosk: erro ao consultar pulseira:', error.message);
@@ -150,9 +150,9 @@ router.post('/participants', async (req, res) => {
 
     const participant = await withTransaction(async (tx) => {
       const event = await tx.queryOne(
-        `SELECT id, empresa_id, status FROM eventos
-         WHERE id = @eventId AND empresa_id = @empresaId`,
-        { eventId, empresaId: req.user.empresa_id }
+        `SELECT id, empresaId, status FROM eventos
+         WHERE id = @eventId AND empresaId = @empresaId`,
+        { eventId, empresaId: req.user.empresaId }
       );
       if (!event) throw httpError('Evento não encontrado', 404);
       if (!isOpenEvent(event)) throw httpError('Este evento não está aberto para cadastro', 409);
@@ -161,44 +161,44 @@ router.post('/participants', async (req, res) => {
       if (timeId) {
         team = await tx.queryOne(
           `SELECT id, name FROM times
-           WHERE id = @timeId AND evento_id = @eventId AND empresa_id = @empresaId`,
-          { timeId, eventId, empresaId: event.empresa_id }
+           WHERE id = @timeId AND eventoId = @eventId AND empresaId = @empresaId`,
+          { timeId, eventId, empresaId: event.empresaId }
         );
         if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
       }
 
       let bracelet = await tx.queryOne(
-        `SELECT code, status, crianca_id, empresa_id
+        `SELECT code, status, criancaId, empresaId
          FROM pulseiras
          WHERE ${uidSqlExpression('code')} = @code`,
         { code }
       );
 
-      if (bracelet && String(bracelet.empresa_id).trim().toLowerCase() !== String(event.empresa_id).trim().toLowerCase()) {
+      if (bracelet && String(bracelet.empresaId).trim().toLowerCase() !== String(event.empresaId).trim().toLowerCase()) {
         throw httpError('Esta pulseira pertence a outra empresa', 403);
       }
       if (!bracelet) {
         await tx.query(
-          `INSERT INTO pulseiras (code, status, empresa_id, created_at)
+          `INSERT INTO pulseiras (code, status, empresaId, criadoEm)
            VALUES (@code, 'disponivel', @empresaId, GETDATE())`,
-          { code, empresaId: event.empresa_id }
+          { code, empresaId: event.empresaId }
         );
-        bracelet = { code, status: 'disponivel', crianca_id: null, empresa_id: event.empresa_id };
+        bracelet = { code, status: 'disponivel', criancaId: null, empresaId: event.empresaId };
       }
 
-      if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.crianca_id) {
+      if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.criancaId) {
         throw httpError('Esta pulseira não está disponível para vínculo', 409);
       }
 
       const childId = uuidv4();
       await tx.query(
         `INSERT INTO criancas
-          (id, evento_id, empresa_id, time_id, name, nickname, age, avatar, bracelet_code, scores)
+          (id, eventoId, empresaId, timeId, name, nickname, age, avatar, codigoPulseira, scores)
          VALUES (@id, @eventId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @code, 0)`,
         {
           id: childId,
           eventId: event.id,
-          empresaId: event.empresa_id,
+          empresaId: event.empresaId,
           timeId: team ? team.id : null,
           name: cleanName,
           nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
@@ -210,12 +210,12 @@ router.post('/participants', async (req, res) => {
 
       const braceletUpdate = await tx.query(
         `UPDATE pulseiras
-         SET status = 'em_uso', crianca_id = @childId
+         SET status = 'em_uso', criancaId = @childId
          WHERE ${uidSqlExpression('code')} = @code
-           AND empresa_id = @empresaId
+           AND empresaId = @empresaId
            AND status = 'disponivel'
-           AND crianca_id IS NULL`,
-        { code, childId, empresaId: event.empresa_id }
+           AND criancaId IS NULL`,
+        { code, childId, empresaId: event.empresaId }
       );
       if ((braceletUpdate.rowsAffected?.[0] || 0) === 0) {
         throw httpError('Esta pulseira acabou de ser vinculada. Aproxime outra pulseira', 409);

@@ -11,27 +11,27 @@ const TEAM_MANAGER_ROLES = ['admin', 'reception', 'game_master', 'master'];
 // Listar times/equipes da empresa
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const role = req.user.role;
 
     let times;
     if (isMaster(req)) {
       // Master vê todos os times (exceto os da Master Admin)
       times = await allQuery(`
-        SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
+        SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.timeId = t.id) AS members_count
         FROM times t
-        LEFT JOIN empresas e ON t.empresa_id = e.id
+        LEFT JOIN empresas e ON t.empresaId = e.id
         WHERE e.nome != 'Master Admin'
         ORDER BY t.name
       `);
       console.log(`✅ ${times.length} times (master - TODAS as empresas, exceto Master Admin)`);
     } else {
       times = await allQuery(
-        `SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.time_id = t.id) AS members_count
-         FROM times t WHERE t.empresa_id = @empresa_id ORDER BY t.name`,
-        { empresa_id }
+        `SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.timeId = t.id) AS members_count
+         FROM times t WHERE t.empresaId = @empresaId ORDER BY t.name`,
+        { empresaId }
       );
-      console.log(`✅ ${times.length} times da empresa ${empresa_id}`);
+      console.log(`✅ ${times.length} times da empresa ${empresaId}`);
     }
 
     res.json(times);
@@ -45,8 +45,8 @@ router.get('/', verifyToken, async (req, res) => {
 router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const templates = await allQuery(
-      'SELECT id, name, color, created_at FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
-      { empresaId: req.user.empresa_id }
+      'SELECT id, name, color, criadoEm FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
+      { empresaId: req.user.empresaId }
     );
     res.json(templates);
   } catch (err) {
@@ -56,35 +56,35 @@ router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, 
 });
 
 // Copia os times padrão para o evento (sem duplicar os que já existem pelo nome).
-router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
+router.post('/eventos/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
-      { evento_id: req.params.evento_id }
+      'SELECT id, empresaId FROM eventos WHERE id = @eventoId',
+      { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
     const result = await withTransaction(async (tx) => {
       const templates = await tx.allQuery(
-        'SELECT name, color FROM times WHERE evento_id IS NULL AND empresa_id = @empresaId ORDER BY created_at, name',
-        { empresaId: evento.empresa_id }
+        'SELECT name, color FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
+        { empresaId: evento.empresaId }
       );
       if (templates.length === 0) return { error: 'Cadastre os times padrão antes de aplicá-los a um evento.' };
 
       const existing = await tx.allQuery(
-        'SELECT name FROM times WHERE evento_id = @eventoId AND empresa_id = @empresaId',
-        { eventoId: evento.id, empresaId: evento.empresa_id }
+        'SELECT name FROM times WHERE eventoId = @eventoId AND empresaId = @empresaId',
+        { eventoId: evento.id, empresaId: evento.empresaId }
       );
       const toCreate = planDefaultTeams({ templates, existingTeams: existing });
       for (const team of toCreate) {
         await tx.query(
           // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
-          `INSERT INTO times (id, evento_id, empresa_id, name, color, points)
+          `INSERT INTO times (id, eventoId, empresaId, name, color, points)
            VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
-          { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresa_id, name: team.name, color: team.color }
+          { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresaId, name: team.name, color: team.color }
         );
       }
       return { created: toCreate.length, skipped: templates.length - toCreate.length };
@@ -100,20 +100,20 @@ router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_
 });
 
 // Listar times de um evento específico
-router.get('/eventos/:evento_id/times', verifyToken, async (req, res) => {
+router.get('/eventos/:eventoId/times', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento = await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @evento_id', { evento_id: req.params.evento_id });
+    const empresaId = req.user.empresaId;
+    const evento = await queryOne('SELECT id, empresaId FROM eventos WHERE id = @eventoId', { eventoId: req.params.eventoId });
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
     const times = await allQuery(
       `SELECT * FROM times 
-       WHERE evento_id = @evento_id AND (empresa_id = @empresa_id OR @isMaster = 1)
+       WHERE eventoId = @eventoId AND (empresaId = @empresaId OR @isMaster = 1)
        ORDER BY points DESC`,
-      { evento_id: req.params.evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+      { eventoId: req.params.eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
 
     res.json(times);
@@ -125,21 +125,21 @@ router.get('/eventos/:evento_id/times', verifyToken, async (req, res) => {
 // Criar time/equipe
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, color, evento_id } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { name, color, eventoId } = req.body;
+    const empresaId = req.user.empresaId;
 
     if (!name || !color) {
       return res.status(400).json({ error: 'nome e cor são obrigatórios' });
     }
 
-    const evento = evento_id
-      ? await queryOne('SELECT id, empresa_id FROM eventos WHERE id = @evento_id', { evento_id })
+    const evento = eventoId
+      ? await queryOne('SELECT id, empresaId FROM eventos WHERE id = @eventoId', { eventoId })
       : null;
-    if (evento_id && !evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (evento && !isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (eventoId && !evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (evento && !isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
-    const targetEmpresaId = evento?.empresa_id || empresa_id;
+    const targetEmpresaId = evento?.empresaId || empresaId;
     const empresa = await queryOne('SELECT id FROM empresas WHERE id = @id', { id: targetEmpresaId });
     if (!empresa) return res.status(403).json({ error: 'Empresa não encontrada' });
 
@@ -148,13 +148,13 @@ router.post('/', verifyToken, async (req, res) => {
 
     await query(
       // A pontuação nunca vem do cliente: todo time novo começa com 0 ponto.
-      `INSERT INTO times (id, evento_id, empresa_id, name, color, points) 
-       VALUES (@id, @evento_id, @empresa_id, @name, @color, 0)`,
-      { id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color }
+      `INSERT INTO times (id, eventoId, empresaId, name, color, points) 
+       VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
+      { id, eventoId: eventoId || null, empresaId: targetEmpresaId, name, color }
     );
 
-    console.log(`✅ Time criado: ${name} (empresa: ${empresa_id}${evento_id ? `, evento: ${evento_id}` : ', sem evento'})`);
-    res.json({ id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color, points: 0 });
+    console.log(`✅ Time criado: ${name} (empresa: ${empresaId}${eventoId ? `, evento: ${eventoId}` : ', sem evento'})`);
+    res.json({ id, eventoId: eventoId || null, empresaId: targetEmpresaId, name, color, points: 0 });
   } catch (err) {
     console.error('❌ Erro ao criar time:', err);
     res.status(500).json({ error: err.message });
@@ -165,11 +165,11 @@ router.post('/', verifyToken, async (req, res) => {
 router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { name, color } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresa_id FROM times WHERE id = @id',
+      'SELECT empresaId FROM times WHERE id = @id',
       { id: req.params.id }
     );
 
@@ -177,7 +177,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Time não encontrado' });
     }
 
-    if (time.empresa_id !== empresa_id) {
+    if (time.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: time não pertence a esta empresa' });
     }
 
@@ -197,11 +197,11 @@ router.put('/:id', verifyToken, async (req, res) => {
 // Deletar time
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresa_id FROM times WHERE id = @id',
+      'SELECT empresaId FROM times WHERE id = @id',
       { id: req.params.id }
     );
 
@@ -209,7 +209,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Time não encontrado' });
     }
 
-    if (time.empresa_id !== empresa_id) {
+    if (time.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: time não pertence a esta empresa' });
     }
 
@@ -226,7 +226,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 // Distribuir aleatoriamente as crianças do evento entre os times do evento.
 // mode 'unassigned' (padrão): só quem está sem time. mode 'all': sorteia todos de novo.
 router.post(
-  '/eventos/:evento_id/distribuir-aleatorio',
+  '/eventos/:eventoId/distribuir-aleatorio',
   verifyToken,
   requireRole(TEAM_MANAGER_ROLES),
   async (req, res) => {
@@ -235,32 +235,32 @@ router.post(
       if (!DISTRIBUTION_MODES.has(mode)) return res.status(400).json({ error: 'Modo de distribuição inválido' });
 
       const evento = await queryOne(
-        'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
-        { evento_id: req.params.evento_id }
+        'SELECT id, empresaId FROM eventos WHERE id = @eventoId',
+        { eventoId: req.params.eventoId }
       );
       if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-      if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
         return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
       }
 
       const result = await withTransaction(async (tx) => {
         const teams = await tx.allQuery(
-          'SELECT id, name FROM times WHERE evento_id = @eventoId AND empresa_id = @empresaId ORDER BY name',
-          { eventoId: evento.id, empresaId: evento.empresa_id }
+          'SELECT id, name FROM times WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY name',
+          { eventoId: evento.id, empresaId: evento.empresaId }
         );
         if (teams.length < 2) {
           return { error: 'Crie pelo menos 2 times neste evento antes de distribuir os participantes.' };
         }
 
         const children = await tx.allQuery(
-          'SELECT id, time_id FROM criancas WHERE evento_id = @eventoId AND empresa_id = @empresaId',
-          { eventoId: evento.id, empresaId: evento.empresa_id }
+          'SELECT id, timeId FROM criancas WHERE eventoId = @eventoId AND empresaId = @empresaId',
+          { eventoId: evento.id, empresaId: evento.empresaId }
         );
         const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.id), mode });
 
         for (const { criancaId, timeId } of assignments) {
           await tx.query(
-            'UPDATE criancas SET time_id = @timeId WHERE id = @criancaId AND evento_id = @eventoId',
+            'UPDATE criancas SET timeId = @timeId WHERE id = @criancaId AND eventoId = @eventoId',
             { timeId, criancaId, eventoId: evento.id }
           );
         }
@@ -269,17 +269,17 @@ router.post(
         for (const team of teams) {
           await tx.query(
             `UPDATE times
-             SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
+             SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE timeId = @timeId)
              WHERE id = @timeId`,
             { timeId: team.id }
           );
         }
 
         const sizes = await tx.allQuery(
-          'SELECT time_id, COUNT(*) AS total FROM criancas WHERE evento_id = @eventoId AND time_id IS NOT NULL GROUP BY time_id',
+          'SELECT timeId, COUNT(*) AS total FROM criancas WHERE eventoId = @eventoId AND timeId IS NOT NULL GROUP BY timeId',
           { eventoId: evento.id }
         );
-        const totalByTeam = new Map(sizes.map(row => [row.time_id, Number(row.total)]));
+        const totalByTeam = new Map(sizes.map(row => [row.timeId, Number(row.total)]));
         return {
           mode,
           distributed: assignments.length,

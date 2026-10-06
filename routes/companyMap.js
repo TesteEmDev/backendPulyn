@@ -11,14 +11,14 @@ const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 
 function resolveEmpresaId(req) {
   if (isMaster(req) && req.query.empresaId) return String(req.query.empresaId);
-  return req.user.empresa_id;
+  return req.user.empresaId;
 }
 
 router.get('/floor-plan', verifyToken, async (req, res) => {
   try {
     const empresaId = resolveEmpresaId(req);
     const empresa = await queryOne(
-      'SELECT id, floor_plan_data, floor_plan_name, floor_plan_type FROM empresas WHERE id = @id',
+      'SELECT id, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM empresas WHERE id = @id',
       { id: empresaId }
     );
 
@@ -28,11 +28,11 @@ router.get('/floor-plan', verifyToken, async (req, res) => {
 
     res.json({
       empresaId: empresa.id,
-      floorPlan: empresa.floor_plan_data
+      floorPlan: empresa.dadosPlanoPiso
         ? {
-            dataUrl: empresa.floor_plan_data,
-            name: empresa.floor_plan_name,
-            type: empresa.floor_plan_type,
+            dataUrl: empresa.dadosPlanoPiso,
+            name: empresa.nomePlanoPiso,
+            type: empresa.tipoPlanoPiso,
           }
         : null,
     });
@@ -55,9 +55,9 @@ router.post('/floor-plan', verifyToken, requireRole('admin', 'master'), async (r
     const empresaId = resolveEmpresaId(req);
     await query(
       `UPDATE empresas
-       SET floor_plan_data = @dataUrl,
-           floor_plan_name = @name,
-           floor_plan_type = @type
+       SET dadosPlanoPiso = @dataUrl,
+           nomePlanoPiso = @name,
+           tipoPlanoPiso = @type
        WHERE id = @id`,
       {
         dataUrl,
@@ -79,9 +79,9 @@ router.delete('/floor-plan', verifyToken, requireRole('admin', 'master'), async 
     const empresaId = resolveEmpresaId(req);
     await query(
       `UPDATE empresas
-       SET floor_plan_data = NULL,
-           floor_plan_name = NULL,
-           floor_plan_type = NULL
+       SET dadosPlanoPiso = NULL,
+           nomePlanoPiso = NULL,
+           tipoPlanoPiso = NULL
        WHERE id = @id`,
       { id: empresaId }
     );

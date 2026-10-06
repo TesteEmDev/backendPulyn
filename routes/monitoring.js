@@ -19,7 +19,7 @@ function asDate(value) {
 
 function formatEvent(event) {
   if (!event) return 'Nenhum evento registrado';
-  const date = asDate(event.event_date || event.created_at);
+  const date = asDate(event.event_date || event.criadoEm);
   const dateLabel = date ? date.toLocaleDateString('pt-BR') : '';
   const timeLabel = event.event_time ? String(event.event_time).slice(0, 5) : '';
   return [event.name, dateLabel, timeLabel].filter(Boolean).join(' - ');
@@ -34,22 +34,22 @@ async function loadMonitoringData() {
       ORDER BY nome
     `, { masterName: 'Master Admin' }),
     allQuery(`
-      SELECT id, evento_id, empresa_id, name, status, last_seen, ip, zone, points
+      SELECT id, eventoId, empresaId, name, status, ultimoVisto, ip, zone, points
       FROM checkpoints
-      WHERE LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+      WHERE LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'
     `),
     allQuery(`
-      SELECT id, empresa_id, name, [date] AS event_date, [time] AS event_time, created_at
+      SELECT id, empresaId, name, [date] AS event_date, [time] AS event_time, criadoEm
       FROM eventos
-      WHERE empresa_id IS NOT NULL
+      WHERE empresaId IS NOT NULL
     `),
   ]);
 
   const eventById = new Map(events.map(event => [String(event.id), event]));
   const checkpointsByCompany = new Map();
   checkpoints.forEach(checkpoint => {
-    const event = eventById.get(String(checkpoint.evento_id));
-    const companyId = checkpoint.empresa_id || event?.empresa_id;
+    const event = eventById.get(String(checkpoint.eventoId));
+    const companyId = checkpoint.empresaId || event?.empresaId;
     if (!companyId) return;
     const key = String(companyId);
     if (!checkpointsByCompany.has(key)) checkpointsByCompany.set(key, []);
@@ -58,10 +58,10 @@ async function loadMonitoringData() {
 
   const eventsByCompany = new Map();
   events.forEach(event => {
-    const key = String(event.empresa_id);
+    const key = String(event.empresaId);
     const current = eventsByCompany.get(key);
-    const currentDate = asDate(current?.event_date || current?.created_at);
-    const eventDate = asDate(event.event_date || event.created_at);
+    const currentDate = asDate(current?.event_date || current?.criadoEm);
+    const eventDate = asDate(event.event_date || event.criadoEm);
     if (!current || (eventDate && (!currentDate || eventDate > currentDate))) {
       eventsByCompany.set(key, event);
     }
@@ -71,14 +71,14 @@ async function loadMonitoringData() {
   const units = companies.map(company => {
     const companyCheckpoints = checkpointsByCompany.get(String(company.id)) || [];
     const checkpointItems = companyCheckpoints.map(checkpoint => {
-      const lastSeen = asDate(checkpoint.last_seen);
+      const lastSeen = asDate(checkpoint.ultimoVisto);
       const statusValue = String(checkpoint.status || '').toLowerCase();
       const online = statusValue === 'online' && (!lastSeen || lastSeen.getTime() >= staleLimit);
       return {
         id: checkpoint.id,
         name: checkpoint.name,
         status: online ? 'online' : 'offline',
-        lastSeen: checkpoint.last_seen || null,
+        lastSeen: checkpoint.ultimoVisto || null,
         ip: checkpoint.ip || null,
         zone: checkpoint.zone || null,
         points: checkpoint.points,

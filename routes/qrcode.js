@@ -48,7 +48,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, name, evento_id, empresa_id FROM criancas WHERE id = @criancaId',
+      'SELECT id, name, eventoId, empresaId FROM criancas WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -70,12 +70,12 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO family_linking_codes (crianca_id, evento_id, empresa_id, qr_code_value, tracking_url, created_at, expires_at, status)
+      `INSERT INTO family_linking_codes (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,
-        eventoId: crianca.evento_id,
-        empresaId: crianca.empresa_id,
+        eventoId: crianca.eventoId,
+        empresaId: crianca.empresaId,
         qrCode,
         trackingUrl
       }
@@ -90,7 +90,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
       trackingUrl,
       criancaId: crianca.id,
       criancaNome: crianca.name,
-      eventoId: crianca.evento_id,
+      eventoId: crianca.eventoId,
     });
   } catch (error) {
     console.error('❌ [QRCode] Erro ao gerar QR Code:', error);
@@ -114,7 +114,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, name, evento_id, empresa_id FROM criancas WHERE id = @criancaId',
+      'SELECT id, name, eventoId, empresaId FROM criancas WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -136,12 +136,12 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO family_linking_codes (crianca_id, evento_id, empresa_id, qr_code_value, tracking_url, created_at, expires_at, status)
+      `INSERT INTO family_linking_codes (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,
-        eventoId: crianca.evento_id,
-        empresaId: crianca.empresa_id,
+        eventoId: crianca.eventoId,
+        empresaId: crianca.empresaId,
         qrCode,
         trackingUrl
       }
@@ -156,7 +156,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
       trackingUrl,
       criancaId: crianca.id,
       criancaNome: crianca.name,
-      eventoId: crianca.evento_id,
+      eventoId: crianca.eventoId,
     });
   } catch (error) {
     console.error('❌ [QRCode] Erro ao buscar QR Code:', error);

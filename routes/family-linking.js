@@ -78,13 +78,13 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     console.log(`   🔍 Buscando código QR no banco: "${codigoQR}"`);
     // Buscar código QR ativo
     const codigoVinculacao = await queryOne(
-      `SELECT flc.*, c.name, c.nickname, c.age, e.name as evento_nome, e.id as evento_id, c.empresa_id
+      `SELECT flc.*, c.name, c.nickname, c.age, e.name as evento_nome, e.id as eventoId, c.empresaId
        FROM family_linking_codes flc
-       JOIN criancas c ON flc.crianca_id = c.id
-       JOIN eventos e ON flc.evento_id = e.id
+       JOIN criancas c ON flc.criancaId = c.id
+       JOIN eventos e ON flc.eventoId = e.id
        WHERE flc.qr_code_value = @codigoQR 
          AND flc.status = 'active'
-         AND flc.expires_at > CURRENT_TIMESTAMP`,
+         AND flc.expiramEm > CURRENT_TIMESTAMP`,
       { codigoQR }
     );
 
@@ -108,10 +108,10 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       // ✅ VERIFICAR E INSERIR DENTRO DA TRANSAÇÃO COM LOCK (evita race condition)
       const vinculacaoExistente = await tx.queryOne(
         `SELECT id, status FROM family_child_links
-         WHERE login_id = @loginId 
-           AND crianca_id = @criancaId
+         WHERE loginId = @loginId 
+           AND criancaId = @criancaId
          FOR UPDATE`,
-        { loginId: req.user.id, criancaId: codigoVinculacao.crianca_id }
+        { loginId: req.user.id, criancaId: codigoVinculacao.criancaId }
       );
 
       if (vinculacaoExistente) {
@@ -131,16 +131,16 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         // ✅ Criar nova vinculação
         const linkId = uuidv4();
         console.log(`   📝 Link ID gerado: ${linkId}`);
-        console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.crianca_id}, empresaId=${codigoVinculacao.empresa_id}`);
+        console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.criancaId}, empresaId=${codigoVinculacao.empresaId}`);
         
         await tx.query(
-          `INSERT INTO family_child_links (id, login_id, crianca_id, empresa_id, status, relationship)
+          `INSERT INTO family_child_links (id, loginId, criancaId, empresaId, status, relationship)
            VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
           { 
             linkId: linkId,
             loginId: req.user.id, 
-            criancaId: codigoVinculacao.crianca_id, 
-            empresaId: codigoVinculacao.empresa_id 
+            criancaId: codigoVinculacao.criancaId, 
+            empresaId: codigoVinculacao.empresaId 
           }
         );
         console.log(`   ✅ Link criado com sucesso`);
@@ -163,7 +163,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       success: true,
       message: 'Criança vinculada com sucesso!',
       linkedChild: {
-        id: codigoVinculacao.crianca_id,
+        id: codigoVinculacao.criancaId,
         name: codigoVinculacao.name,
         nickname: codigoVinculacao.nickname,
         age: codigoVinculacao.age,
@@ -220,15 +220,15 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
     // A busca já filtra pela empresa do responsável: pulseira de outra empresa é
     // indistinguível de pulseira que não existe.
     const row = await queryOne(
-      `SELECT p.code, p.status, p.crianca_id, p.empresa_id,
-              c.name, c.nickname, c.age, c.evento_id,
+      `SELECT p.code, p.status, p.criancaId, p.empresaId,
+              c.name, c.nickname, c.age, c.eventoId,
               e.name AS evento_nome, e.status AS evento_status
        FROM pulseiras p
-       JOIN criancas c ON c.id = p.crianca_id
-       LEFT JOIN eventos e ON e.id = c.evento_id
+       JOIN criancas c ON c.id = p.criancaId
+       LEFT JOIN eventos e ON e.id = c.eventoId
        WHERE ${uidSqlExpression('p.code')} = @uid
-         AND LOWER(p.empresa_id) = LOWER(@empresaId)`,
-      { uid: parsed.uid, empresaId: req.user.empresa_id }
+         AND LOWER(p.empresaId) = LOWER(@empresaId)`,
+      { uid: parsed.uid, empresaId: req.user.empresaId }
     );
 
     const decision = checkBraceletLinkable(row);
@@ -241,10 +241,10 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
     await withTransaction(async (tx) => {
       const vinculacaoExistente = await tx.queryOne(
         `SELECT id, status FROM family_child_links
-         WHERE login_id = @loginId
-           AND crianca_id = @criancaId
+         WHERE loginId = @loginId
+           AND criancaId = @criancaId
          FOR UPDATE`,
-        { loginId: req.user.id, criancaId: row.crianca_id }
+        { loginId: req.user.id, criancaId: row.criancaId }
       );
 
       if (vinculacaoExistente) {
@@ -258,13 +258,13 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
         }
       } else {
         await tx.query(
-          `INSERT INTO family_child_links (id, login_id, crianca_id, empresa_id, status, relationship)
+          `INSERT INTO family_child_links (id, loginId, criancaId, empresaId, status, relationship)
            VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
           {
             linkId: uuidv4(),
             loginId: req.user.id,
-            criancaId: row.crianca_id,
-            empresaId: row.empresa_id,
+            criancaId: row.criancaId,
+            empresaId: row.empresaId,
           }
         );
       }
@@ -276,7 +276,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       success: true,
       message: 'Criança vinculada com sucesso!',
       linkedChild: {
-        id: row.crianca_id,
+        id: row.criancaId,
         name: row.name,
         nickname: row.nickname,
         age: row.age,
@@ -325,7 +325,7 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
     // Verificar se a criança pertence a essa família
     const link = await queryOne(
       `SELECT l.* FROM family_child_links l
-       WHERE l.crianca_id = @childId AND l.login_id = @loginId`,
+       WHERE l.criancaId = @childId AND l.loginId = @loginId`,
       { childId, loginId: req.user.id }
     );
 

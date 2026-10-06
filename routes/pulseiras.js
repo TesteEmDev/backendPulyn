@@ -7,27 +7,27 @@ const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 // Listar pulseiras
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     
     let pulseiras;
     if (isMaster(req)) {
       // Master vê todas as pulseiras (exceto as da Master Admin)
       pulseiras = await allQuery(`
-        SELECT p.code, p.status, p.crianca_id, c.name as crianca_name, p.empresa_id
+        SELECT p.code, p.status, p.criancaId, c.name as crianca_name, p.empresaId
         FROM pulseiras p
-        LEFT JOIN criancas c ON p.crianca_id = c.id
-        LEFT JOIN empresas e ON p.empresa_id = e.id
+        LEFT JOIN criancas c ON p.criancaId = c.id
+        LEFT JOIN empresas e ON p.empresaId = e.id
         WHERE e.nome != 'Master Admin'
         ORDER BY p.code
       `);
     } else {
       pulseiras = await allQuery(`
-        SELECT p.code, p.status, p.crianca_id, c.name as crianca_name, p.empresa_id
+        SELECT p.code, p.status, p.criancaId, c.name as crianca_name, p.empresaId
         FROM pulseiras p
-        LEFT JOIN criancas c ON p.crianca_id = c.id
-        WHERE p.empresa_id = @empresa_id
+        LEFT JOIN criancas c ON p.criancaId = c.id
+        WHERE p.empresaId = @empresaId
         ORDER BY p.code
-      `, { empresa_id });
+      `, { empresaId });
     }
     
     res.json(pulseiras);
@@ -41,7 +41,7 @@ router.get('/', verifyToken, async (req, res) => {
 router.post('/', verifyToken, async (req, res) => {
   try {
     const { code } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const codeUpper = normalizeUid(code);
     
     if (!codeUpper) {
@@ -56,10 +56,10 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Pulseira já cadastrada!' });
     }
     
-    await query('INSERT INTO pulseiras (code, status, empresa_id, created_at) VALUES (@code, @status, @empresa_id, GETDATE())', 
-      { code: codeUpper, status: 'disponivel', empresa_id });
+    await query('INSERT INTO pulseiras (code, status, empresaId, criadoEm) VALUES (@code, @status, @empresaId, GETDATE())', 
+      { code: codeUpper, status: 'disponivel', empresaId });
     
-    res.json({ code: codeUpper, status: 'disponivel', empresa_id, crianca_id: null, crianca_name: null });
+    res.json({ code: codeUpper, status: 'disponivel', empresaId, criancaId: null, crianca_name: null });
   } catch (err) {
     console.error('❌ Erro ao cadastrar pulseira:', err.message);
     res.status(500).json({ error: err.message });
@@ -71,7 +71,7 @@ router.put('/:code/status', verifyToken, async (req, res) => {
   try {
     const { code } = req.params;
     const { status } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const allowedStatuses = ['disponivel', 'em_uso', 'perdida', 'bloqueada'];
     const allowedRoles = ['admin', 'reception', 'game_master'];
 
@@ -85,7 +85,7 @@ router.put('/:code/status', verifyToken, async (req, res) => {
     // Verificar que a pulseira pertence à empresa (ou master)
     const normalizedCode = normalizeUid(code);
     const pulseira = await queryOne(
-      `SELECT empresa_id, crianca_id FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
+      `SELECT empresaId, criancaId FROM pulseiras WHERE ${uidSqlExpression('code')} = @code`,
       { code: normalizedCode }
     );
     
@@ -94,28 +94,28 @@ router.put('/:code/status', verifyToken, async (req, res) => {
     }
     
     // Master pode atualizar qualquer pulseira
-    if (!isMaster(req) && pulseira.empresa_id !== empresa_id) {
+    if (!isMaster(req) && pulseira.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: pulseira não pertence a esta empresa' });
     }
     
-    if (status !== 'em_uso' && pulseira.crianca_id) {
+    if (status !== 'em_uso' && pulseira.criancaId) {
       await query(
-        `UPDATE criancas SET bracelet_code = NULL
-         WHERE id = @criancaId AND empresa_id = @empresaId`,
-        { criancaId: pulseira.crianca_id, empresaId: pulseira.empresa_id }
+        `UPDATE criancas SET codigoPulseira = NULL
+         WHERE id = @criancaId AND empresaId = @empresaId`,
+        { criancaId: pulseira.criancaId, empresaId: pulseira.empresaId }
       );
     }
 
     await query(
       `UPDATE pulseiras SET status = @status,
-       crianca_id = @criancaId
+       criancaId = @criancaId
        WHERE ${uidSqlExpression('code')} = @code
-       AND empresa_id = @empresa_id`,
+       AND empresaId = @empresaId`,
       {
         code: normalizedCode,
         status,
-        criancaId: status === 'em_uso' ? pulseira.crianca_id : null,
-        empresa_id: pulseira.empresa_id,
+        criancaId: status === 'em_uso' ? pulseira.criancaId : null,
+        empresaId: pulseira.empresaId,
       }
     );
     res.json({ ok: true });
@@ -129,7 +129,7 @@ router.put('/:code/status', verifyToken, async (req, res) => {
 // Endpoint para receber detecção de pulseira do Arduino (durante check-in)
 // O Arduino envia o código da pulseira detectada
 // Nota: Este endpoint pode ser chamado pelo Arduino sem autenticação, pois é parte do fluxo de leitura de checkpoint
-// A validação real acontece em /api/leituras (que valida empresa_id + crianca)
+// A validação real acontece em /api/leituras (que valida empresaId + crianca)
 router.post('/detectar', async (req, res) => {
   try {
     const { code, checkpointId, timestamp } = req.body;

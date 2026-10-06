@@ -15,37 +15,37 @@ const { listPlatformClients } = require('../utils/platformClients');
 router.get('/', verifyToken, async (req, res) => {
   try {
     const master = isMaster(req);
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
 
     const [clientRows, ticketRows, checkpointRows] = await Promise.all([
       master
         ? listPlatformClients().then((list) =>
-            list.map((c) => ({ id: c.id, empresa_nome: c.name, data_criacao: c.createdAt })))
+            list.map((c) => ({ id: c.id, empresa_nome: c.name, dataCriacao: c.createdAt })))
         : allQuery(`
-            SELECT id, nome as empresa_nome, data_criacao
+            SELECT id, nome as empresa_nome, dataCriacao
             FROM empresas
-            WHERE nome <> 'Master Admin' AND id = @empresa_id
-          `, { empresa_id }),
+            WHERE nome <> 'Master Admin' AND id = @empresaId
+          `, { empresaId }),
       allQuery(`
-        SELECT id, client as empresa_nome, subject, status, created_at
+        SELECT id, client as empresa_nome, subject, status, criadoEm
         FROM support_tickets
-        WHERE 1=1 ${master ? '' : 'AND empresa_id = @empresa_id'}
-      `, { empresa_id }),
+        WHERE 1=1 ${master ? '' : 'AND empresaId = @empresaId'}
+      `, { empresaId }),
       allQuery(`
-        SELECT c.id, c.name, c.zone, c.last_seen, emp.nome as empresa_nome
+        SELECT c.id, c.name, c.zone, c.ultimoVisto, emp.nome as empresa_nome
         FROM checkpoints c
-        LEFT JOIN empresas emp ON c.empresa_id = emp.id
+        LEFT JOIN empresas emp ON c.empresaId = emp.id
         WHERE c.status = 'offline'
-          AND LOWER(COALESCE(c.checkpoint_purpose, 'game')) <> 'reception'
-          ${master ? '' : 'AND c.empresa_id = @empresa_id'}
-      `, { empresa_id }),
+          AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
+          ${master ? '' : 'AND c.empresaId = @empresaId'}
+      `, { empresaId }),
     ]);
 
     const logs = [
       ...clientRows.map((c) => ({
         id: `client-${c.id}`,
-        timestamp: c.data_criacao,
+        timestamp: c.dataCriacao,
         client: c.empresa_nome,
         type: 'info',
         message: `Cliente cadastrado: ${c.empresa_nome}`,
@@ -53,7 +53,7 @@ router.get('/', verifyToken, async (req, res) => {
       })),
       ...ticketRows.map((t) => ({
         id: `ticket-${t.id}`,
-        timestamp: t.created_at,
+        timestamp: t.criadoEm,
         client: t.empresa_nome,
         type: t.status === 'resolvido' ? 'info' : 'warning',
         message: `Ticket de suporte: ${t.subject}`,
@@ -61,7 +61,7 @@ router.get('/', verifyToken, async (req, res) => {
       })),
       ...checkpointRows.map((cp) => ({
         id: `checkpoint-${cp.id}`,
-        timestamp: cp.last_seen,
+        timestamp: cp.ultimoVisto,
         client: cp.empresa_nome || 'Sem empresa',
         type: 'error',
         message: `Checkpoint "${cp.name || cp.id}" está offline`,
@@ -72,7 +72,7 @@ router.get('/', verifyToken, async (req, res) => {
       .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
       .slice(0, limit);
 
-    console.log(`✅ ${logs.length} logs carregados${master ? ' (master)' : ` para empresa ${empresa_id}`}`);
+    console.log(`✅ ${logs.length} logs carregados${master ? ' (master)' : ` para empresa ${empresaId}`}`);
     res.json(logs);
   } catch (err) {
     console.error('❌ Erro ao montar logs:', err);
@@ -82,16 +82,16 @@ router.get('/', verifyToken, async (req, res) => {
 
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { tipo, cliente_id, evento_id, message, details } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { tipo, clienteId, eventoId, message, details } = req.body;
+    const empresaId = req.user.empresaId;
     
     await query(
-      `INSERT INTO logs (tipo, cliente_id, evento_id, message, details, empresa_id) 
-       VALUES (@tipo, @cliente_id, @evento_id, @message, @details, @empresa_id)`,
-      { tipo, cliente_id, evento_id, message, details, empresa_id }
+      `INSERT INTO logs (tipo, clienteId, eventoId, message, details, empresaId) 
+       VALUES (@tipo, @clienteId, @eventoId, @message, @details, @empresaId)`,
+      { tipo, clienteId, eventoId, message, details, empresaId }
     );
     
-    console.log(`✅ Log registrado para empresa ${empresa_id}`);
+    console.log(`✅ Log registrado para empresa ${empresaId}`);
     res.json({ ok: true });
   } catch (err) {
     console.error('❌ Erro ao registrar log:', err);

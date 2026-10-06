@@ -9,15 +9,15 @@ router.use(verifyToken, (req, res, next) => {
   next();
 });
 
-router.get('/eventos/:evento_id/ranking/criancas', verifyToken, async (req, res) => {
+router.get('/eventos/:eventoId/ranking/criancas', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.params.evento_id;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
-      { id: evento_id }
+      'SELECT id, empresaId FROM eventos WHERE id = @id',
+      { id: eventoId }
     );
     
     if (!evento) {
@@ -25,7 +25,7 @@ router.get('/eventos/:evento_id/ranking/criancas', verifyToken, async (req, res)
     }
     
     // ✅ Verificar permissão (apenas master ou de mesma empresa)
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
@@ -33,12 +33,12 @@ router.get('/eventos/:evento_id/ranking/criancas', verifyToken, async (req, res)
       SELECT c.id, c.name, c.nickname, c.avatar, c.scores, 
              t.name as time_name, t.color as time_color
       FROM criancas c
-      LEFT JOIN times t ON c.time_id = t.id
-      WHERE c.evento_id = @evento_id 
-        AND (c.empresa_id = @empresa_id OR @isMaster = 1)
+      LEFT JOIN times t ON c.timeId = t.id
+      WHERE c.eventoId = @eventoId 
+        AND (c.empresaId = @empresaId OR @isMaster = 1)
         AND c.status = 'active'
       ORDER BY c.scores DESC
-    `, { evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 });
+    `, { eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);
   } catch (err) {
@@ -47,15 +47,15 @@ router.get('/eventos/:evento_id/ranking/criancas', verifyToken, async (req, res)
   }
 });
 
-router.get('/eventos/:evento_id/ranking/times', verifyToken, async (req, res) => {
+router.get('/eventos/:eventoId/ranking/times', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.params.evento_id;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @id',
-      { id: evento_id }
+      'SELECT id, empresaId FROM eventos WHERE id = @id',
+      { id: eventoId }
     );
     
     if (!evento) {
@@ -63,19 +63,19 @@ router.get('/eventos/:evento_id/ranking/times', verifyToken, async (req, res) =>
     }
     
     // ✅ Verificar permissão (apenas master ou de mesma empresa)
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
     const ranking = await allQuery(`
       SELECT t.*, COUNT(c.id) as membros_count
       FROM times t
-      LEFT JOIN criancas c ON c.time_id = t.id AND c.status = 'active'
-      WHERE t.evento_id = @evento_id
-        AND (t.empresa_id = @empresa_id OR @isMaster = 1)
-      GROUP BY t.id, t.name, t.color, t.points, t.created_at, t.evento_id, t.empresa_id
+      LEFT JOIN criancas c ON c.timeId = t.id AND c.status = 'active'
+      WHERE t.eventoId = @eventoId
+        AND (t.empresaId = @empresaId OR @isMaster = 1)
+      GROUP BY t.id, t.name, t.color, t.points, t.criadoEm, t.eventoId, t.empresaId
       ORDER BY t.points DESC
-    `, { evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 });
+    `, { eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);
   } catch (err) {

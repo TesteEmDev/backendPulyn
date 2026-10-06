@@ -19,10 +19,10 @@ router.post('/login', async (req, res) => {
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.id, l.email, l.password, l.status, l.role, l.family_name,
-              e.id as empresa_id, e.nome as empresa_nome, e.[plano]
+      `SELECT l.id, l.email, l.password, l.status, l.role, l.nomeFamilia,
+              e.id as empresaId, e.nome as empresa_nome, e.[plano]
        FROM logins l
-       JOIN empresas e ON l.empresa_id = e.id
+       JOIN empresas e ON l.empresaId = e.id
        WHERE LOWER(l.email) = LOWER(@email)`,
       { email: String(email).trim() }
     );
@@ -51,12 +51,12 @@ router.post('/login', async (req, res) => {
     // ✅ Login bem-sucedido
     console.log(`✅ Login bem-sucedido: ${email} (role: ${login.role})`);
 
-    // Gerar JWT com empresa_id e role
+    // Gerar JWT com empresaId e role
     const token = jwt.sign(
       { 
         id: login.id,
         email: login.email,
-        empresa_id: login.empresa_id,
+        empresaId: login.empresaId,
         empresa_nome: login.empresa_nome,
         role: login.role
       },
@@ -66,7 +66,7 @@ router.post('/login', async (req, res) => {
 
     // Atualizar último acesso
     await query(
-      'UPDATE logins SET ultimo_acesso = GETDATE() WHERE id = @id',
+      'UPDATE logins SET ultimoAcesso = GETDATE() WHERE id = @id',
       { id: login.id }
     );
 
@@ -87,12 +87,12 @@ router.post('/login', async (req, res) => {
       token: token,
       user: {
         id: login.id,
-        name: login.family_name || login.empresa_nome,
+        name: login.nomeFamilia || login.empresa_nome,
         email: login.email,
         role: login.role,
         redirect: roleRedirects[login.role] || '/admin',
         plan: login.plano,
-        empresa_id: login.empresa_id
+        empresaId: login.empresaId
       }
     });
 
@@ -167,7 +167,7 @@ router.get('/check-email', async (req, res) => {
 // POST /auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name, family_name } = req.body;
+    const { email, password, name, nomeFamilia } = req.body;
 
     if (!email || !password || !name) {
       console.log('❌ Email, senha ou nome não fornecidos');
@@ -206,7 +206,7 @@ router.post('/register', async (req, res) => {
     const empresaId = crypto.randomUUID();
     
     await query(
-      `INSERT INTO empresas (id, nome, plano, status, data_criacao)
+      `INSERT INTO empresas (id, nome, plano, status, dataCriacao)
        VALUES (@id, @nome, 'family', 'active', GETDATE())`,
       { 
         id: empresaId, 
@@ -221,14 +221,14 @@ router.post('/register', async (req, res) => {
     console.log('📝 Criando login para família...');
     
     await query(
-      `INSERT INTO logins (id, empresa_id, email, password, family_name, role, status, data_criacao)
+      `INSERT INTO logins (id, empresaId, email, password, nomeFamilia, role, status, dataCriacao)
        VALUES (@id, @empresaId, @email, @password, @familyName, 'family', 'active', GETDATE())`,
       {
         id: loginId,
         empresaId: empresaId,
         email: normalizedEmail,
         password: hashedPassword,
-        familyName: family_name || name
+        familyName: nomeFamilia || name
       }
     );
 
@@ -239,7 +239,7 @@ router.post('/register', async (req, res) => {
       {
         id: loginId,
         email: normalizedEmail,
-        empresa_id: empresaId,
+        empresaId: empresaId,
         empresa_nome: `${name}'s Family`,
         role: 'family'
       },
@@ -257,9 +257,9 @@ router.post('/register', async (req, res) => {
         id: loginId,
         email: normalizedEmail,
         name: name,
-        family_name: family_name || name,
+        nomeFamilia: nomeFamilia || name,
         role: 'family',
-        empresa_id: empresaId,
+        empresaId: empresaId,
         empresa_nome: `${name}'s Family`
       }
     });

@@ -86,7 +86,7 @@ router.get(
 /**
  * PUT /api/zone-conquest/checkpoint-state/:stateId
  * Atualiza o estado de um checkpoint
- * Body: { current_owner_id?, protected_until?, last_conquered_at?, conquest_count? }
+ * Body: { current_owner_id?, protected_until?, ultimoConquistadoEm?, conquest_count? }
  */
 router.put(
   '/checkpoint-state/:stateId',
@@ -128,10 +128,10 @@ router.get(
       const { eventoId } = req.params;
 
       const partidas = await allQuery(
-        `SELECT id, status, round_number, current_team_id, started_at, finished_at
+        `SELECT id, status, numeroRonda, current_team_id, iniciadoEm, finalizadoEm
          FROM zone_conquest_team_partidas
-         WHERE LOWER(evento_id) = LOWER(@eventoId)
-         ORDER BY started_at DESC`,
+         WHERE LOWER(eventoId) = LOWER(@eventoId)
+         ORDER BY iniciadoEm DESC`,
         { eventoId }
       );
 
@@ -163,10 +163,10 @@ router.get(
       const { eventoId } = req.params;
 
       const partidas = await allQuery(
-        `SELECT id, status, version, started_at, finished_at
+        `SELECT id, status, version, iniciadoEm, finalizadoEm
          FROM zone_conquest_individual_partidas
-         WHERE LOWER(evento_id) = LOWER(@eventoId)
-         ORDER BY started_at DESC`,
+         WHERE LOWER(eventoId) = LOWER(@eventoId)
+         ORDER BY iniciadoEm DESC`,
         { eventoId }
       );
 

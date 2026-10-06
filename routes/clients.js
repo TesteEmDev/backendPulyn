@@ -111,40 +111,40 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     if (client.empresaId) {
       const empresaId = client.empresaId;
       const [empresa, users, events, tickets] = await Promise.all([
-        queryOne('SELECT cnpj, data_atualizacao FROM empresas WHERE id = @id', { id: empresaId }),
+        queryOne('SELECT cnpj, dataAtualizacao FROM empresas WHERE id = @id', { id: empresaId }),
         allQuery(
-          `SELECT id, email, role, status, ultimo_acesso, data_criacao
-           FROM logins WHERE empresa_id = @id ORDER BY role, email`,
+          `SELECT id, email, role, status, ultimoAcesso, dataCriacao
+           FROM logins WHERE empresaId = @id ORDER BY role, email`,
           { id: empresaId }
         ),
         allQuery(
           `SELECT e.id, e.name, TO_CHAR(e.date, 'YYYY-MM-DD') AS date_str, e.time, e.duration, e.status,
-                  e.responsible_name, e.started_at, e.ended_at,
-                  (SELECT COUNT(*) FROM criancas c WHERE c.evento_id = e.id) AS children_count,
+                  e.nomeResponsavel, e.iniciadoEm, e.finalizadoEm,
+                  (SELECT COUNT(*) FROM criancas c WHERE c.eventoId = e.id) AS children_count,
                   (SELECT COUNT(*) FROM checkpoints k
-                    WHERE k.evento_id = e.id
-                      AND LOWER(COALESCE(k.checkpoint_purpose, 'game')) <> 'reception') AS checkpoints_count
+                    WHERE k.eventoId = e.id
+                      AND LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception') AS checkpoints_count
            FROM eventos e
-           WHERE e.empresa_id = @id
+           WHERE e.empresaId = @id
            ORDER BY e.date DESC, e.time DESC`,
           { id: empresaId }
         ),
         allQuery(
-          'SELECT status, COUNT(*) AS total FROM support_tickets WHERE empresa_id = @id GROUP BY status',
+          'SELECT status, COUNT(*) AS total FROM support_tickets WHERE empresaId = @id GROUP BY status',
           { id: empresaId }
         ),
       ]);
 
       details.cnpj = empresa?.cnpj || null;
-      details.updatedAt = toIso(empresa?.data_atualizacao);
+      details.updatedAt = toIso(empresa?.dataAtualizacao);
 
       details.users = users.map((u) => ({
         id: u.id,
         email: u.email,
         role: u.role,
         status: u.status,
-        lastAccess: toIso(u.ultimo_acesso),
-        createdAt: toIso(u.data_criacao),
+        lastAccess: toIso(u.ultimoAcesso),
+        createdAt: toIso(u.dataCriacao),
       }));
 
       details.events = events.map((e) => ({
@@ -154,9 +154,9 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
         time: e.time ? String(e.time).slice(0, 5) : null,
         duration: e.duration,
         status: String(e.status || '').toLowerCase(),
-        responsibleName: e.responsible_name || null,
-        startedAt: toIso(e.started_at),
-        endedAt: toIso(e.ended_at),
+        responsibleName: e.nomeResponsavel || null,
+        startedAt: toIso(e.iniciadoEm),
+        endedAt: toIso(e.finalizadoEm),
         childrenCount: Number(e.children_count) || 0,
         checkpointsCount: Number(e.checkpoints_count) || 0,
       }));
@@ -236,11 +236,11 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO logins (id, empresa_id, email, password, status) 
-         VALUES (@id, @empresa_id, @email, @password, @status)`,
+        `INSERT INTO logins (id, empresaId, email, password, status) 
+         VALUES (@id, @empresaId, @email, @password, @status)`,
         {
           id: loginId,
-          empresa_id: empresaId,
+          empresaId: empresaId,
           email: email,
           password: hashedPassword,
           status: 'active'
@@ -250,11 +250,11 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO clientes (id, name, city, state, email, phone, plano, status, empresa_id) 
-         VALUES (@id, @name, @city, @state, @email, @phone, @plano, @status, @empresa_id)`,
+        `INSERT INTO clientes (id, name, city, state, email, phone, plano, status, empresaId) 
+         VALUES (@id, @name, @city, @state, @email, @phone, @plano, @status, @empresaId)`,
         {
           id: clienteId,
-          empresa_id: empresaId,
+          empresaId: empresaId,
           name: name,
           city: city,
           state: state,
@@ -268,8 +268,8 @@ router.post('/', verifyToken, async (req, res) => {
 
       res.json({
         id: clienteId,
-        empresa_id: empresaId,
-        login_id: loginId,
+        empresaId: empresaId,
+        loginId: loginId,
         name,
         city,
         state,
@@ -309,7 +309,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       // Atualizar EMPRESA
       await query(
         `UPDATE empresas SET nome = @nome, cidade = @cidade, estado = @estado, 
-         telefone = @telefone, plano = @plano, status = @status, data_atualizacao = GETDATE()
+         telefone = @telefone, plano = @plano, status = @status, dataAtualizacao = GETDATE()
          WHERE id = @id`,
         {
           nome: name,
@@ -326,11 +326,11 @@ router.put('/:id', verifyToken, async (req, res) => {
       // e-mail era gravado em todos os logins da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
-          `UPDATE logins SET email = @email, data_atualizacao = GETDATE()
-           WHERE empresa_id = @empresa_id AND role = 'admin'`,
+          `UPDATE logins SET email = @email, dataAtualizacao = GETDATE()
+           WHERE empresaId = @empresaId AND role = 'admin'`,
           {
             email: email,
-            empresa_id: req.params.id
+            empresaId: req.params.id
           }
         );
       }
@@ -376,13 +376,13 @@ router.put('/:id/status', verifyToken, async (req, res) => {
 
     // Atualizar status na EMPRESA
     await query(
-      'UPDATE empresas SET status = @status, data_atualizacao = GETDATE() WHERE id = @id',
+      'UPDATE empresas SET status = @status, dataAtualizacao = GETDATE() WHERE id = @id',
       { status, id: req.params.id }
     );
 
     // Atualizar status no LOGIN também
     await query(
-      'UPDATE logins SET status = @status, data_atualizacao = GETDATE() WHERE empresa_id = @id',
+      'UPDATE logins SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
       { status, id: req.params.id }
     );
 
@@ -408,7 +408,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
       // 1. Deletar LOGIN
       await query(
-        'DELETE FROM logins WHERE empresa_id = @id',
+        'DELETE FROM logins WHERE empresaId = @id',
         { id: req.params.id }
       );
       console.log(`✅ Login deletado`);

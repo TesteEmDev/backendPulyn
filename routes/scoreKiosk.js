@@ -33,16 +33,16 @@ router.post('/readings', async (req, res) => {
       return res.status(400).json({ error: 'eventId e uid são obrigatórios' });
     }
 
-    const controlledEvent = await getActiveEvent(req.user.empresa_id);
+    const controlledEvent = await getActiveEvent(req.user.empresaId);
     if (!controlledEvent || String(controlledEvent.id).toLowerCase() !== eventId.toLowerCase()) {
       return res.status(409).json({ error: 'A recepção ainda não selecionou este evento' });
     }
 
     const event = await queryOne(
-      `SELECT id, empresa_id, status
+      `SELECT id, empresaId, status
        FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
-      { eventId, empresaId: req.user.empresa_id }
+       WHERE id = @eventId AND empresaId = @empresaId`,
+      { eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
@@ -71,8 +71,8 @@ router.get('/events/:eventId/score-readings', async (req, res) => {
   try {
     const event = await queryOne(
       `SELECT id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+       WHERE id = @eventId AND empresaId = @empresaId`,
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
@@ -92,10 +92,10 @@ router.get('/events', async (req, res) => {
     const events = await allQuery(
       `SELECT id, name, date, time, duration, status
        FROM eventos
-       WHERE empresa_id = @empresaId
+       WHERE empresaId = @empresaId
          AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
        ORDER BY date DESC`,
-      { empresaId: req.user.empresa_id }
+      { empresaId: req.user.empresaId }
     );
     res.json(events || []);
   } catch (error) {
@@ -108,8 +108,8 @@ router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const event = await queryOne(
       `SELECT id, status FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+       WHERE id = @eventId AND empresaId = @empresaId`,
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
@@ -130,43 +130,43 @@ router.get('/events/:eventId/bracelets/:code/score', async (req, res) => {
     if (!code) return res.status(400).json({ error: 'Código da pulseira inválido' });
 
     const event = await queryOne(
-      `SELECT id, empresa_id, name, status
+      `SELECT id, empresaId, name, status
        FROM eventos
-       WHERE id = @eventId AND empresa_id = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+       WHERE id = @eventId AND empresaId = @empresaId`,
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const child = await queryOne(
-      `SELECT c.id, c.name, c.nickname, c.avatar, c.scores, c.evento_id,
+      `SELECT c.id, c.name, c.nickname, c.avatar, c.scores, c.eventoId,
               t.name AS team_name, t.color AS team_color
        FROM pulseiras p
-       JOIN criancas c ON c.id = p.crianca_id
-         AND c.empresa_id = p.empresa_id
-         AND c.evento_id = @eventId
-         AND ${uidSqlExpression('c.bracelet_code')} = @code
-       LEFT JOIN times t ON t.id = c.time_id
-         AND t.evento_id = c.evento_id
-         AND t.empresa_id = c.empresa_id
+       JOIN criancas c ON c.id = p.criancaId
+         AND c.empresaId = p.empresaId
+         AND c.eventoId = @eventId
+         AND ${uidSqlExpression('c.codigoPulseira')} = @code
+       LEFT JOIN times t ON t.id = c.timeId
+         AND t.eventoId = c.eventoId
+         AND t.empresaId = c.empresaId
        WHERE ${uidSqlExpression('p.code')} = @code
-         AND p.empresa_id = @empresaId
+         AND p.empresaId = @empresaId
          AND LOWER(COALESCE(p.status, '')) = 'em_uso'
-         AND p.crianca_id IS NOT NULL`,
-      { code, eventId: event.id, empresaId: event.empresa_id }
+         AND p.criancaId IS NOT NULL`,
+      { code, eventId: event.id, empresaId: event.empresaId }
     );
     if (!child) return res.status(404).json({ error: 'Pulseira não vinculada a uma criança deste evento' });
 
     const scores = await allQuery(
-      `SELECT TOP 5 p.id, p.points, p.created_at,
+      `SELECT TOP 5 p.id, p.points, p.criadoEm,
               cp.name AS checkpoint_name
        FROM pontuacoes p
-       LEFT JOIN checkpoints cp ON cp.id = p.checkpoint_id
-       WHERE p.crianca_id = @childId
-         AND p.evento_id = @eventId
-         AND p.empresa_id = @empresaId
-       ORDER BY p.created_at DESC`,
-      { childId: child.id, eventId: event.id, empresaId: event.empresa_id }
+       LEFT JOIN checkpoints cp ON cp.id = p.checkpointId
+       WHERE p.criancaId = @childId
+         AND p.eventoId = @eventId
+         AND p.empresaId = @empresaId
+       ORDER BY p.criadoEm DESC`,
+      { childId: child.id, eventId: event.id, empresaId: event.empresaId }
     );
 
     res.json({
@@ -182,7 +182,7 @@ router.get('/events/:eventId/bracelets/:code/score', async (req, res) => {
         id: score.id,
         points: Number(score.points || 0),
         checkpointName: score.checkpoint_name || 'Conquista',
-        createdAt: score.created_at,
+        createdAt: score.criadoEm,
       })),
     });
   } catch (error) {

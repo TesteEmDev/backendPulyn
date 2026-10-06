@@ -31,7 +31,7 @@ async function loadCompanies() {
   return list
     .map((c) => ({
       id: c.id, nome: c.name, cidade: c.city, estado: c.state,
-      plano: c.plan, status: c.status, data_criacao: c.createdAt,
+      plano: c.plan, status: c.status, dataCriacao: c.createdAt,
     }))
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
 }
@@ -75,7 +75,7 @@ router.get('/:plano/clients', verifyToken, requireMaster, async (req, res) => {
         state: company.estado,
         plan,
         status: company.status,
-        since: formatSince(company.data_criacao),
+        since: formatSince(company.dataCriacao),
       }));
 
     return res.json(clients);

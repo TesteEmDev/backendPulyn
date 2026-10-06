@@ -31,46 +31,46 @@ function normalizeCheckpointConfigs(type, checkpoints) {
 // Listar brincadeiras por empresa/evento do usuário
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.query.evento_id ? String(req.query.evento_id) : null;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.query.eventoId ? String(req.query.eventoId) : null;
 
-    let whereClause = `b.empresa_id = @empresa_id
+    let whereClause = `b.empresaId = @empresaId
       AND LOWER(COALESCE(b.status, 'active')) <> 'archived'`;
-    let eventoSelect = 'b.evento_id';
-    const params = { empresa_id };
+    let eventoSelect = 'b.eventoId';
+    const params = { empresaId };
 
-    if (evento_id) {
+    if (eventoId) {
       const evento = await queryOne(
-        'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@evento_id)',
-        { evento_id }
+        'SELECT id, empresaId FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+        { eventoId }
       );
       if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-      if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(empresa_id).toLowerCase()) {
+      if (!isMaster(req) && String(evento.empresaId).toLowerCase() !== String(empresaId).toLowerCase()) {
         return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
       }
 
       // O evento é a fonte do escopo. Aceita tanto o vínculo direto quanto o legado
       // em evento_brincadeiras, sempre mantendo o isolamento pela empresa do evento.
-      whereClause = `LOWER(b.empresa_id) = LOWER(@evento_empresa_id)
+      whereClause = `LOWER(b.empresaId) = LOWER(@evento_empresa_id)
         AND LOWER(COALESCE(b.status, 'active')) <> 'archived'
         AND (
-          LOWER(b.evento_id) = LOWER(@evento_id)
+          LOWER(b.eventoId) = LOWER(@eventoId)
           OR EXISTS (
             SELECT 1
             FROM evento_brincadeiras eb
-            WHERE LOWER(eb.brincadeira_id) = LOWER(b.id)
-              AND LOWER(eb.evento_id) = LOWER(@evento_id)
+            WHERE LOWER(eb.brincadeiraId) = LOWER(b.id)
+              AND LOWER(eb.eventoId) = LOWER(@eventoId)
           )
         )`;
-      eventoSelect = '@evento_id AS evento_id';
-      params.evento_id = evento_id;
-      params.evento_empresa_id = evento.empresa_id;
+      eventoSelect = '@eventoId AS eventoId';
+      params.eventoId = eventoId;
+      params.evento_empresa_id = evento.empresaId;
     }
 
-    console.log(`📋 [BRINCADEIRAS] Buscando jogos${evento_id ? ` do evento ${evento_id}` : ''}`);
+    console.log(`📋 [BRINCADEIRAS] Buscando jogos${eventoId ? ` do evento ${eventoId}` : ''}`);
     const brincadeiras = await allQuery(
-      `SELECT b.id, b.name, b.description, b.rules, b.type, b.duration, b.default_points,
-              b.empresa_id, b.status, ${eventoSelect}, b.checkpoints
+      `SELECT b.id, b.name, b.description, b.rules, b.type, b.duration, b.pontosPadrao,
+              b.empresaId, b.status, ${eventoSelect}, b.checkpoints
        FROM brincadeiras b
        WHERE ${whereClause}
        ORDER BY b.name`,
@@ -92,23 +92,23 @@ router.get('/', verifyToken, async (req, res) => {
 // Criar brincadeira
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, description, rules, type, duration, default_points, evento_id, checkpoints } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { name, description, rules, type, duration, pontosPadrao, eventoId, checkpoints } = req.body;
+    const empresaId = req.user.empresaId;
     const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
 
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
     }
-    if (!evento_id) {
-      return res.status(400).json({ error: 'evento_id é obrigatório' });
+    if (!eventoId) {
+      return res.status(400).json({ error: 'eventoId é obrigatório' });
     }
 
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
-      { evento_id }
+      'SELECT id, empresaId FROM eventos WHERE id = @eventoId',
+      { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
@@ -121,10 +121,10 @@ router.post('/', verifyToken, async (req, res) => {
     }
     const validCheckpoints = await allQuery(
       `SELECT id FROM checkpoints
-       WHERE evento_id = @evento_id
-         AND empresa_id = @empresa_id
-         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
-      { evento_id, empresa_id: evento.empresa_id }
+       WHERE eventoId = @eventoId
+         AND empresaId = @empresaId
+         AND LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'`,
+      { eventoId, empresaId: evento.empresaId }
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
     if (selectedCheckpointIds.some(id => !validCheckpointIds.has(id))) {
@@ -134,7 +134,7 @@ router.post('/', verifyToken, async (req, res) => {
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
     
     await query(
-      'INSERT INTO brincadeiras (id, name, description, rules, type, duration, default_points, empresa_id, status, evento_id, checkpoints) VALUES (@id, @name, @description, @rules, @type, @duration, @default_points, @empresa_id, @status, @evento_id, @checkpoints)',
+      'INSERT INTO brincadeiras (id, name, description, rules, type, duration, pontosPadrao, empresaId, status, eventoId, checkpoints) VALUES (@id, @name, @description, @rules, @type, @duration, @pontosPadrao, @empresaId, @status, @eventoId, @checkpoints)',
       { 
         id, 
         name, 
@@ -142,16 +142,16 @@ router.post('/', verifyToken, async (req, res) => {
         rules, 
         type, 
         duration: parseInt(duration), 
-        default_points: default_points || 10, 
-        empresa_id: evento.empresa_id, 
+        pontosPadrao: pontosPadrao || 10, 
+        empresaId: evento.empresaId, 
         status: 'active',
-        evento_id: evento_id || null,
+        eventoId: eventoId || null,
         checkpoints: checkpointsJson
       }
     );
     
     console.log(`✅ Jogo criado: ${name}`);
-    res.json({ id, name, description, rules, type, duration, default_points, empresa_id: evento.empresa_id, status: 'active', evento_id, checkpoints: normalizedCheckpoints });
+    res.json({ id, name, description, rules, type, duration, pontosPadrao, empresaId: evento.empresaId, status: 'active', eventoId, checkpoints: normalizedCheckpoints });
   } catch (err) {
     console.error('❌ Erro ao criar brincadeira:', err);
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -161,8 +161,8 @@ router.post('/', verifyToken, async (req, res) => {
 // Atualizar brincadeira
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, description, rules, type, duration, default_points, status, evento_id, checkpoints } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { name, description, rules, type, duration, pontosPadrao, status, eventoId, checkpoints } = req.body;
+    const empresaId = req.user.empresaId;
     const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
     if (!validTypes.includes(type)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
@@ -170,7 +170,7 @@ router.put('/:id', verifyToken, async (req, res) => {
     
     // ✅ Verificar que o jogo pertence à empresa
     const brincadeira = await queryOne(
-      `SELECT id, empresa_id, evento_id, status
+      `SELECT id, empresaId, eventoId, status
        FROM brincadeiras
        WHERE id = @id`,
       { id: req.params.id }
@@ -183,22 +183,22 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
     
-    if (!isMaster(req) && brincadeira.empresa_id !== empresa_id) {
+    if (!isMaster(req) && brincadeira.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
 
-    const targetEventoId = evento_id || brincadeira.evento_id;
+    const targetEventoId = eventoId || brincadeira.eventoId;
     if (!targetEventoId) {
-      return res.status(400).json({ error: 'evento_id é obrigatório' });
+      return res.status(400).json({ error: 'eventoId é obrigatório' });
     }
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE id = @evento_id',
-      { evento_id: targetEventoId }
+      'SELECT id, empresaId FROM eventos WHERE id = @eventoId',
+      { eventoId: targetEventoId }
     );
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
-    if (evento.empresa_id !== brincadeira.empresa_id) {
+    if (evento.empresaId !== brincadeira.empresaId) {
       return res.status(403).json({ error: 'O jogo e o evento devem pertencer à mesma empresa' });
     }
     
@@ -210,10 +210,10 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     const validCheckpoints = await allQuery(
       `SELECT id FROM checkpoints
-       WHERE evento_id = @evento_id
-         AND empresa_id = @empresa_id
-         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
-      { evento_id: targetEventoId, empresa_id: evento.empresa_id }
+       WHERE eventoId = @eventoId
+         AND empresaId = @empresaId
+         AND LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'`,
+      { eventoId: targetEventoId, empresaId: evento.empresaId }
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
     if (selectedCheckpointIds.length === 0 || selectedCheckpointIds.some(id => !validCheckpointIds.has(id))) {
@@ -222,8 +222,8 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     await query(
       `UPDATE brincadeiras SET name = @name, description = @description, rules = @rules, 
-       type = @type, duration = @duration, default_points = @default_points, status = @status,
-       evento_id = @evento_id, checkpoints = @checkpoints
+       type = @type, duration = @duration, pontosPadrao = @pontosPadrao, status = @status,
+       eventoId = @eventoId, checkpoints = @checkpoints
        WHERE id = @id`,
       {
         name,
@@ -231,9 +231,9 @@ router.put('/:id', verifyToken, async (req, res) => {
         rules,
         type,
         duration: parseInt(duration),
-        default_points,
+        pontosPadrao,
         status,
-        evento_id: targetEventoId,
+        eventoId: targetEventoId,
         checkpoints: checkpointsJson,
         id: req.params.id
       }
@@ -256,15 +256,15 @@ router.patch('/:id/status', verifyToken, requireRole('admin', 'master'), async (
     }
 
     const brincadeira = await queryOne(
-      'SELECT id, empresa_id, status FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
+      'SELECT id, empresaId, status FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
       { id: req.params.id }
     );
     if (!brincadeira || String(brincadeira.status || '').trim().toLowerCase() === 'archived') {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
     if (!isMaster(req)
-      && String(brincadeira.empresa_id || '').trim().toLowerCase()
-        !== String(req.user.empresa_id || '').trim().toLowerCase()) {
+      && String(brincadeira.empresaId || '').trim().toLowerCase()
+        !== String(req.user.empresaId || '').trim().toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
 
@@ -285,11 +285,11 @@ router.patch('/:id/status', verifyToken, requireRole('admin', 'master'), async (
 router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const gameId = req.params.id;
-    const empresaId = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
 
     const result = await withTransaction(async (tx) => {
       const brincadeira = await tx.queryOne(
-        `SELECT id, name, type, empresa_id, status
+        `SELECT id, name, type, empresaId, status
          FROM brincadeiras
          WHERE LOWER(id) = LOWER(@id)`,
         { id: gameId }
@@ -302,7 +302,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       }
 
       if (!isMaster(req)
-        && String(brincadeira.empresa_id || '').trim().toLowerCase()
+        && String(brincadeira.empresaId || '').trim().toLowerCase()
           !== String(empresaId || '').trim().toLowerCase()) {
         const error = new Error('Acesso negado: jogo não pertence a esta empresa');
         error.statusCode = 403;
@@ -318,7 +318,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       const activeEvent = await tx.queryOne(
         `SELECT TOP 1 id
          FROM eventos
-         WHERE LOWER(active_brincadeira_id) = LOWER(@id)
+         WHERE LOWER(brincadeiraAtivaId) = LOWER(@id)
            AND LOWER(COALESCE(status, '')) = 'active'`,
         { id: gameId }
       );
@@ -329,7 +329,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       }
 
       const activeState = await tx.queryOne(
-        `SELECT TOP 1 evento_id
+        `SELECT TOP 1 eventoId
          FROM event_game_state
          WHERE LOWER(game_id) = LOWER(@id)
            AND LOWER(COALESCE(mode, 'idle')) = 'game'`,
@@ -348,7 +348,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
         const activeSession = await tx.queryOne(
           `SELECT TOP 1 id
            FROM ${activeSessionTable}
-           WHERE LOWER(brincadeira_id) = LOWER(@id)
+           WHERE LOWER(brincadeiraId) = LOWER(@id)
              AND LOWER(COALESCE(status, '')) = 'active'`,
           { id: gameId }
         );

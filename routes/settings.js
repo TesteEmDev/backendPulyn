@@ -1,7 +1,7 @@
 // routes/settings.js - Configurações por empresa (buffet)
 //
-// Cada buffet guarda as próprias configurações em linhas (empresa_id, setting_key).
-// As linhas antigas sem empresa_id (seed original) não são lidas nem alteradas aqui.
+// Cada buffet guarda as próprias configurações em linhas (empresaId, chave).
+// As linhas antigas sem empresaId (seed original) não são lidas nem alteradas aqui.
 const express = require('express');
 const router = express.Router();
 const { allQuery, withTransaction } = require('../database');
@@ -10,23 +10,23 @@ const { parseSettingsPayload, KEY_PATTERN } = require('../utils/settingsRules');
 
 const WRITE_ROLES = ['admin', 'master'];
 
-// Empresa alvo: a do token; o master pode consultar/alterar outra com ?empresa_id=.
+// Empresa alvo: a do token; o master pode consultar/alterar outra com ?empresaId=.
 function resolveEmpresaId(req) {
-  const requested = req.query?.empresa_id;
-  return isMaster(req) && requested ? String(requested) : req.user.empresa_id;
+  const requested = req.query?.empresaId;
+  return isMaster(req) && requested ? String(requested) : req.user.empresaId;
 }
 
 // Atualiza a linha da empresa e cria se ainda não existir.
 async function upsertSettings(tx, empresaId, entries) {
   for (const [key, value] of entries) {
     const updated = await tx.query(
-      `UPDATE settings SET setting_value = @value, updated_at = CURRENT_TIMESTAMP
-       WHERE setting_key = @key AND empresa_id = @empresaId`,
+      `UPDATE settings SET valor = @value, atualizadoEm = CURRENT_TIMESTAMP
+       WHERE chave = @key AND empresaId = @empresaId`,
       { value, key, empresaId }
     );
     if ((updated.rowsAffected?.[0] || 0) === 0) {
       await tx.query(
-        `INSERT INTO settings (setting_key, setting_value, empresa_id)
+        `INSERT INTO settings (chave, valor, empresaId)
          VALUES (@key, @value, @empresaId)`,
         { key, value, empresaId }
       );
@@ -39,7 +39,7 @@ router.get('/', verifyToken, async (req, res) => {
     const empresaId = resolveEmpresaId(req);
     if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
     const settings = await allQuery(
-      'SELECT setting_key, setting_value, empresa_id FROM settings WHERE empresa_id = @empresaId ORDER BY setting_key',
+      'SELECT chave, valor, empresaId FROM settings WHERE empresaId = @empresaId ORDER BY chave',
       { empresaId }
     );
     res.json(settings || []);
@@ -54,7 +54,7 @@ router.get('/:key', verifyToken, async (req, res) => {
     const empresaId = resolveEmpresaId(req);
     if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
     const rows = await allQuery(
-      'SELECT setting_key, setting_value, empresa_id FROM settings WHERE setting_key = @key AND empresa_id = @empresaId',
+      'SELECT chave, valor, empresaId FROM settings WHERE chave = @key AND empresaId = @empresaId',
       { key: req.params.key, empresaId }
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Configuração não encontrada' });
