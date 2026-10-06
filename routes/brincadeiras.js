@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
-const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
+const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 
 const MONSTER_COOLDOWN_MIN_SECONDS = 1;
 const MONSTER_COOLDOWN_MAX_SECONDS = 120;

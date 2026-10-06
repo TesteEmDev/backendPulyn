@@ -7,7 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne } = require('../database');
-const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
+const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 
 function resolveEmpresaId(req) {
   if (isMaster(req) && req.query.empresaId) return String(req.query.empresaId);

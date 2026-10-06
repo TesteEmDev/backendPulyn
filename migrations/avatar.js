@@ -4,14 +4,14 @@ async function ensureAvatarSchema() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
   if (isPostgres) {
-    await query('ALTER TABLE criancas ALTER COLUMN avatar TYPE varchar(64)');
+    await query('ALTER TABLE crianca ALTER COLUMN avatar TYPE varchar(64)');
     return;
   }
 
   await query(`
-    IF COL_LENGTH('dbo.criancas', 'avatar') IS NOT NULL
+    IF COL_LENGTH('dbo.crianca', 'avatar') IS NOT NULL
     BEGIN
-      ALTER TABLE dbo.criancas ALTER COLUMN avatar NVARCHAR(64) NULL
+      ALTER TABLE dbo.crianca ALTER COLUMN avatar NVARCHAR(64) NULL
     END
   `);
 }

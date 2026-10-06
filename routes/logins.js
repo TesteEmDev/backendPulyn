@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
-const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
+const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { checkUnitEmail } = require('../utils/unitEmail');
 const { loadUnitProfile } = require('../utils/unitProfileStore');
 const database = require('../database');

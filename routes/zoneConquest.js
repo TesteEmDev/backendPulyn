@@ -15,7 +15,7 @@ const {
   updateZoneEstado,
   getZoneEstado,
   clearPartidaEstados,
-} = require('../utils/zoneConquestEstadoManager');
+} = require('../utils/zoneConquestStateManager');
 
 // ==================== CHECKPOINT Estado ====================
 

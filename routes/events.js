@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
-const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
+const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
-const { saveGameEstado, getGameEstado } = require('../utils/gameEstado');
+const { saveGameEstado, getGameEstado } = require('../utils/gameState');
 const {
   isClosedStatus,
   startEvent,

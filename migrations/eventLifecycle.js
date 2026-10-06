@@ -6,7 +6,7 @@ async function ensureEventLifecycleSchema() {
 
   if (isPostgres) {
     await query(`
-      ALTER TABLE eventos
+      ALTER TABLE evento
         ADD COLUMN IF NOT EXISTS responsible_name varchar(150),
         ADD COLUMN IF NOT EXISTS started_at timestamptz,
         ADD COLUMN IF NOT EXISTS ended_at timestamptz,
@@ -15,11 +15,11 @@ async function ensureEventLifecycleSchema() {
     `);
   } else {
     await query(`
-      IF COL_LENGTH('dbo.eventos', 'responsible_name') IS NULL ALTER TABLE eventos ADD responsible_name varchar(150) NULL;
-      IF COL_LENGTH('dbo.eventos', 'started_at') IS NULL ALTER TABLE eventos ADD started_at datetime2 NULL;
-      IF COL_LENGTH('dbo.eventos', 'ended_at') IS NULL ALTER TABLE eventos ADD ended_at datetime2 NULL;
-      IF COL_LENGTH('dbo.eventos', 'auto_start') IS NULL ALTER TABLE eventos ADD auto_start int NULL DEFAULT 0;
-      IF COL_LENGTH('dbo.eventos', 'auto_end') IS NULL ALTER TABLE eventos ADD auto_end int NULL DEFAULT 0;
+      IF COL_LENGTH('dbo.evento', 'responsible_name') IS NULL ALTER TABLE evento ADD responsible_name varchar(150) NULL;
+      IF COL_LENGTH('dbo.evento', 'started_at') IS NULL ALTER TABLE evento ADD started_at datetime2 NULL;
+      IF COL_LENGTH('dbo.evento', 'ended_at') IS NULL ALTER TABLE evento ADD ended_at datetime2 NULL;
+      IF COL_LENGTH('dbo.evento', 'auto_start') IS NULL ALTER TABLE evento ADD auto_start int NULL DEFAULT 0;
+      IF COL_LENGTH('dbo.evento', 'auto_end') IS NULL ALTER TABLE evento ADD auto_end int NULL DEFAULT 0;
     `);
   }
   // Eventos que já existiam ficam com auto_start/auto_end = 0 de propósito: o
