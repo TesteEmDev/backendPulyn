@@ -32,6 +32,7 @@ router.get('/overview', async (req, res) => {
       `, params),
       allQuery(`
         SELECT TOP 10 c.id, c.name, c.nickname, c.age, c.scores,
+          COALESCE(c.bracelet_code, c.last_bracelet_code) AS bracelet_code,
           e.name AS event_name, t.name AS team_name, t.color AS team_color
         FROM criancas c
         JOIN eventos e ON e.id = c.evento_id
@@ -71,7 +72,7 @@ router.get('/overview', async (req, res) => {
       ...summary,
       topParticipants: topParticipants.map((c) => ({
         id: c.id, name: c.name, nickname: c.nickname || '', age: c.age,
-        scores: Number(c.scores) || 0, eventName: c.event_name, teamName: c.team_name || '', teamColor: c.team_color || '',
+        scores: Number(c.scores) || 0, braceletCode: c.bracelet_code || '', eventName: c.event_name, teamName: c.team_name || '', teamColor: c.team_color || '',
       })),
       topTeams: topTeams.map((t) => ({
         id: t.id, name: t.name, color: t.color, points: Number(t.points) || 0, eventName: t.event_name,

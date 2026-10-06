@@ -46,6 +46,7 @@ const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
+const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { startBraceletReleaseScheduler } = require('./utils/braceletRelease');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
@@ -1931,6 +1932,7 @@ async function startServer() {
     await ensureEmpresaCnpjSchema();
     await ensureSettingsPerCompanySchema();
     await ensureClienteUnidadeSchema();
+    await ensureBraceletHistorySchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();

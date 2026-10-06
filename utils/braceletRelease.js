@@ -3,7 +3,8 @@
 // 10 minutos depois do encerramento do evento (eventos.ended_at), todas as pulseiras ligadas às
 // crianças daquele evento voltam a ficar sem dono: pulseiras.status = 'disponivel',
 // pulseiras.crianca_id = NULL e criancas.bracelet_code = NULL (o mesmo que "Desvincular pulseira"
-// faz para uma criança). O histórico de pontuação, as leituras e os vínculos de família continuam.
+// faz para uma criança). A pulseira usada fica em criancas.last_bracelet_code para os relatórios.
+// O histórico de pontuação, as leituras e os vínculos de família continuam.
 const { query, allQuery, withTransaction } = require('../database');
 
 const BRACELET_RELEASE_DELAY_MS = 10 * 60 * 1000;
@@ -40,8 +41,9 @@ async function releaseBraceletsWith(db, eventoId) {
                     WHERE LOWER(evento_id) = LOWER(@eventoId) AND bracelet_code IS NOT NULL)`,
     { eventoId }
   );
+  // A criança guarda qual pulseira usou (last_bracelet_code) para os relatórios; só o vínculo é desfeito.
   const cleared = await db.query(
-    `UPDATE criancas SET bracelet_code = NULL
+    `UPDATE criancas SET last_bracelet_code = bracelet_code, bracelet_code = NULL
      WHERE LOWER(evento_id) = LOWER(@eventoId) AND bracelet_code IS NOT NULL`,
     { eventoId }
   );

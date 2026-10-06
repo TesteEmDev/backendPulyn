@@ -399,7 +399,7 @@ router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
     const braceletCode = crianca.bracelet_code;
     
     await query(
-      `UPDATE criancas SET bracelet_code = NULL
+      `UPDATE criancas SET last_bracelet_code = bracelet_code, bracelet_code = NULL
        WHERE id = @criancaId AND (empresa_id = @empresaId OR @isMaster = 1)`,
       { criancaId: crianca_id, empresaId: crianca.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
     );
