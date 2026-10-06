@@ -170,7 +170,7 @@ router.get('/:id/config', verifyToken, async (req, res) => {
 
     // Buscar tags autorizadas
     const tags = await allQuery(
-      'SELECT tagUid FROM checkpointTags WHERE checkpointId = @id',
+      'SELECT tagUid FROM "etiquetasCheckpoint" WHERE checkpointId = @id',
       { id: req.params.id }
     );
 
@@ -336,13 +336,13 @@ router.post('/:checkpointId/authorize-tags', async (req, res) => {
     }
 
     // Limpar tags antigas
-    await query('DELETE FROM checkpointTags WHERE checkpointId = @id', { id: checkpointId });
+    await query('DELETE FROM "etiquetasCheckpoint" WHERE checkpointId = @id', { id: checkpointId });
 
     // Inserir novas tags
     for (const tag of tags) {
       if (tag && tag.trim()) {
         await query(
-          'INSERT INTO checkpointTags (checkpointId, tagUid) VALUES (@checkpointId, @tagUid)',
+          'INSERT INTO "etiquetasCheckpoint" (checkpointId, tagUid) VALUES (@checkpointId, @tagUid)',
           { checkpointId: checkpointId, tagUid: tag.trim().toUpperCase() }
         );
       }
@@ -404,7 +404,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     }
 
     const activeMonster = await queryOne(
-      `SELECT id FROM "monsterHuntPartidas"
+      `SELECT id FROM ""monsterCacaPartidas""
        WHERE LOWER(eventoId) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
@@ -471,7 +471,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     // As FKs do schema não usam ON DELETE CASCADE; limpar dependências antes
     // do registro principal evita a violação de FK sem afetar outros eventos.
     await query(
-      `DELETE FROM "monsterHuntScans"
+      `DELETE FROM ""monsterCacaLeituras""
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)
          AND LOWER(eventoId) = LOWER(@eventoId)`,
       { checkpointId: checkpoint.id, eventoId }
@@ -494,7 +494,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
       { checkpointId: checkpoint.id }
     );
     await query(
-      `DELETE FROM checkpointTags
+      `DELETE FROM "etiquetasCheckpoint"
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
       { checkpointId: checkpoint.id }
     );

@@ -343,7 +343,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
 
       const activeSessionTable = brincadeira.type === 'treasure_hunt'
         ? 'cacaTesourPartidas'
-        : brincadeira.type === 'monster_hunt' ? '"monsterHuntPartidas"' : null;
+        : brincadeira.type === 'monster_hunt' ? '""monsterCacaPartidas""' : null;
       if (activeSessionTable) {
         const activeSession = await tx.queryOne(
           `SELECT TOP 1 id
