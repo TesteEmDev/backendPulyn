@@ -50,8 +50,8 @@ async function findProcessedReading(readingId, checkpoint) {
      FROM leituras l
      LEFT JOIN criancas c ON c.id = l.criancaId
      LEFT JOIN times t ON t.id = c.timeId
-     LEFT JOIN monsterHuntScans ms ON ms.leituraId = l.id
-     LEFT JOIN monsterHuntPartidas mp ON mp.id = ms.partidaId
+     LEFT JOIN "monsterHuntScans" ms ON ms.leituraId = l.id
+     LEFT JOIN "monsterHuntPartidas" mp ON mp.id = ms.partidaId
      WHERE l.id = @readingId`,
     { readingId }
   );
@@ -827,7 +827,7 @@ router.post('/', async (req, res) => {
     if (zoneConquestTeamGame || zoneConquestIndividualGame) {
       try {
         const activeSession = await queryOne(
-          `SELECT id FROM gameSessions 
+          `SELECT id FROM "gameSessions" 
            WHERE LOWER(eventoId) = LOWER(@eventoId) 
              AND status = 'active'
            ORDER BY iniciadoEm DESC

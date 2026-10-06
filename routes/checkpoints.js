@@ -404,7 +404,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     }
 
     const activeMonster = await queryOne(
-      `SELECT id FROM monsterHuntPartidas
+      `SELECT id FROM "monsterHuntPartidas"
        WHERE LOWER(eventoId) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
@@ -471,7 +471,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     // As FKs do schema não usam ON DELETE CASCADE; limpar dependências antes
     // do registro principal evita a violação de FK sem afetar outros eventos.
     await query(
-      `DELETE FROM monsterHuntScans
+      `DELETE FROM "monsterHuntScans"
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)
          AND LOWER(eventoId) = LOWER(@eventoId)`,
       { checkpointId: checkpoint.id, eventoId }

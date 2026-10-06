@@ -70,7 +70,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO familyLinkingCodes (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
+      `INSERT INTO "familyLinkingCodes" (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,
@@ -136,7 +136,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO familyLinkingCodes (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
+      `INSERT INTO "familyLinkingCodes" (criancaId, eventoId, empresaId, qr_code_value, tracking_url, criadoEm, expiramEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,

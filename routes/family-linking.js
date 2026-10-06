@@ -79,7 +79,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     // Buscar código QR ativo
     const codigoVinculacao = await queryOne(
       `SELECT flc.*, c.nome, c.nicknome, c.age, e.nome as evento_nome, e.id as eventoId, c.empresaId
-       FROM familyLinkingCodes flc
+       FROM "familyLinkingCodes" flc
        JOIN criancas c ON flc.criancaId = c.id
        JOIN eventos e ON flc.eventoId = e.id
        WHERE flc.qr_code_value = @codigoQR 
@@ -148,7 +148,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
 
       // ✅ Marcar QR codigo como usado
       const updateResult = await tx.query(
-        `UPDATE familyLinkingCodes
+        `UPDATE "familyLinkingCodes"
          SET status = 'used', used_by_login_id = @loginId
          WHERE id = @codeId`,
         { codeId: codigoVinculacao.id, loginId: req.user.id }

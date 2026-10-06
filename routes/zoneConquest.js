@@ -129,7 +129,7 @@ router.get(
 
       const partidas = await allQuery(
         `SELECT id, status, numeroRonda, current_team_id, iniciadoEm, finalizadoEm
-         FROM zoneConquestTeamPartidas
+         FROM "zoneConquestTeamPartidas"
          WHERE LOWER(eventoId) = LOWER(@eventoId)
          ORDER BY iniciadoEm DESC`,
         { eventoId }
@@ -164,7 +164,7 @@ router.get(
 
       const partidas = await allQuery(
         `SELECT id, status, version, iniciadoEm, finalizadoEm
-         FROM zoneConquestIndividualPartidas
+         FROM "zoneConquestIndividualPartidas"
          WHERE LOWER(eventoId) = LOWER(@eventoId)
          ORDER BY iniciadoEm DESC`,
         { eventoId }
