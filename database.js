@@ -4,6 +4,7 @@ const { AsyncLocalStorage } = require('async_hooks');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const sql = require('mssql');
+const { citarIdentificadoresCamelCase, converterLinhasParaApi } = require('./utils/sqlNomenclatura');
 
 const DB_DRIVER = String(process.env.DB_DRIVER || 'sqlserver').toLowerCase();
 const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
@@ -113,6 +114,9 @@ function adaptPostgresSql(sqlQuery) {
   text = text.replace(/DATEDIFF\s*\(\s*MINUTE\s*,\s*([^,]+),\s*([^\)]+)\)/gi,
     'EXTRACT(EPOCH FROM ($2 - $1)) / 60');
 
+  // O banco usa nomes camelCase (criancaId, criadoEm...), que no PostgreSQL exigem aspas.
+  text = citarIdentificadoresCamelCase(text);
+
   const topMatch = text.match(/(SELECT\s+)(DISTINCT\s+)?TOP\s+(\([^)]*\)|\d+)\s+/i);
   if (topMatch) {
     text = text.replace(topMatch[0], `${topMatch[1]}${topMatch[2] || ''}`);
@@ -143,6 +147,7 @@ async function connectDB() {
       pool = new Pool(config);
       await pool.query('SELECT 1');
       console.log('✅ Conectado ao PostgreSQL/Supabase com sucesso!');
+      await carregarCatalogo().catch(err => console.warn('⚠️ Não foi possível ler o catálogo de tabelas:', err.message));
       return pool;
     }
 
@@ -160,10 +165,56 @@ async function connectDB() {
   }
 }
 
-function normalizePostgresResult(result) {
+// Catálogo das tabelas (oid -> nome e colunas), usado para devolver cada linha com as chaves da API.
+let catalogoTabelas = new Map();
+let catalogoCarregadoEm = 0;
+const mapasPorTabela = new Map();
+
+async function carregarCatalogo() {
+  const resultado = await pool.query(`
+    SELECT c.oid::bigint AS oid, c.relname AS tabela, a.attnum::int AS posicao, a.attname AS coluna
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_attribute a ON a.attrelid = c.oid
+    WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+  `);
+  const novo = new Map();
+  for (const linha of resultado.rows) {
+    const oid = Number(linha.oid);
+    if (!novo.has(oid)) novo.set(oid, { tabela: linha.tabela, colunas: new Map() });
+    novo.get(oid).colunas.set(linha.posicao, linha.coluna);
+  }
+  catalogoTabelas = novo;
+  catalogoCarregadoEm = Date.now();
+}
+
+// Chamado depois de migrações que renomeiam tabelas/colunas.
+async function recarregarCatalogo() {
+  if (!pool) await connectDB();
+  if (isPostgres) await carregarCatalogo();
+}
+
+function catalogoConhece(fields) {
+  return fields.every(campo => {
+    if (!campo.tableID) return true;
+    const tabela = catalogoTabelas.get(campo.tableID);
+    return Boolean(tabela && tabela.colunas.has(campo.columnID));
+  });
+}
+
+async function normalizePostgresResult(result, { dentroDeTransacao = false } = {}) {
+  let rows = result.rows;
+  if (result.fields && result.fields.length && rows.length) {
+    // Uma recarga a cada 5s no máximo, para colunas novas criadas por migrações.
+    if (!catalogoConhece(result.fields) && !dentroDeTransacao && Date.now() - catalogoCarregadoEm > 5000) {
+      await carregarCatalogo();
+    }
+    rows = converterLinhasParaApi(result.fields, rows, catalogoTabelas, mapasPorTabela);
+  }
   return {
     ...result,
-    recordset: result.rows,
+    rows,
+    recordset: rows,
     rowsAffected: [result.rowCount || 0]
   };
 }
@@ -197,7 +248,7 @@ function createPostgresExecutor(client) {
   return {
     async query(sqlQuery, params = {}) {
       const bound = bindNamedParameters(adaptPostgresSql(sqlQuery), params);
-      return normalizePostgresResult(await client.query(bound.text, bound.values));
+      return normalizePostgresResult(await client.query(bound.text, bound.values), { dentroDeTransacao: true });
     },
     async queryOne(sqlQuery, params = {}) {
       const result = await this.query(sqlQuery, params);
@@ -288,4 +339,4 @@ async function closeDB() {
   pool = null;
 }
 
-module.exports = { connectDB, closeDB, query, queryOne, allQuery, withTransaction, sql, DB_DRIVER };
+module.exports = { connectDB, closeDB, query, queryOne, allQuery, withTransaction, recarregarCatalogo, sql, DB_DRIVER };
