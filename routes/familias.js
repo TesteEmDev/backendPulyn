@@ -154,7 +154,7 @@ router.post('/invites/:token/register', async (req, res) => {
     }
 
     const existingLogin = await queryOne(
-      'SELECT id, perfil, empresaId, status, senha FROM acessos WHERE LOWER(email) = @email',
+      'SELECT id, perfil, empresaId, status, senha FROM logins WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
     if (existingLogin && (existingLogin.role !== 'family' || String(existingLogin.empresaId) !== String(invite.empresaId))) {
@@ -179,7 +179,7 @@ router.post('/invites/:token/register', async (req, res) => {
       const loginId = existingLogin?.id || crypto.randomUUID();
       if (!existingLogin) {
         await query(`
-          INSERT INTO acessos (id, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
+          INSERT INTO logins (id, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
           VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', @loginStatus, GETDATE())
         `, {
           id: loginId,
@@ -266,7 +266,7 @@ async function listFamilyLinks(status, eventoId, req) {
            e.id as eventoId, e.nome as evento_nome, e.data as evento_date,
            t.id as timeId, t.nome as time_nome, t.cor as time_color
     FROM vinculoFamiliar l
-    JOIN acessos u ON u.id = l.loginId
+    JOIN logins u ON u.id = l.loginId
     JOIN criancas c ON c.id = l.criancaId
     JOIN eventos e ON e.id = c.eventoId
     LEFT JOIN times t ON t.id = c.timeId
@@ -333,7 +333,7 @@ router.post('/links/:linkId/approve', verifyToken, async (req, res) => {
       SET status = 'approved', aprovadoPor = @approvedBy, aprovadoEm = GETDATE()
       WHERE id = @linkId AND status = 'pending'
     `, { linkId: link.id, approvedBy: req.user.id });
-    await query(`UPDATE acessos SET status = 'active', dataAtualizacao = GETDATE() WHERE id = @loginId`, { loginId: link.loginId });
+    await query(`UPDATE logins SET status = 'active', dataAtualizacao = GETDATE() WHERE id = @loginId`, { loginId: link.loginId });
     await query(`UPDATE criancas SET status = 'active' WHERE id = @childId AND status = 'pending'`, { childId: link.criancaId });
 
     res.json({ ok: true, status: 'approved', message: 'Família aprovada com sucesso' });
@@ -368,7 +368,7 @@ router.post('/links/:linkId/reject', verifyToken, async (req, res) => {
       SELECT id FROM vinculoFamiliar WHERE loginId = @loginId AND status = 'approved'
     `, { loginId: link.loginId });
     if (!approvedSibling) {
-      await query(`UPDATE acessos SET status = 'inactive', dataAtualizacao = GETDATE() WHERE id = @loginId AND status = 'pending'`, { loginId: link.loginId });
+      await query(`UPDATE logins SET status = 'inactive', dataAtualizacao = GETDATE() WHERE id = @loginId AND status = 'pending'`, { loginId: link.loginId });
     }
 
     res.json({ ok: true, status: 'rejected', message: 'Solicitação rejeitada' });
@@ -383,7 +383,7 @@ router.get('/me', verifyToken, async (req, res) => {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
     const family = await queryOne(`
       SELECT id, email, nomeFamilia, status, empresaId
-      FROM acessos WHERE id = @loginId AND role = 'family'
+      FROM logins WHERE id = @loginId AND role = 'family'
     `, { loginId: req.user.id });
     if (!family) return res.status(404).json({ error: 'Conta familiar não encontrada' });
     res.json({ id: family.id, name: family.nomeFamilia || family.email, email: family.email, status: family.status, empresaId: family.empresaId });

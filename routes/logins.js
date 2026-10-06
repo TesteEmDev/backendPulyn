@@ -1,4 +1,4 @@
-// routes/acessos.js - Gerenciamento de Usuários
+// routes/logins.js - Gerenciamento de Usuários
 const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
@@ -14,7 +14,7 @@ router.use(verifyToken, (req, res, next) => {
 
 // ==================== LISTAR USUÁRIOS DA EMPRESA ====================
 
-// GET /api/acessos/empresa/:empresaId
+// GET /api/logins/empresa/:empresaId
 router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, res) => {
   try {
     const { empresaId } = req.params;
@@ -27,7 +27,7 @@ router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, re
 
     const users = await allQuery(`
       SELECT id, email, perfil, status, dataCriacao as criadoEm
-      FROM acessos
+      FROM logins
       WHERE empresaId = @empresaId
       ORDER BY dataCriacao DESC
     `, { empresaId });
@@ -41,7 +41,7 @@ router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, re
 
 // ==================== CRIAR NOVO USUÁRIO ====================
 
-// POST /api/acessos
+// POST /api/logins
 router.post('/', requireRole('admin', 'master'), async (req, res) => {
   try {
     const { senha, role } = req.body;
@@ -74,7 +74,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
     // Verificar se email já existe (o login ignora maiúsculas/minúsculas)
     const existing = await queryOne(
-      'SELECT id FROM acessos WHERE LOWER(email) = LOWER(@email)',
+      'SELECT id FROM logins WHERE LOWER(email) = LOWER(@email)',
       { email }
     );
 
@@ -94,7 +94,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     // Criar usuário com empresaId do token
     const id = require('crypto').randomUUID();
     await query(
-      `INSERT INTO acessos (id, email, senha, perfil, empresaId, status, dataCriacao)
+      `INSERT INTO logins (id, email, senha, perfil, empresaId, status, dataCriacao)
        VALUES (@id, @email, @senha, @perfil, @empresaId, @status, GETDATE())`,
       {
         id,
@@ -124,7 +124,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
 // ==================== DELETAR USUÁRIO ====================
 
-// DELETE /api/acessos/:id
+// DELETE /api/logins/:id
 router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
   try {
     const { id } = req.params;
@@ -132,7 +132,7 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
 
     // Buscar usuário
     const user = await queryOne(
-      'SELECT empresaId, perfil, status FROM acessos WHERE id = @id',
+      'SELECT empresaId, perfil, status FROM logins WHERE id = @id',
       { id }
     );
 
@@ -148,7 +148,7 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
     // Não deixar deletar o último admin
     if (user.role === 'admin') {
       const adminCount = await queryOne(`
-        SELECT COUNT(*) as count FROM acessos
+        SELECT COUNT(*) as count FROM logins
         WHERE empresaId = @empresaId AND role = 'admin' AND status = 'active'
       `, { empresaId: user.empresaId });
 
@@ -159,7 +159,7 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
 
     // Deletar usuário (soft delete)
     await query(
-      `UPDATE acessos 
+      `UPDATE logins 
        SET status = @status, dataAtualizacao = GETDATE() 
        WHERE id = @id 
        AND empresaId = @empresaId`,

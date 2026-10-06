@@ -114,7 +114,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
         queryOne('SELECT cnpj, dataAtualizacao FROM empresas WHERE id = @id', { id: empresaId }),
         allQuery(
           `SELECT id, email, perfil, status, ultimoAcesso, dataCriacao
-           FROM acessos WHERE empresaId = @id ORDER BY perfil, email`,
+           FROM logins WHERE empresaId = @id ORDER BY perfil, email`,
           { id: empresaId }
         ),
         allQuery(
@@ -236,7 +236,7 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO acessos (id, empresaId, email, senha, status) 
+        `INSERT INTO logins (id, empresaId, email, senha, status) 
          VALUES (@id, @empresaId, @email, @senha, @status)`,
         {
           id: loginId,
@@ -323,10 +323,10 @@ router.put('/:id', verifyToken, async (req, res) => {
       );
 
       // Atualizar EMAIL do LOGIN admin se foi fornecido (sem o filtro de perfil, o
-      // e-mail era gravado em todos os acessos da empresa: recepção, telão, famílias...)
+      // e-mail era gravado em todos os logins da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
-          `UPDATE acessos SET email = @email, dataAtualizacao = GETDATE()
+          `UPDATE logins SET email = @email, dataAtualizacao = GETDATE()
            WHERE empresaId = @empresaId AND role = 'admin'`,
           {
             email: email,
@@ -382,7 +382,7 @@ router.put('/:id/status', verifyToken, async (req, res) => {
 
     // Atualizar status no LOGIN também
     await query(
-      'UPDATE acessos SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
+      'UPDATE logins SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
       { status, id: req.params.id }
     );
 
@@ -408,7 +408,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
       // 1. Deletar LOGIN
       await query(
-        'DELETE FROM acessos WHERE empresaId = @id',
+        'DELETE FROM logins WHERE empresaId = @id',
         { id: req.params.id }
       );
       console.log(`✅ Login deletado`);
