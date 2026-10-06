@@ -3,6 +3,49 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { checkGameStartRequirements } = require('../utils/gameRequirements');
+const { buildCheckpointConfigs, parseConfigItems, idOf } = require('../utils/liveCheckpoints');
+const { refreshTreasureTargetAfterListChange } = require('../utils/treasure');
+const { refreshMonsterSpecialAfterListChange } = require('../utils/monster');
+
+// Eventos em que uma partida deste jogo (Tesouro ou Monstro) está em andamento agora.
+async function eventsRunningGame(gameId) {
+  const rows = await allQuery(
+    `SELECT evento_id, 'treasure_hunt' AS kind FROM caca_tesouro_partidas
+       WHERE LOWER(brincadeira_id) = LOWER(@gameId) AND status = 'active'
+     UNION
+     SELECT evento_id, 'monster_hunt' AS kind FROM monster_hunt_partidas
+       WHERE LOWER(brincadeira_id) = LOWER(@gameId) AND status = 'active'`,
+    { gameId }
+  );
+  return rows.map(row => ({ eventoId: row.evento_id, kind: row.kind }));
+}
+
+// Depois de trocar a lista com a partida rodando: corrige o que dependia dela (alvo do Tesouro,
+// checkpoint especial do Monstro) e avisa as telas do evento para recarregarem.
+async function reconcileRunningGames(gameId, checkpointIds) {
+  const changes = [];
+  for (const { eventoId, kind } of await eventsRunningGame(gameId)) {
+    const change = kind === 'treasure_hunt'
+      ? await refreshTreasureTargetAfterListChange(eventoId)
+      : await refreshMonsterSpecialAfterListChange(eventoId);
+    changes.push({ eventoId, kind, ...(change || {}) });
+    if (typeof global.broadcastToEvent === 'function') {
+      global.broadcastToEvent(eventoId, {
+        type: 'GAME_CHECKPOINTS_UPDATED',
+        payload: {
+          eventoId,
+          gameId,
+          gameType: kind,
+          checkpointIds,
+          targetCheckpointId: change?.targetCheckpointId ?? null,
+          specialCheckpointId: change?.specialCheckpointId ?? null,
+        },
+      });
+    }
+  }
+  return changes;
+}
 
 const MONSTER_COOLDOWN_MIN_SECONDS = 1;
 const MONSTER_COOLDOWN_MAX_SECONDS = 120;
@@ -240,9 +283,77 @@ router.put('/:id', verifyToken, async (req, res) => {
     );
     
     console.log(`✅ Jogo atualizado: ${req.params.id}`);
+
+    // Se este jogo está rodando, a partida passa a usar a lista nova (alvo/especial corrigidos).
+    try {
+      await reconcileRunningGames(req.params.id, selectedCheckpointIds);
+    } catch (reconcileError) {
+      console.warn(`⚠️ Jogo atualizado, mas a partida em andamento não foi ajustada: ${reconcileError.message}`);
+    }
     res.json({ updated: true });
   } catch (err) {
     console.error('❌ Erro ao atualizar brincadeira:', err);
+    res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
+// Troca só os checkpoints do jogo, inclusive com a partida em andamento (recreacionista, admin e master).
+// Mantém a configuração de quem continua na lista (bloqueio do Monstro) e corrige o que dependia dela.
+router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+  try {
+    const game = await queryOne(
+      'SELECT id, name, empresa_id, evento_id, type, status, checkpoints FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
+      { id: req.params.id }
+    );
+    if (!game || String(game.status || '').trim().toLowerCase() === 'archived') {
+      return res.status(404).json({ error: 'Jogo não encontrado' });
+    }
+    if (!isMaster(req) && String(game.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
+    }
+    if (!game.evento_id) return res.status(400).json({ error: 'Este jogo não está ligado a um evento' });
+
+    const requestedIds = Array.isArray(req.body?.checkpoints) ? req.body.checkpoints.map(idOf).filter(Boolean) : [];
+    if (requestedIds.length === 0) return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
+
+    const valid = await allQuery(
+      `SELECT id FROM checkpoints
+       WHERE LOWER(evento_id) = LOWER(@eventoId)
+         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
+      { eventoId: game.evento_id }
+    );
+    const validIds = new Set(valid.map(row => String(row.id).toLowerCase()));
+    if (requestedIds.some(id => !validIds.has(id.toLowerCase()))) {
+      return res.status(400).json({ error: 'Selecione apenas checkpoints de jogo pertencentes ao evento' });
+    }
+
+    const items = buildCheckpointConfigs({
+      type: game.type,
+      requestedIds,
+      existingItems: parseConfigItems(game.checkpoints),
+      specialId: req.body?.specialCheckpointId || null,
+    });
+    const checkpointsJson = JSON.stringify(items);
+
+    // Com a partida rodando, a lista nova também precisa atender o mínimo de checkpoints online do jogo.
+    const running = await eventsRunningGame(game.id);
+    for (const { eventoId } of running) {
+      const requirement = await checkGameStartRequirements(eventoId, { ...game, checkpoints: checkpointsJson });
+      if (!requirement.ok) {
+        return res.status(409).json({
+          error: `Com o jogo em andamento, a lista precisa ter pelo menos ${requirement.required} checkpoints online `
+            + `(com essa seleção há ${requirement.available}). Selecione mais checkpoints ou ligue os que estão offline.`,
+          requirement,
+        });
+      }
+    }
+
+    await query('UPDATE brincadeiras SET checkpoints = @checkpoints WHERE id = @id', { checkpoints: checkpointsJson, id: game.id });
+    const changes = await reconcileRunningGames(game.id, requestedIds);
+
+    res.json({ updated: true, running: running.length > 0, checkpoints: items, changes });
+  } catch (err) {
+    console.error('❌ Erro ao trocar os checkpoints do jogo:', err);
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });

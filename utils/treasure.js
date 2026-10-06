@@ -851,8 +851,37 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   };
 }
 
+// Depois de trocar a lista de checkpoints do jogo com a partida em andamento: se o alvo atual
+// deixou de fazer parte da lista, sorteia outro alvo para a equipe da vez.
+async function refreshTreasureTargetAfterListChange(eventoId) {
+  const session = await getActiveSession(eventoId);
+  if (!session) return null;
+
+  const ids = await getTreasureCheckpointIds(eventoId, session.brincadeira_id);
+  if (!ids.length) return null;
+  if (session.target_checkpoint_id && ids.some(id => sameId(id, session.target_checkpoint_id))) {
+    return { changed: false, targetCheckpointId: String(session.target_checkpoint_id) };
+  }
+
+  const targetCheckpointId = await getNextTargetCheckpointId(
+    eventoId,
+    session.turn_team_id || session.starting_team_id,
+    null,
+    ids
+  );
+  if (!targetCheckpointId) return null;
+
+  await query(
+    `UPDATE caca_tesouro_partidas SET target_checkpoint_id = @targetCheckpointId
+     WHERE id = @partidaId AND status = 'active'`,
+    { targetCheckpointId, partidaId: session.id }
+  );
+  return { changed: true, targetCheckpointId };
+}
+
 module.exports = {
   TREASURE_GAME_TYPE,
+  refreshTreasureTargetAfterListChange,
   getGameForEvent,
   getActiveSession,
   startTreasureGame,
