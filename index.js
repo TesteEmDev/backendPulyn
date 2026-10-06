@@ -196,7 +196,7 @@ global.broadcastAll = (message) => {
 async function persistEventMode(eventoId, mode, gameType = currentGameType, details = {}) {
   if (!eventoId || eventoId === 'global') return;
   const evento = await queryOne(
-    'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+    'SELECT id, empresa_id FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return;
@@ -283,7 +283,7 @@ wss.on('connection', async (ws, req) => {
   if (wsUser && !controlScope && wsUser.role !== 'master') {
     try {
       const authorizedEvent = await queryOne(
-        `SELECT id FROM eventos
+        `SELECT id FROM "evento"
          WHERE LOWER(id) = LOWER(@eventoId)
            AND LOWER(empresa_id) = LOWER(@empresaId)`,
         { eventoId, empresaId: wsUser.empresa_id }
@@ -329,7 +329,7 @@ wss.on('connection', async (ws, req) => {
   if (KIOSK_ROLES.has(wsUser?.role) && !controlScope) {
     try {
       const kioskEvent = await queryOne(
-        `SELECT id FROM eventos
+        `SELECT id FROM "evento"
          WHERE id = @eventoId
            AND empresa_id = @empresaId
            AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
@@ -495,7 +495,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const game = await queryOne(
-      'SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
+      'SELECT id, name, type, evento_id, empresa_id FROM "brincadeira" WHERE LOWER(id) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
       { gameId }
     );
     if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
@@ -581,7 +581,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [INICIAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+      `SELECT id, empresa_id, status FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -599,7 +599,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     const selectedGame = await queryOne(
       `SELECT id, name, type, evento_id, empresa_id
-       FROM brincadeiras
+       FROM "brincadeira"
        WHERE LOWER(id) = LOWER(@gameId)
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { gameId }
@@ -824,7 +824,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // O status do evento não é mexido aqui: iniciar um jogo só garante que o
     // evento (se ainda agendado) passe a ativo; parar o jogo nunca o desativa.
     const updateResult = await query(
-      `UPDATE eventos SET
+      `UPDATE "evento" SET
         brincadeiraAtivaId = @gameId,
         tipoJogoAtivo = @gameType
        WHERE LOWER(id) = LOWER(@eventoId)`,
@@ -953,7 +953,7 @@ async function stopGameForEvento(eventoId) {
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [PARAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos WHERE id = @eventoId`,
+      `SELECT id, empresa_id, status FROM "evento" WHERE id = @eventoId`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -1159,7 +1159,7 @@ async function checkExpiredGames() {
     const activeSessions = await allQuery(`
       SELECT gs.evento_id, gs.started_at, b.duration
       FROM game_sessions gs
-      INNER JOIN brincadeiras b ON b.id = gs.brincadeira_id
+      INNER JOIN "brincadeira" b ON b.id = gs.brincadeira_id
       WHERE gs.status = 'active'
         AND b.duration IS NOT NULL
         AND b.duration > 0
@@ -1202,14 +1202,14 @@ async function checkStaleTeamCheckpoints() {
   try {
     const cutoff = new Date(Date.now() - TEAM_CHECKPOINT_RESET_MS);
     const staleCheckpoints = await allQuery(
-      `SELECT c.id, c.evento_id
-       FROM pontoVerificacao c
-       WHERE c.territorioDonoTimeId IS NOT NULL
-         AND c.last_conquered_at IS NOT NULL
-         AND c.last_conquered_at < @cutoff
+      `SELECT c."checkpointId", c."eventoId"
+       FROM "pontoVerificacao" c
+       WHERE c."territorioDonoTimeId" IS NOT NULL
+         AND c."ultimoConquistadoEm" IS NOT NULL
+         AND c."ultimoConquistadoEm" < @cutoff
          AND EXISTS (
            SELECT 1 FROM zone_conquest_team_partidas p
-           WHERE LOWER(p.evento_id) = LOWER(c.evento_id) AND p.status = 'active'
+           WHERE LOWER(p.evento_id) = LOWER(c."eventoId") AND p.status = 'active'
          )`,
       { cutoff }
     );
@@ -1217,13 +1217,13 @@ async function checkStaleTeamCheckpoints() {
     const eventosAfetados = new Set();
     for (const checkpoint of staleCheckpoints) {
       await query(
-        `UPDATE pontoVerificacao SET
-           territorioDonoTimeId = NULL,
-           territorioDonosCriancaId = NULL
-         WHERE id = @id`,
-        { id: checkpoint.id }
+        `UPDATE "pontoVerificacao" SET
+           "territorioDonoTimeId" = NULL,
+           "territory_owner_crianca_id" = NULL
+         WHERE "checkpointId" = @id`,
+        { id: checkpoint.checkpointId }
       );
-      eventosAfetados.add(checkpoint.evento_id);
+      eventosAfetados.add(checkpoint.eventoId);
       console.log(`   🔓 [ZONE-TEAM] Checkpoint ${checkpoint.id} liberado após 1m30s sem leituras`);
     }
 
@@ -1302,7 +1302,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
   try {
     const { eventoId } = req.params;
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT id, empresa_id FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) {
@@ -1532,7 +1532,7 @@ app.post('/api/debug/checkpoint-mode', verifyToken, requireRole('admin', 'game_m
 
   if (eventoId) {
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT id, empresa_id FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
