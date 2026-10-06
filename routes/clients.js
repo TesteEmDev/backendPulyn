@@ -130,7 +130,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
           { id: empresaId }
         ),
         allQuery(
-          'SELECT status, COUNT(*) AS total FROM support_tickets WHERE empresaId = @id GROUP BY status',
+          'SELECT status, COUNT(*) AS total FROM supportTickets WHERE empresaId = @id GROUP BY status',
           { id: empresaId }
         ),
       ]);

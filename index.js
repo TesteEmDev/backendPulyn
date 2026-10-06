@@ -508,7 +508,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     const linkedEvent = directEventMatch
       ? true
       : await queryOne(
-        `SELECT evento_id FROM evento_brincadeiras
+        `SELECT evento_id FROM eventoBrincadeiras
          WHERE LOWER(brincadeira_id) = LOWER(@gameId)
            AND LOWER(evento_id) = LOWER(@eventoId)`,
         { gameId, eventoId }
@@ -616,7 +616,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     const linkedEvent = directEventMatch
       ? true
       : await queryOne(
-        `SELECT evento_id FROM evento_brincadeiras
+        `SELECT evento_id FROM eventoBrincadeiras
          WHERE LOWER(brincadeira_id) = LOWER(@gameId)
            AND LOWER(evento_id) = LOWER(@eventoId)`,
         { gameId, eventoId }
@@ -2055,9 +2055,9 @@ async function startServer() {
   // Migração 019: estado persistente do Caça ao Tesouro
   try {
     await query(`
-      IF OBJECT_ID('dbo.caca_tesouro_partidas', 'U') IS NULL
+      IF OBJECT_ID('dbo.cacaTesourPartidas', 'U') IS NULL
       BEGIN
-        CREATE TABLE caca_tesouro_partidas (
+        CREATE TABLE cacaTesourPartidas (
           id NVARCHAR(36) NOT NULL PRIMARY KEY,
           evento_id NVARCHAR(36) NOT NULL,
           brincadeira_id NVARCHAR(36) NOT NULL,
@@ -2076,9 +2076,9 @@ async function startServer() {
     `);
 
     await query(`
-      IF OBJECT_ID('dbo.caca_tesouro_scans', 'U') IS NULL
+      IF OBJECT_ID('dbo.cacaTesourScans', 'U') IS NULL
       BEGIN
-        CREATE TABLE caca_tesouro_scans (
+        CREATE TABLE cacaTesourScans (
           id NVARCHAR(36) NOT NULL PRIMARY KEY,
           partida_id NVARCHAR(36) NOT NULL,
           evento_id NVARCHAR(36) NOT NULL,
@@ -2102,13 +2102,13 @@ async function startServer() {
   try {
     const startingTeamColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'caca_tesouro_partidas'
+      WHERE TABLE_NAME = 'cacaTesourPartidas'
         AND COLUMN_NAME = 'timeInicialId'
     `);
 
     if (!startingTeamColumn) {
       await query(`
-        ALTER TABLE caca_tesouro_partidas
+        ALTER TABLE cacaTesourPartidas
         ADD timeInicialId NVARCHAR(36) NULL
       `);
       console.log('✅ Coluna timeInicialId adicionada na migração 020!\n');
@@ -2123,24 +2123,24 @@ async function startServer() {
   try {
     const turnTeamColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'caca_tesouro_partidas'
+      WHERE TABLE_NAME = 'cacaTesourPartidas'
         AND COLUMN_NAME = 'timeVezId'
     `);
     const turnAvailableColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'caca_tesouro_partidas'
+      WHERE TABLE_NAME = 'cacaTesourPartidas'
         AND COLUMN_NAME = 'vezDisponvelEm'
     `);
 
     if (!turnTeamColumn) {
       await query(`
-        ALTER TABLE caca_tesouro_partidas
+        ALTER TABLE cacaTesourPartidas
         ADD timeVezId NVARCHAR(36) NULL
       `);
     }
     if (!turnAvailableColumn) {
       await query(`
-        ALTER TABLE caca_tesouro_partidas
+        ALTER TABLE cacaTesourPartidas
         ADD vezDisponvelEm DATETIME2 NULL
       `);
     }
@@ -2153,9 +2153,9 @@ async function startServer() {
   // Migração 022: cronômetros individuais das equipes
   try {
     await query(`
-      IF OBJECT_ID('dbo.caca_tesouro_tempos', 'U') IS NULL
+      IF OBJECT_ID('dbo.cacaTesourTempos', 'U') IS NULL
       BEGIN
-        CREATE TABLE caca_tesouro_tempos (
+        CREATE TABLE cacaTesourTempos (
           id NVARCHAR(36) NOT NULL PRIMARY KEY,
           partida_id NVARCHAR(36) NOT NULL,
           evento_id NVARCHAR(36) NOT NULL,

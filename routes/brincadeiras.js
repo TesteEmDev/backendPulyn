@@ -50,14 +50,14 @@ router.get('/', verifyToken, async (req, res) => {
       }
 
       // O evento é a fonte do escopo. Aceita tanto o vínculo direto quanto o legado
-      // em evento_brincadeiras, sempre mantendo o isolamento pela empresa do evento.
+      // em eventoBrincadeiras, sempre mantendo o isolamento pela empresa do evento.
       whereClause = `LOWER(b.empresaId) = LOWER(@evento_empresa_id)
         AND LOWER(COALESCE(b.status, 'active')) <> 'archived'
         AND (
           LOWER(b.eventoId) = LOWER(@eventoId)
           OR EXISTS (
             SELECT 1
-            FROM evento_brincadeiras eb
+            FROM eventoBrincadeiras eb
             WHERE LOWER(eb.brincadeiraId) = LOWER(b.id)
               AND LOWER(eb.eventoId) = LOWER(@eventoId)
           )
@@ -342,7 +342,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
       }
 
       const activeSessionTable = brincadeira.type === 'treasure_hunt'
-        ? 'caca_tesouro_partidas'
+        ? 'cacaTesourPartidas'
         : brincadeira.type === 'monster_hunt' ? 'monster_hunt_partidas' : null;
       if (activeSessionTable) {
         const activeSession = await tx.queryOne(

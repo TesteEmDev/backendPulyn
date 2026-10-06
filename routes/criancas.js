@@ -340,8 +340,8 @@ router.delete('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req,
     );
 
     // Remover registros que possuem FK obrigatória para a criança.
-    await query('DELETE FROM crianca_conquistas WHERE criancaId = @criancaId', { criancaId: criancaId });
-    await query('DELETE FROM caca_tesouro_scans WHERE criancaId = @criancaId', { criancaId: criancaId });
+    await query('DELETE FROM criancaConquistas WHERE criancaId = @criancaId', { criancaId: criancaId });
+    await query('DELETE FROM cacaTesourScans WHERE criancaId = @criancaId', { criancaId: criancaId });
     await query('DELETE FROM pontuacoes WHERE criancaId = @criancaId', { criancaId: criancaId });
     await query('DELETE FROM leituras WHERE criancaId = @criancaId', { criancaId: criancaId });
 

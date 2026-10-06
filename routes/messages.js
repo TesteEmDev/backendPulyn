@@ -52,7 +52,7 @@ router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (re
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
     const messages = await allQuery(`
       SELECT TOP (@limit) id, eventoId, texto, type, remetente, enviadoEm
-      FROM mensagens_display
+      FROM mensagensDisplay
       WHERE eventoId = @eventoId
       ORDER BY enviadoEm DESC
     `, { eventoId: req.params.eventoId, limit });
@@ -77,7 +77,7 @@ router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (
 
     const messageId = uuidv4();
     await query(`
-      INSERT INTO mensagens_display (id, eventoId, texto, type, remetente, enviadoEm)
+      INSERT INTO mensagensDisplay (id, eventoId, texto, type, remetente, enviadoEm)
       VALUES (@id, @eventoId, @texto, @type, @remetente, CURRENT_TIMESTAMP)
     `, {
       id: messageId,
@@ -88,7 +88,7 @@ router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (
     });
 
     const message = await queryOne(
-      'SELECT id, eventoId, texto, type, remetente, enviadoEm FROM mensagens_display WHERE id = @id',
+      'SELECT id, eventoId, texto, type, remetente, enviadoEm FROM mensagensDisplay WHERE id = @id',
       { id: messageId }
     );
     const serialized = serializeMessage(message);

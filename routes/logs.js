@@ -29,7 +29,7 @@ router.get('/', verifyToken, async (req, res) => {
           `, { empresaId }),
       allQuery(`
         SELECT id, cliente as empresa_nome, subject, status, criadoEm
-        FROM support_tickets
+        FROM supportTickets
         WHERE 1=1 ${master ? '' : 'AND empresaId = @empresaId'}
       `, { empresaId }),
       allQuery(`

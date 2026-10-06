@@ -170,7 +170,7 @@ router.get('/:id/config', verifyToken, async (req, res) => {
 
     // Buscar tags autorizadas
     const tags = await allQuery(
-      'SELECT tagUid FROM checkpoint_tags WHERE checkpointId = @id',
+      'SELECT tagUid FROM checkpointTags WHERE checkpointId = @id',
       { id: req.params.id }
     );
 
@@ -336,13 +336,13 @@ router.post('/:checkpointId/authorize-tags', async (req, res) => {
     }
 
     // Limpar tags antigas
-    await query('DELETE FROM checkpoint_tags WHERE checkpointId = @id', { id: checkpointId });
+    await query('DELETE FROM checkpointTags WHERE checkpointId = @id', { id: checkpointId });
 
     // Inserir novas tags
     for (const tag of tags) {
       if (tag && tag.trim()) {
         await query(
-          'INSERT INTO checkpoint_tags (checkpointId, tagUid) VALUES (@checkpointId, @tagUid)',
+          'INSERT INTO checkpointTags (checkpointId, tagUid) VALUES (@checkpointId, @tagUid)',
           { checkpointId: checkpointId, tagUid: tag.trim().toUpperCase() }
         );
       }
@@ -393,7 +393,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
 
     // Não alterar a estrutura de uma partida enquanto o jogo está ativo.
     const activeTreasure = await queryOne(
-      `SELECT id FROM caca_tesouro_partidas
+      `SELECT id FROM cacaTesourPartidas
        WHERE LOWER(eventoId) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
@@ -417,7 +417,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     // Remover o checkpoint de históricos JSON de partidas encerradas.
     const treasureSessions = await allQuery(
       `SELECT id, checkpointAlvoId, checkpointsCompletadosIds
-       FROM caca_tesouro_partidas
+       FROM cacaTesourPartidas
        WHERE LOWER(eventoId) = LOWER(@eventoId)`,
       { eventoId }
     );
@@ -426,7 +426,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
       const targetWasDeleted = sameId(session.checkpointAlvoId, checkpointId);
       if (completed.changed || targetWasDeleted) {
         await query(
-          `UPDATE caca_tesouro_partidas
+          `UPDATE cacaTesourPartidas
            SET checkpointAlvoId = @targetCheckpointId,
                checkpointsCompletadosIds = @completedCheckpointIds
            WHERE LOWER(id) = LOWER(@partidaId)`,
@@ -450,7 +450,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
          AND (
            LOWER(eventoId) = LOWER(@eventoId)
            OR EXISTS (
-             SELECT 1 FROM evento_brincadeiras eb
+             SELECT 1 FROM eventoBrincadeiras eb
              WHERE LOWER(eb.brincadeiraId) = LOWER(brincadeiras.id)
                AND LOWER(eb.eventoId) = LOWER(@eventoId)
            )
@@ -477,7 +477,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
       { checkpointId: checkpoint.id, eventoId }
     );
     await query(
-      `DELETE FROM caca_tesouro_scans
+      `DELETE FROM cacaTesourScans
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)
          AND LOWER(eventoId) = LOWER(@eventoId)`,
       { checkpointId: checkpoint.id, eventoId }
@@ -494,7 +494,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
       { checkpointId: checkpoint.id }
     );
     await query(
-      `DELETE FROM checkpoint_tags
+      `DELETE FROM checkpointTags
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
       { checkpointId: checkpoint.id }
     );

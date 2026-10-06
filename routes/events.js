@@ -88,7 +88,7 @@ router.get('/', verifyToken, async (req, res) => {
 const MAX_RESPONSIBLE_NAME = 150;
 
 // Jogos do evento: um jogo pertence a um evento pelo vínculo direto (brincadeiras.eventoId, do
-// evento em que foi criado) ou por um vínculo extra em evento_brincadeiras. Deixa o evento com
+// evento em que foi criado) ou por um vínculo extra em eventoBrincadeiras. Deixa o evento com
 // exatamente os jogos informados: vincula os novos, tira os desmarcados e, se um jogo criado
 // neste evento for desmarcado, solta o vínculo direto dele. Deve rodar dentro de uma transação.
 async function syncEventGames(eventoId, empresaId, gameIds) {
@@ -117,7 +117,7 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
     { eventoId }
   );
   const links = await allQuery(
-    'SELECT brincadeiraId FROM evento_brincadeiras WHERE LOWER(eventoId) = LOWER(@eventoId)',
+    'SELECT brincadeiraId FROM eventoBrincadeiras WHERE LOWER(eventoId) = LOWER(@eventoId)',
     { eventoId }
   );
   const isWanted = (id) => wanted.some((w) => same(w, id));
@@ -127,7 +127,7 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
   for (const [order, gameId] of wanted.entries()) {
     if (!isOwned(gameId) && !isLinked(gameId)) {
       await query(
-        'INSERT INTO evento_brincadeiras (eventoId, brincadeiraId, ordem) VALUES (@eventoId, @gameId, @order)',
+        'INSERT INTO eventoBrincadeiras (eventoId, brincadeiraId, ordem) VALUES (@eventoId, @gameId, @order)',
         { eventoId, gameId, order }
       );
     }
@@ -135,7 +135,7 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
   for (const link of links) {
     if (!isWanted(link.brincadeiraId)) {
       await query(
-        'DELETE FROM evento_brincadeiras WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(brincadeiraId) = LOWER(@gameId)',
+        'DELETE FROM eventoBrincadeiras WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(brincadeiraId) = LOWER(@gameId)',
         { eventoId, gameId: link.brincadeiraId }
       );
     }

@@ -21,14 +21,14 @@ async function getInvite(token) {
   const invite = await queryOne(`
     SELECT i.*, e.name as evento_nome, e.date as evento_data,
            c.id as linked_child_id, c.name as linked_child_name
-    FROM family_invites i
+    FROM familyInvites i
     JOIN eventos e ON e.id = i.eventoId
     LEFT JOIN criancas c ON c.id = i.criancaId
     WHERE i.hashToken = @tokenHash
   `, { tokenHash: hashToken(token) });
   if (!invite) return null;
   if (invite.status === 'pending' && new Date(invite.expiramEm) <= new Date()) {
-    await query(`UPDATE family_invites SET status = 'expired' WHERE id = @id AND status = 'pending'`, { id: invite.id });
+    await query(`UPDATE familyInvites SET status = 'expired' WHERE id = @id AND status = 'pending'`, { id: invite.id });
     invite.status = 'expired';
   }
   return invite;
@@ -95,7 +95,7 @@ router.post('/invites', verifyToken, async (req, res) => {
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
     const id = crypto.randomUUID();
     await query(`
-      INSERT INTO family_invites
+      INSERT INTO familyInvites
         (id, empresaId, eventoId, criancaId, email, hashToken, status, expiramEm, criadoPor)
       VALUES (@id, @empresaId, @eventoId, @criancaId, @email, @tokenHash, 'pending', @expiresAt, @createdBy)
     `, {
@@ -168,7 +168,7 @@ router.post('/invites/:token/register', async (req, res) => {
     }
 
     const claimed = await query(`
-      UPDATE family_invites SET status = 'processing'
+      UPDATE familyInvites SET status = 'processing'
       WHERE id = @id AND status = 'pending' AND expiramEm > GETDATE()
     `, { id: invite.id });
     if (!claimed.rowsAffected?.[0]) {
@@ -216,7 +216,7 @@ router.post('/invites/:token/register', async (req, res) => {
       for (const childId of childIds) {
         const linkId = crypto.randomUUID();
         await query(`
-          INSERT INTO family_child_links
+          INSERT INTO familyChildLinks
             (id, loginId, criancaId, empresaId, relacionamento, status)
           VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'pending')
         `, {
@@ -229,7 +229,7 @@ router.post('/invites/:token/register', async (req, res) => {
       }
 
       await query(`
-        UPDATE family_invites SET status = 'used', usadoEm = GETDATE()
+        UPDATE familyInvites SET status = 'used', usadoEm = GETDATE()
         WHERE id = @inviteId AND status = 'processing'
       `, { inviteId: invite.id });
 
@@ -248,7 +248,7 @@ router.post('/invites/:token/register', async (req, res) => {
         childrenCount: childIds.length,
       });
     } catch (registrationError) {
-      await query(`UPDATE family_invites SET status = 'pending' WHERE id = @id AND status = 'processing'`, { id: invite.id }).catch(() => {});
+      await query(`UPDATE familyInvites SET status = 'pending' WHERE id = @id AND status = 'processing'`, { id: invite.id }).catch(() => {});
       throw registrationError;
     }
   } catch (err) {
@@ -265,7 +265,7 @@ async function listFamilyLinks(status, eventoId, req) {
            c.codigoPulseira, c.scores, c.status as crianca_status,
            e.id as eventoId, e.name as evento_name, e.date as evento_date,
            t.id as timeId, t.name as time_name, t.color as time_color
-    FROM family_child_links l
+    FROM familyChildLinks l
     JOIN logins u ON u.id = l.loginId
     JOIN criancas c ON c.id = l.criancaId
     JOIN eventos e ON e.id = c.eventoId
@@ -307,7 +307,7 @@ router.get('/approved', verifyToken, async (req, res) => {
 async function getLinkForStaff(linkId, req) {
   const link = await queryOne(
     `SELECT l.*, c.name as crianca_name, c.status as crianca_status
-     FROM family_child_links l
+     FROM familyChildLinks l
      JOIN criancas c ON c.id = l.criancaId
      WHERE l.id = @linkId`,
     { linkId }
@@ -329,7 +329,7 @@ router.post('/links/:linkId/approve', verifyToken, async (req, res) => {
     if (link.status !== 'pending') return res.status(409).json({ error: 'Solicitação já foi rejeitada' });
 
     await query(`
-      UPDATE family_child_links
+      UPDATE familyChildLinks
       SET status = 'approved', aprovadoPor = @approvedBy, aprovadoEm = GETDATE()
       WHERE id = @linkId AND status = 'pending'
     `, { linkId: link.id, approvedBy: req.user.id });
@@ -353,19 +353,19 @@ router.post('/links/:linkId/reject', verifyToken, async (req, res) => {
     if (link.status === 'approved') return res.status(409).json({ error: 'Uma solicitação aprovada não pode ser rejeitada' });
 
     await query(`
-      UPDATE family_child_links
+      UPDATE familyChildLinks
       SET status = 'rejected', rejeitadoEm = GETDATE()
       WHERE id = @linkId AND status = 'pending'
     `, { linkId: link.id });
     const approvedLink = await queryOne(`
-      SELECT id FROM family_child_links
+      SELECT id FROM familyChildLinks
       WHERE criancaId = @childId AND status = 'approved'
     `, { childId: link.criancaId });
     if (!approvedLink) {
       await query(`UPDATE criancas SET status = 'inactive' WHERE id = @childId AND status = 'pending'`, { childId: link.criancaId });
     }
     const approvedSibling = await queryOne(`
-      SELECT id FROM family_child_links WHERE loginId = @loginId AND status = 'approved'
+      SELECT id FROM familyChildLinks WHERE loginId = @loginId AND status = 'approved'
     `, { loginId: link.loginId });
     if (!approvedSibling) {
       await query(`UPDATE logins SET status = 'inactive', dataAtualizacao = GETDATE() WHERE id = @loginId AND status = 'pending'`, { loginId: link.loginId });
@@ -404,7 +404,7 @@ router.get('/children', verifyToken, async (req, res) => {
              COALESCE(c.scores, 0) as "totalScore",
              l.relacionamento, l.status as link_status,
              t.id as "teamId", t.name as "teamName", t.color as "teamColor", t.points as team_points
-      FROM family_child_links l
+      FROM familyChildLinks l
       JOIN criancas c ON c.id = l.criancaId
       LEFT JOIN times t ON t.id = c.timeId
       WHERE l.loginId = @loginId AND (l.status = 'approved' OR l.status = 'pending')
@@ -454,7 +454,7 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
     const child = await queryOne(`
       SELECT c.id, c.eventoId, c.name, c.nickname, c.scores, c.status,
              e.name as evento_name
-      FROM family_child_links l
+      FROM familyChildLinks l
       JOIN criancas c ON c.id = l.criancaId
       JOIN eventos e ON e.id = c.eventoId
       WHERE l.loginId = @loginId AND l.criancaId = @childId AND l.status = 'approved'
@@ -491,7 +491,7 @@ router.get('/active-event', verifyToken, async (req, res) => {
     // Buscar primeira criança vinculada (aprovada ou pendente)
     const firstChild = await queryOne(`
       SELECT c.id, c.eventoId, c.name
-      FROM family_child_links l
+      FROM familyChildLinks l
       JOIN criancas c ON c.id = l.criancaId
       WHERE l.loginId = @loginId AND (l.status = 'approved' OR l.status = 'pending')
       ORDER BY c.name ASC
@@ -598,7 +598,7 @@ router.get('/children/:id/achievements', verifyToken, async (req, res) => {
 
     // Verificar se pais tem acesso a essa criança
     const hasAccess = await queryOne(
-      `SELECT 1 FROM family_child_links
+      `SELECT 1 FROM familyChildLinks
        WHERE family_login_id = @family_id AND criancaId = @criancaId AND status = 'active'`,
       { family_id: req.user.id, criancaId: id }
     );
