@@ -13,10 +13,10 @@ const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
 async function legacyClienteIdsFor(empresaId) {
   const empresa = await queryOne('SELECT nome, cidade FROM empresas WHERE id = @id', { id: empresaId });
   if (!empresa) return [];
-  const rows = await allQuery('SELECT id, name, city FROM clientes');
+  const rows = await allQuery('SELECT id, nome, cidade FROM clientes');
   return rows
     .filter((c) => normalizeClientText(c.name) === normalizeClientText(empresa.nome) &&
-      normalizeClientText(c.city) === normalizeClientText(empresa.cidade))
+      normalizeClientText(c.cidade) === normalizeClientText(empresa.cidade))
     .map((c) => c.id);
 }
 
@@ -33,10 +33,10 @@ router.get('/', verifyToken, async (req, res) => {
 
     const formatted = clientes.map((c) => ({
       id: c.id,
-      name: c.name,
-      city: c.city,
-      state: c.state,
-      phone: c.phone,
+      name: c.nome,
+      cidade: c.cidade,
+      estado: c.estado,
+      telefone: c.telefone,
       plan: c.plan,
       status: c.status,
       email: c.email,
@@ -87,12 +87,12 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     const details = {
       id: cliente.id,
       origin: cliente.origin,
-      name: cliente.name,
+      name: cliente.nome,
       cnpj: null,
-      city: cliente.city,
-      state: cliente.state,
+      cidade: cliente.cidade,
+      estado: cliente.estado,
       email: cliente.email,
-      phone: cliente.phone,
+      telefone: cliente.telefone,
       plan: planId,
       status: cliente.status,
       createdAt: toIso(cliente.createdAt),
@@ -113,12 +113,12 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       const [empresa, users, events, tickets] = await Promise.all([
         queryOne('SELECT cnpj, dataAtualizacao FROM empresas WHERE id = @id', { id: empresaId }),
         allQuery(
-          `SELECT id, email, role, status, ultimoAcesso, dataCriacao
-           FROM acessos WHERE empresaId = @id ORDER BY role, email`,
+          `SELECT id, email, perfil, status, ultimoAcesso, dataCriacao
+           FROM acessos WHERE empresaId = @id ORDER BY perfil, email`,
           { id: empresaId }
         ),
         allQuery(
-          `SELECT e.id, e.name, TO_CHAR(e.date, 'YYYY-MM-DD') AS date_str, e.time, e.duration, e.status,
+          `SELECT e.id, e.nome, TO_CHAR(e.data, 'YYYY-MM-DD') AS date_str, e.hora, e.duracao, e.status,
                   e.nomeResponsavel, e.iniciadoEm, e.finalizadoEm,
                   (SELECT COUNT(*) FROM criancas c WHERE c.eventoId = e.id) AS children_count,
                   (SELECT COUNT(*) FROM pontoVerificacao k
@@ -126,7 +126,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
                       AND LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception') AS checkpoints_count
            FROM eventos e
            WHERE e.empresaId = @id
-           ORDER BY e.date DESC, e.time DESC`,
+           ORDER BY e.data DESC, e.hora DESC`,
           { id: empresaId }
         ),
         allQuery(
@@ -141,7 +141,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       details.users = users.map((u) => ({
         id: u.id,
         email: u.email,
-        role: u.role,
+        role: u.perfil,
         status: u.status,
         lastAccess: toIso(u.ultimoAcesso),
         createdAt: toIso(u.dataCriacao),
@@ -149,10 +149,10 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
 
       details.events = events.map((e) => ({
         id: e.id,
-        name: e.name,
-        date: e.date_str,
-        time: e.time ? String(e.time).slice(0, 5) : null,
-        duration: e.duration,
+        name: e.nome,
+        date: e.data_str,
+        time: e.hora ? String(e.hora).slice(0, 5) : null,
+        duration: e.duracao,
         status: String(e.status || '').toLowerCase(),
         responsibleName: e.nomeResponsavel || null,
         startedAt: toIso(e.iniciadoEm),
@@ -169,7 +169,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
         eventsActive: countByGroup('active'),
         eventsScheduled: countByGroup('scheduled'),
         eventsFinished: countByGroup('finished'),
-        eventsThisMonth: details.events.filter((e) => String(e.date || '').startsWith(monthPrefix)).length,
+        eventsThisMonth: details.events.filter((e) => String(e.data || '').startsWith(monthPrefix)).length,
         childrenTotal: details.events.reduce((sum, e) => sum + e.childrenCount, 0),
         maxCheckpointsPerEvent: details.events.reduce((max, e) => Math.max(max, e.checkpointsCount), 0),
         usersTotal: details.users.length,
@@ -200,7 +200,7 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode criar clientes' });
     }
 
-    const { name, city, state, email, senha, phone, plan } = req.body;
+    const { nome, cidade, estado, email, senha, telefone, plan } = req.body;
     
     if (!email || !senha) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
@@ -224,10 +224,10 @@ router.post('/', verifyToken, async (req, res) => {
          VALUES (@id, @nome, @cidade, @estado, @telefone, @plano, @status)`,
         {
           id: empresaId,
-          nome: name,
-          cidade: city,
-          estado: state,
-          telefone: phone,
+          nome: nome,
+          cidade: cidade,
+          estado: estado,
+          telefone: telefone,
           plano: plan || 'starter',
           status: 'active'
         }
@@ -250,16 +250,16 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO clientes (id, name, city, state, email, phone, plano, status, empresaId) 
-         VALUES (@id, @name, @city, @state, @email, @phone, @plano, @status, @empresaId)`,
+        `INSERT INTO clientes (id, nome, cidade, estado, email, telefone, plano, status, empresaId) 
+         VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId)`,
         {
           id: clienteId,
           empresaId: empresaId,
-          name: name,
-          city: city,
-          state: state,
+          name: nome,
+          cidade: cidade,
+          estado: estado,
           email: email,
-          phone: phone,
+          telefone: telefone,
           plano: plan || 'starter',
           status: 'active'
         }
@@ -270,11 +270,11 @@ router.post('/', verifyToken, async (req, res) => {
         id: clienteId,
         empresaId: empresaId,
         loginId: loginId,
-        name,
-        city,
-        state,
+        nome,
+        cidade,
+        estado,
         email,
-        phone,
+        telefone,
         plan: plan || 'starter',
         status: 'active',
         message: `Cliente ${name} criado com sucesso! Email: ${email}`
@@ -299,7 +299,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar clientes' });
     }
 
-    const { name, city, state, email, phone, plan, status } = req.body;
+    const { nome, cidade, estado, email, telefone, plan, status } = req.body;
     
     try {
       // Registro legado em `clientes`: o próprio id (cliente sem empresa) e/ou o
@@ -312,17 +312,17 @@ router.put('/:id', verifyToken, async (req, res) => {
          telefone = @telefone, plano = @plano, status = @status, dataAtualizacao = GETDATE()
          WHERE id = @id`,
         {
-          nome: name,
-          cidade: city,
-          estado: state,
-          telefone: phone,
+          nome: nome,
+          cidade: cidade,
+          estado: estado,
+          telefone: telefone,
           plano: plan,
           status: status,
           id: req.params.id
         }
       );
 
-      // Atualizar EMAIL do LOGIN admin se foi fornecido (sem o filtro de role, o
+      // Atualizar EMAIL do LOGIN admin se foi fornecido (sem o filtro de perfil, o
       // e-mail era gravado em todos os acessos da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
@@ -337,13 +337,13 @@ router.put('/:id', verifyToken, async (req, res) => {
 
       for (const legacyId of legacyIds) {
         await query(
-          `UPDATE clientes SET name = COALESCE(@name, name), city = COALESCE(@city, city),
-           state = COALESCE(@state, state), email = COALESCE(@email, email),
-           phone = COALESCE(@phone, phone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
+          `UPDATE clientes SET nome = COALESCE(@nome, name), cidade = COALESCE(@cidade, cidade),
+           estado = COALESCE(@estado, estado), email = COALESCE(@email, email),
+           telefone = COALESCE(@telefone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
            WHERE id = @id`,
           {
-            name: name ?? null, city: city ?? null, state: state ?? null, email: email || null,
-            phone: phone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
+            name: name ?? null, cidade: cidade ?? null, estado: estado ?? null, email: email || null,
+            telefone: telefone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
           }
         );
       }

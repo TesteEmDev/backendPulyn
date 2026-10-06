@@ -30,7 +30,7 @@ async function loadCompanies() {
   const list = await listPlatformClients({ includeFamily: true });
   return list
     .map((c) => ({
-      id: c.id, nome: c.name, cidade: c.city, estado: c.state,
+      id: c.id, nome: c.nome, cidade: c.cidade, estado: c.estado,
       plano: c.plan, status: c.status, dataCriacao: c.createdAt,
     }))
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
@@ -71,8 +71,8 @@ router.get('/:plano/clients', verifyToken, requireMaster, async (req, res) => {
       .map(company => ({
         id: company.id,
         name: company.nome,
-        city: company.cidade,
-        state: company.estado,
+        cidade: company.cidade,
+        estado: company.estado,
         plan,
         status: company.status,
         since: formatSince(company.dataCriacao),

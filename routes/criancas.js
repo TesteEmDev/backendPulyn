@@ -19,16 +19,16 @@ router.get('/', verifyToken, async (req, res) => {
     const criancas = await allQuery(`
       SELECT TOP 5000
         c.*,
-        t.name AS time_name,
-        t.color AS time_color,
-        e.name AS evento_name,
+        t.nome AS time_nome,
+        t.cor AS time_color,
+        e.nome AS evento_nome,
         e.status AS evento_status,
-        e.date AS evento_date
+        e.data AS evento_date
       FROM criancas c
       LEFT JOIN times t ON c.timeId = t.id
       LEFT JOIN eventos e ON c.eventoId = e.id
       WHERE c.empresaId = @empresaId
-      ORDER BY e.date DESC, c.scores DESC
+      ORDER BY e.data DESC, c.scores DESC
     `, { empresaId: req.user?.empresaId });
     res.json(criancas);
   } catch (err) {
@@ -44,7 +44,7 @@ router.get('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
     const empresaId = req.user?.empresaId;
     
     const criancas = await allQuery(`
-      SELECT c.*, t.name as time_name, t.color as time_color 
+      SELECT c.*, t.nome as time_nome, t.cor as time_color 
       FROM criancas c
       LEFT JOIN times t ON c.timeId = t.id
       WHERE c.eventoId = @eventoId
@@ -60,7 +60,7 @@ router.get('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
 // Criar criança
 router.post('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
   try {
-    const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, nicknome, age, avatar, braceletCode, timeId } = req.body;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     const avatarValue = getAvatarForCreate(avatar);
     const { eventoId } = req.params;
@@ -121,9 +121,9 @@ router.post('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
     
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
     await query(
-      `INSERT INTO criancas (id, eventoId, empresaId, timeId, name, nickname, age, avatar, codigoPulseira) 
-       VALUES (@id, @eventoId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @braceletCode)`,
-      { id, eventoId, empresaId: empresaId, timeId, name, nickname, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode }
+      `INSERT INTO criancas (id, eventoId, empresaId, timeId, nome, nicknome, age, avatar, codigoPulseira) 
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @nicknome, @age, @avatar, @braceletCode)`,
+      { id, eventoId, empresaId: empresaId, timeId, nome, nicknome, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode }
     );
     
     if (normalizedBraceletCode) {
@@ -140,7 +140,7 @@ router.post('/eventos/:eventoId/criancas', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, name, nickname, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, nome, nicknome, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -156,7 +156,7 @@ router.get('/criancas/by-bracelet/:codigo', verifyToken, async (req, res) => {
 
     const empresaId = req.user.empresaId;
     const crianca = await queryOne(`
-      SELECT c.*, t.name as time_name, t.color as time_color 
+      SELECT c.*, t.nome as time_nome, t.cor as time_color 
       FROM criancas c
       LEFT JOIN times t ON c.timeId = t.id
       WHERE ${uidSqlExpression('c.codigoPulseira')} = @codigo
@@ -175,7 +175,7 @@ router.get('/criancas/by-bracelet/:codigo', verifyToken, async (req, res) => {
 // Atualizar criança
 router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, res) => {
   try {
-    const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, nicknome, age, avatar, braceletCode, timeId } = req.body;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     const { eventoId, criancaId } = req.params;
     
@@ -264,8 +264,8 @@ router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, re
     // Atualizar criança
     await query(
       `UPDATE criancas SET 
-        name = @name, 
-        nickname = @nickname, 
+        name = @nome, 
+        nickname = @nicknome, 
         age = @age, 
         avatar = @avatar, 
         codigoPulseira = @braceletCode,
@@ -274,8 +274,8 @@ router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, re
        AND eventoId = @eventoId
        AND empresaId = @empresaId`,
       { 
-        name: name || crianca.name, 
-        nickname: nickname || crianca.nickname, 
+        name: name || crianca.nome, 
+        nickname: nickname || crianca.nicknome, 
         age: age ? parseInt(age) : crianca.age, 
         avatar: nextAvatar,
         braceletCode: normalizedBraceletCode,
@@ -308,7 +308,7 @@ router.put('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, re
 router.delete('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
       return res.status(403).json({ error: 'Acesso negado para excluir participantes' });
     }
 
@@ -378,7 +378,7 @@ router.delete('/eventos/:eventoId/criancas/:criancaId', verifyToken, async (req,
 router.post('/:criancaId/unassign-bracelet', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
       return res.status(403).json({ error: 'Acesso negado para desvincular pulseiras' });
     }
     const { criancaId } = req.params;
@@ -519,7 +519,7 @@ router.get('/:criancaId/qrcode-image', verifyToken, async (req, res) => {
 router.post('/eventos/:eventoId/generate-qrcodes-batch', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
       return res.status(403).json({ error: 'Acesso negado para esta operação em lote' });
     }
 
@@ -565,7 +565,7 @@ router.post('/eventos/:eventoId/generate-qrcodes-batch', verifyToken, async (req
 
         results.push({
           criancaId: crianca.id,
-          crianca_name: crianca.name,
+          crianca_name: crianca.nome,
           qrCode: qrCodeData.qrCode,
           success: true,
         });
@@ -575,7 +575,7 @@ router.post('/eventos/:eventoId/generate-qrcodes-batch', verifyToken, async (req
         console.error(`❌ Erro ao gerar QR Code para ${crianca.name}:`, err.message);
         results.push({
           criancaId: crianca.id,
-          crianca_name: crianca.name,
+          crianca_name: crianca.nome,
           success: false,
           error: err.message,
         });

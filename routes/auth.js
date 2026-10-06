@@ -19,7 +19,7 @@ router.post('/login', async (req, res) => {
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.id, l.email, l.senha, l.status, l.role, l.nomeFamilia,
+      `SELECT l.id, l.email, l.senha, l.status, l.perfil, l.nomeFamilia,
               e.id as empresaId, e.nome as empresa_nome, e.[plano]
        FROM acessos l
        JOIN empresas e ON l.empresaId = e.id
@@ -43,7 +43,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
     }
 
-    if (!VALID_ROLES.has(login.role)) {
+    if (!VALID_ROLES.has(login.perfil)) {
       console.error(`❌ Role inválido configurado para o usuário ${email}: ${login.role}`);
       return res.status(403).json({ error: 'Perfil de usuário inválido. Procure o administrador.' });
     }
@@ -89,7 +89,7 @@ router.post('/login', async (req, res) => {
         id: login.id,
         name: login.nomeFamilia || login.empresa_nome,
         email: login.email,
-        role: login.role,
+        role: login.perfil,
         redirect: roleRedirects[login.role] || '/admin',
         plan: login.plano,
         empresaId: login.empresaId
@@ -167,7 +167,7 @@ router.get('/check-email', async (req, res) => {
 // POST /auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { email, senha, name, nomeFamilia } = req.body;
+    const { email, senha, nome, nomeFamilia } = req.body;
 
     if (!email || !senha || !name) {
       console.log('❌ Email, senha ou nome não fornecidos');
@@ -181,7 +181,7 @@ router.post('/register', async (req, res) => {
     
     // Verificar se email já existe
     const existingLogin = await queryOne(
-      'SELECT id, role, status FROM acessos WHERE LOWER(email) = @email',
+      'SELECT id, perfil, status FROM acessos WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
 
@@ -221,8 +221,8 @@ router.post('/register', async (req, res) => {
     console.log('📝 Criando login para família...');
     
     await query(
-      `INSERT INTO acessos (id, empresaId, email, senha, nomeFamilia, role, status, dataCriacao)
-       VALUES (@id, @empresaId, @email, @senha, @familyName, 'family', 'active', GETDATE())`,
+      `INSERT INTO acessos (id, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
+       VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', 'active', GETDATE())`,
       {
         id: loginId,
         empresaId: empresaId,
@@ -256,8 +256,8 @@ router.post('/register', async (req, res) => {
       user: {
         id: loginId,
         email: normalizedEmail,
-        name: name,
-        nomeFamilia: nomeFamilia || name,
+        name: nome,
+        nomeFamilia: nomeFamilia || nome,
         role: 'family',
         empresaId: empresaId,
         empresa_nome: `${name}'s Family`

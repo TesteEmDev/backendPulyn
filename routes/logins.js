@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
-const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
 const { checkUnitEmail } = require('../utils/unitEmail');
 const { loadUnitProfile } = require('../utils/unitProfileStore');
 const database = require('../database');
@@ -26,7 +26,7 @@ router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, re
     }
 
     const users = await allQuery(`
-      SELECT id, email, role, status, dataCriacao as criadoEm
+      SELECT id, email, perfil, status, dataCriacao as criadoEm
       FROM acessos
       WHERE empresaId = @empresaId
       ORDER BY dataCriacao DESC
@@ -50,7 +50,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     const user_role = req.user.role;
 
     // Validações
-    if (!email || !senha || !role) {
+    if (!email || !senha || !perfil) {
       return res.status(400).json({ error: 'Email, senha e role são obrigatórios' });
     }
 
@@ -84,7 +84,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
     // Validar role
     const validRoles = ['admin', 'reception', 'game_master', 'display', 'family', 'kiosk', 'score_kiosk'];
-    if (!validRoles.includes(role)) {
+    if (!validRoles.includes(perfil)) {
       return res.status(400).json({ error: 'Role inválido' });
     }
 
@@ -94,13 +94,13 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     // Criar usuário com empresaId do token
     const id = require('crypto').randomUUID();
     await query(
-      `INSERT INTO acessos (id, email, senha, role, empresaId, status, dataCriacao)
-       VALUES (@id, @email, @senha, @role, @empresaId, @status, GETDATE())`,
+      `INSERT INTO acessos (id, email, senha, perfil, empresaId, status, dataCriacao)
+       VALUES (@id, @email, @senha, @perfil, @empresaId, @status, GETDATE())`,
       {
         id,
         email,
         senha: hashedPassword,
-        role,
+        perfil,
         empresaId,
         status: 'active'
       }
@@ -111,7 +111,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     res.json({
       id,
       email,
-      role,
+      perfil,
       status: 'active',
       criadoEm: new Date().toISOString()
     });
@@ -132,7 +132,7 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
 
     // Buscar usuário
     const user = await queryOne(
-      'SELECT empresaId, role, status FROM acessos WHERE id = @id',
+      'SELECT empresaId, perfil, status FROM acessos WHERE id = @id',
       { id }
     );
 

@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
-const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
-const { saveGameState, getGameState } = require('../utils/gameState');
+const { saveGameEstado, getGameEstado } = require('../utils/gameEstado');
 const {
   isClosedStatus,
   startEvent,
@@ -16,12 +16,12 @@ const {
   wallClockOf,
 } = require('../utils/eventLifecycle');
 const {
-  MONSTER_GAME_TYPE,
+  MONSTER_GAME_Tipo,
   startMonsterGame,
   stopMonsterGame,
 } = require('../utils/monster');
 const {
-  TREASURE_GAME_TYPE,
+  TREASURE_GAME_Tipo,
   startTreasureGame,
   stopTreasureGame,
 } = require('../utils/treasure');
@@ -40,10 +40,10 @@ function sameId(left, right) {
     && String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
 }
 
-function broadcastGameEvent(eventoId, type, payload = {}) {
+function broadcastGameEvent(eventoId, tipo, payload = {}) {
   if (global.broadcastToEvent) {
     global.broadcastToEvent(eventoId, {
-      type,
+      tipo,
       payload: { ...payload, eventoId },
     });
   }
@@ -150,7 +150,7 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
 // Criar evento
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd, games } = req.body;
+    const { nome, description, date, time, duration, enableDisplay, enableLocation, responsibleNome, autoStart, autoEnd, games } = req.body;
     const empresaId = req.user.empresaId;
     const id = uuidv4();
 
@@ -177,14 +177,14 @@ router.post('/', verifyToken, async (req, res) => {
     // O evento e os jogos dele são gravados juntos: jogo inválido cancela a criação do evento.
     await withTransaction(async () => {
       await query(
-        `INSERT INTO eventos (id, empresaId, name, description, date, time, duration, exibirDisplay, exibirLocalizacao, status,
+        `INSERT INTO eventos (id, empresaId, nome, description, date, time, duration, exibirDisplay, exibirLocalizacao, status,
                               nomeResponsavel, autoInicio, autoFim)
-         VALUES (@id, @empresaId, @name, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
-                 @responsibleName, @autoStart, @autoEnd)`,
+         VALUES (@id, @empresaId, @nome, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
+                 @responsibleNome, @autoStart, @autoEnd)`,
         {
           id,
           empresaId,
-          name,
+          nome,
           description,
           date,
           time: time || null,
@@ -200,7 +200,7 @@ router.post('/', verifyToken, async (req, res) => {
     });
 
     res.json({
-      id, empresaId, name, description, date, time, duration, enableDisplay, enableLocation,
+      id, empresaId, nome, description, date, time, duration, enableDisplay, enableLocation,
       status: 'scheduled',
       nomeResponsavel: responsible,
       autoInicio: wantsAutoStart ? 1 : 0,
@@ -235,7 +235,7 @@ router.get('/:eventoId/criancas', verifyToken, async (req, res) => {
     }
     
     const criancas = await allQuery(`
-      SELECT c.*, t.name as time_name, t.color as time_color 
+      SELECT c.*, t.nome as time_nome, t.cor as time_color 
       FROM criancas c
       LEFT JOIN times t ON c.timeId = t.id
       WHERE c.eventoId = @eventoId
@@ -251,7 +251,7 @@ router.get('/:eventoId/criancas', verifyToken, async (req, res) => {
 // Criar criança em um evento
 router.post('/:eventoId/criancas', verifyToken, async (req, res) => {
   try {
-    const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, nicknome, age, avatar, braceletCode, timeId } = req.body;
     const avatarValue = getAvatarForCreate(avatar);
     const eventoId = req.params.eventoId;
     const empresaId = req.user.empresaId;
@@ -282,15 +282,15 @@ router.post('/:eventoId/criancas', verifyToken, async (req, res) => {
     
     // 3. Inserir criança
     await query(
-      `INSERT INTO criancas (id, eventoId, empresaId, timeId, name, nickname, age, avatar, codigoPulseira, scores) 
-       VALUES (@id, @eventoId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @codigoPulseira, 0)`,
+      `INSERT INTO criancas (id, eventoId, empresaId, timeId, nome, nicknome, age, avatar, codigoPulseira, scores) 
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @nicknome, @age, @avatar, @codigoPulseira, 0)`,
       { 
         id, 
         eventoId,
         empresaId: evento.empresaId,
         timeId: timeId || null, 
-        name, 
-        nickname, 
+        nome, 
+        nicknome, 
         age: parseInt(age) || 0, 
         avatar: avatarValue,
         codigoPulseira: braceletCode || null
@@ -314,7 +314,7 @@ router.post('/:eventoId/criancas', verifyToken, async (req, res) => {
       );
     }
     
-    res.json({ id, name, nickname, age, avatar: avatarValue, braceletCode, timeId, scores: 0, empresaId: evento.empresaId });
+    res.json({ id, nome, nicknome, age, avatar: avatarValue, braceletCode, timeId, scores: 0, empresaId: evento.empresaId });
   } catch (err) {
     console.error('❌ Erro ao criar criança:', err);
     res.status(500).json({ error: err.message });
@@ -376,9 +376,9 @@ router.get('/:eventoId/game-status', verifyToken, async (req, res) => {
     
     // "Jogo em andamento" vem do estado do jogo. eventos.status agora é só o
     // ciclo de vida do evento (agendado/ativo/encerrado).
-    const gameState = await getGameState(evento.id);
+    const gameEstado = await getGameEstado(evento.id);
     res.json({
-      gameRunning: gameState?.mode === 'game' && !isClosedStatus(evento.status),
+      gameRunning: gameEstado?.mode === 'game' && !isClosedStatus(evento.status),
       status: evento.status
     });
   } catch (err) {
@@ -395,7 +395,7 @@ router.get('/:eventoId/active-game', verifyToken, async (req, res) => {
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT e.id, e.empresaId, e.tipoJogoAtivo, b.name as game_name, b.type as tipoJogo FROM eventos e LEFT JOIN brincadeiras b ON e.brincadeiraAtivaId = b.id WHERE e.id = @id',
+      'SELECT e.id, e.empresaId, e.tipoJogoAtivo, b.nome as game_nome, b.tipo as tipoJogo FROM eventos e LEFT JOIN brincadeiras b ON e.brincadeiraAtivaId = b.id WHERE e.id = @id',
       { id: eventoId }
     );
     
@@ -410,8 +410,8 @@ router.get('/:eventoId/active-game', verifyToken, async (req, res) => {
     const gameType = evento.tipoJogoAtivo || evento.tipoJogo || 'none';
     
     res.json({ 
-      gameType,
-      gameName: evento.game_name,
+      gameTipo,
+      gameName: evento.game_nome,
       eventoId: evento.id
     });
   } catch (err) {
@@ -441,7 +441,7 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
 
     // Buscar a brincadeira para pegar o tipo
     const brincadeira = await queryOne(
-      `SELECT id, name, type, tipoJogo, empresaId FROM brincadeiras
+      `SELECT id, nome, tipo, tipoJogo, empresaId FROM brincadeiras
        WHERE id = @id
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
@@ -461,7 +461,7 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
     }
 
     const rawGameType = brincadeira.type || brincadeira.tipoJogo || 'standard';
-    const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE, 'zone_conquest_team', 'zone_conquest_individual'].includes(rawGameType)
+    const gameType = [MONSTER_GAME_Tipo, TREASURE_GAME_Tipo, 'zone_conquest_team', 'zone_conquest_individual'].includes(rawGameType)
       ? rawGameType
       : rawGameType || 'standard';
     
@@ -492,7 +492,7 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
       { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zoneConquestIndividualParticipantStates
+      `DELETE FROM zoneConquestIndividualParticipantEstados
        WHERE eventoId = @eventoId`,
       { eventoId: eventoId }
     );
@@ -572,7 +572,7 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
       await stopTreasureGame(eventoId);
       await stopZoneConquestTeam(eventoId);
     } else {
-      console.log('📍 [routes/events.js] Parando todos os jogos (tipo:', gameType, ')');
+      console.log('📍 [routes/events.js] Parando todos os jogos (tipo:', gameTipo, ')');
       await stopMonsterGame(eventoId);
       await stopTreasureGame(eventoId);
       await stopZoneConquestTeam(eventoId);
@@ -588,18 +588,18 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
        WHERE id = @id`,
       {
         brincadeiraId,
-        gameType,
+        gameTipo,
         id: eventoId
       }
     );
     await ensureEventActive(eventoId);
 
     const startedAt = new Date();
-    await saveGameState({
+    await saveGameEstado({
       eventoId: eventoId,
       empresaId: evento.empresaId,
       mode: 'game',
-      gameType,
+      gameTipo,
       gameId: brincadeira.id,
       gameName: brincadeira.name || null,
       startedAt,
@@ -608,19 +608,19 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
     broadcastGameEvent(eventoId, 'GAME_STARTED', {
       gameId: brincadeira.id,
       gameName: brincadeira.name || null,
-      gameType,
+      gameTipo,
       startedAt: startedAt.toISOString(),
     });
     broadcastGameEvent(eventoId, 'CHECKPOINT_MODE_CHANGED', {
       mode: 'game',
-      gameType,
+      gameTipo,
       timestamp: startedAt.toISOString(),
     });
 
     res.json({ 
       success: true, 
       message: 'Jogo iniciado!',
-      gameType,
+      gameTipo,
       brincadeiraId
     });
   } catch (err) {
@@ -655,7 +655,7 @@ router.post('/:eventoId/stop-game', verifyToken, requireRole('admin', 'game_mast
     );
     
     const stoppedAt = new Date();
-    await saveGameState({
+    await saveGameEstado({
       eventoId: eventoId,
       empresaId: evento.empresaId,
       mode: 'idle',
@@ -744,7 +744,7 @@ router.get('/:id', verifyToken, async (req, res) => {
 // Atualizar evento
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd, games } = req.body;
+    const { nome, description, date, time, duration, enableDisplay, enableLocation, responsibleNome, autoStart, autoEnd, games } = req.body;
     const empresaId = req.user.empresaId;
 
     // Verificar que o evento pertence à empresa (ou user é master)
@@ -779,14 +779,14 @@ router.put('/:id', verifyToken, async (req, res) => {
     await withTransaction(async () => {
       await query(
         `UPDATE eventos SET
-           name = COALESCE(@name, name),
+           name = COALESCE(@nome, name),
            description = COALESCE(@description, description),
            date = COALESCE(@date, date),
            time = COALESCE(@time, time),
            duration = COALESCE(@duration, duration),
            exibirDisplay = COALESCE(@enableDisplay, exibirDisplay),
            exibirLocalizacao = COALESCE(@enableLocation, exibirLocalizacao),
-           nomeResponsavel = COALESCE(@responsibleName, nomeResponsavel),
+           nomeResponsavel = COALESCE(@responsibleNome, nomeResponsavel),
            autoInicio = COALESCE(@autoStart, autoInicio),
            autoFim = COALESCE(@autoEnd, autoFim)
          WHERE id = @id`,
@@ -913,7 +913,7 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
 
     // A nova data/hora é lida no relógio do buffet (mesmo fuso do início automático).
     const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
-    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
+    if (wallClockOf(schedule.data, schedule.hora) < nowMinute) {
       return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
     }
 
@@ -921,13 +921,13 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
       `UPDATE eventos
        SET date = @date, time = @time, duration = COALESCE(@duration, duration)
        WHERE id = @id AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
-      { date: schedule.date, time: schedule.time, duration: schedule.duration, id: evento.id }
+      { date: schedule.data, time: schedule.hora, duration: schedule.duracao, id: evento.id }
     );
     if (!Number(result?.rowsAffected?.[0] || 0)) {
       return res.status(409).json({ error: 'O evento mudou de situação e não pode mais ser reagendado.' });
     }
 
-    console.log(`📅 [EVENTO] ${evento.id} reagendado para ${schedule.date} ${schedule.time}`);
+    console.log(`📅 [EVENTO] ${evento.id} reagendado para ${schedule.data} ${schedule.hora}`);
     const updated = await queryOne('SELECT * FROM eventos WHERE id = @id', { id: evento.id });
     res.json({ rescheduled: true, evento: updated });
   } catch (err) {
@@ -955,7 +955,7 @@ router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (r
     if (schedule.error) return res.status(400).json({ error: schedule.error });
 
     const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
-    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
+    if (wallClockOf(schedule.data, schedule.hora) < nowMinute) {
       return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
     }
 
@@ -1016,8 +1016,8 @@ router.post('/:eventoId/setup-active-game', verifyToken, requireRole('admin', 'g
     // 1️⃣ Validar evento existe e pertence à empresa
     const evento = await queryOne(
       isMaster(req)
-        ? 'SELECT id, empresaId, name, status FROM eventos WHERE id = @id'
-        : 'SELECT id, empresaId, name, status FROM eventos WHERE id = @id AND empresaId = @empresaId',
+        ? 'SELECT id, empresaId, nome, status FROM eventos WHERE id = @id'
+        : 'SELECT id, empresaId, nome, status FROM eventos WHERE id = @id AND empresaId = @empresaId',
       isMaster(req)
         ? { id: eventoId }
         : { id: eventoId, empresaId: req.user.empresaId }
@@ -1039,8 +1039,8 @@ router.post('/:eventoId/setup-active-game', verifyToken, requireRole('admin', 'g
       const newBrincadeiraId = require('uuid').v4().toString();
       
       await query(`
-        INSERT INTO brincadeiras (id, name, description, type, tipoJogo, status, pontosPadrao, empresaId, duration)
-        VALUES (@id, @name, @description, @type, @gameType, @status, @points, @empresaId, @duration)
+        INSERT INTO brincadeiras (id, nome, description, tipo, tipoJogo, status, pontosPadrao, empresaId, duration)
+        VALUES (@id, @nome, @description, @tipo, @gameTipo, @status, @points, @empresaId, @duration)
       `, {
         id: newBrincadeiraId,
         name: 'Captura de Territórios',
@@ -1059,7 +1059,7 @@ router.post('/:eventoId/setup-active-game', verifyToken, requireRole('admin', 'g
 
     // 3️⃣ Validar que a brincadeira existe e pertence à empresa
     const brincadeira = await queryOne(
-      'SELECT id, name, tipoJogo FROM brincadeiras WHERE id = @id AND empresaId = @empresaId',
+      'SELECT id, nome, tipoJogo FROM brincadeiras WHERE id = @id AND empresaId = @empresaId',
       { id: finalBrincadeiraId, empresaId: evento.empresaId }
     );
 
@@ -1089,11 +1089,11 @@ router.post('/:eventoId/setup-active-game', verifyToken, requireRole('admin', 'g
       message: 'Jogo ativo configurado com sucesso',
       evento: {
         id: evento.id,
-        name: evento.name,
+        name: evento.nome,
       },
       brincadeira: {
         id: brincadeira.id,
-        name: brincadeira.name,
+        name: brincadeira.nome,
         tipoJogo: brincadeira.tipoJogo,
       }
     });

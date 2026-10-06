@@ -21,18 +21,18 @@ router.get('/overview', async (req, res) => {
 
     const [eventRows, topParticipants, topTeams, topCheckpoints, topGames] = await Promise.all([
       allQuery(`
-        SELECT e.id, e.name, CAST(e.date AS VARCHAR(10)) AS date, e.status,
+        SELECT e.id, e.nome, CAST(e.data AS VARCHAR(10)) AS date, e.status,
           (SELECT COUNT(*) FROM criancas c WHERE c.eventoId = e.id) AS participants,
           (SELECT COALESCE(SUM(c.scores), 0) FROM criancas c WHERE c.eventoId = e.id) AS total_points,
           (SELECT COUNT(*) FROM times t WHERE t.eventoId = e.id) AS teams,
           (SELECT COUNT(*) FROM pontuacoes p WHERE p.eventoId = e.id) AS scorings
         FROM eventos e
         WHERE e.empresaId = @empresaId
-        ORDER BY e.date DESC, e.criadoEm DESC
+        ORDER BY e.data DESC, e.criadoEm DESC
       `, params),
       allQuery(`
-        SELECT TOP 10 c.id, c.name, c.nickname, c.age, c.scores,
-          e.name AS event_name, t.name AS team_name, t.color AS team_color
+        SELECT TOP 10 c.id, c.nome, c.nicknome, c.age, c.scores,
+          e.nome AS event_nome, t.nome AS team_nome, t.cor AS team_color
         FROM criancas c
         JOIN eventos e ON e.id = c.eventoId
         LEFT JOIN times t ON t.id = c.timeId
@@ -40,28 +40,28 @@ router.get('/overview', async (req, res) => {
         ORDER BY c.scores DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 t.id, t.name, t.color, t.points, e.name AS event_name
+        SELECT TOP 5 t.id, t.nome, t.cor, t.points, e.nome AS event_name
         FROM times t
         JOIN eventos e ON e.id = t.eventoId
         WHERE e.empresaId = @empresaId
         ORDER BY t.points DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 cp.id, cp.name, cp.zone, e.name AS event_name, COUNT(p.id) AS readings
+        SELECT TOP 5 cp.id, cp.nome, cp.zone, e.nome AS event_nome, COUNT(p.id) AS readings
         FROM pontuacoes p
         JOIN pontoVerificacao cp ON cp.id = p.checkpointId
         JOIN eventos e ON e.id = p.eventoId
         WHERE e.empresaId = @empresaId
-        GROUP BY cp.id, cp.name, cp.zone, e.name
+        GROUP BY cp.id, cp.nome, cp.zone, e.nome
         ORDER BY readings DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 b.id, b.name, COUNT(p.id) AS plays
+        SELECT TOP 5 b.id, b.nome, COUNT(p.id) AS plays
         FROM pontuacoes p
         JOIN brincadeiras b ON b.id = CAST(p.brincadeiraId AS VARCHAR(36))
         JOIN eventos e ON e.id = p.eventoId
         WHERE e.empresaId = @empresaId
-        GROUP BY b.id, b.name
+        GROUP BY b.id, b.nome
         ORDER BY plays DESC
       `, params),
     ]);
@@ -70,16 +70,16 @@ router.get('/overview', async (req, res) => {
     res.json({
       ...summary,
       topParticipants: topParticipants.map((c) => ({
-        id: c.id, name: c.name, nickname: c.nickname || '', age: c.age,
-        scores: Number(c.scores) || 0, eventName: c.event_name, teamName: c.team_name || '', teamColor: c.team_color || '',
+        id: c.id, name: c.nome, nickname: c.nickname || '', age: c.age,
+        scores: Number(c.scores) || 0, eventName: c.event_nome, teamName: c.team_name || '', teamColor: c.team_color || '',
       })),
       topTeams: topTeams.map((t) => ({
-        id: t.id, name: t.name, color: t.color, points: Number(t.points) || 0, eventName: t.event_name,
+        id: t.id, name: t.nome, color: t.cor, points: Number(t.points) || 0, eventName: t.event_nome,
       })),
       topCheckpoints: topCheckpoints.map((c) => ({
-        id: c.id, name: c.name, zone: c.zone || '', eventName: c.event_name, readings: Number(c.readings) || 0,
+        id: c.id, name: c.nome, zone: c.zone || '', eventName: c.event_nome, readings: Number(c.readings) || 0,
       })),
-      topGames: topGames.map((g) => ({ id: g.id, name: g.name, plays: Number(g.plays) || 0 })),
+      topGames: topGames.map((g) => ({ id: g.id, name: g.nome, plays: Number(g.plays) || 0 })),
     });
   } catch (err) {
     console.error('❌ Erro ao gerar relatório geral:', err);

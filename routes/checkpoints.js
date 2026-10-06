@@ -82,17 +82,17 @@ router.get('/resumo', verifyToken, async (req, res) => {
     const rows = await allQuery(`
       SELECT
         c.eventoId,
-        e.name AS evento_name,
+        e.nome AS evento_nome,
         e.status AS evento_status,
-        e.date AS evento_date,
+        e.data AS evento_date,
         COUNT(*) AS total,
         SUM(CASE WHEN c.status = 'online' THEN 1 ELSE 0 END) AS online
       FROM pontoVerificacao c
       INNER JOIN eventos e ON e.id = c.eventoId
       WHERE e.empresaId = @empresaId
         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
-      GROUP BY c.eventoId, e.name, e.status, e.date
-      ORDER BY e.date DESC
+      GROUP BY c.eventoId, e.nome, e.status, e.data
+      ORDER BY e.data DESC
     `, { empresaId: req.user.empresaId });
 
     res.json(rows.map((row) => {
@@ -100,7 +100,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       const online = Number(row.online) || 0;
       return {
         eventoId: row.eventoId,
-        eventoName: row.evento_name,
+        eventoName: row.evento_nome,
         eventoStatus: row.evento_status,
         eventoDate: row.evento_date,
         total,
@@ -213,7 +213,7 @@ router.get('/:id/territory', async (req, res) => {
     let ownerTeam = null;
     if (checkpoint.territorioDonoTimeId) {
       ownerTeam = await queryOne(
-        `SELECT id, name, color FROM times WHERE id = @id`,
+        `SELECT id, nome, color FROM times WHERE id = @id`,
         { id: checkpoint.territorioDonoTimeId }
       );
     }
@@ -223,7 +223,7 @@ router.get('/:id/territory', async (req, res) => {
 
     // O ESP32 decide a cor do LED pelo campo `gameType`. Resolvemos ele de forma
     // explícita para que o espalhamento de um status não sobrescreva o do outro.
-    const activeGameType = [treasureStatus.gameType, monsterStatus.gameType]
+    const activeGameType = [treasureStatus.gameTipo, monsterStatus.gameType]
       .find(type => type && type !== 'none') || 'none';
 
     // `monsters` traz o progresso de todas as equipes e é grande demais para o
@@ -254,7 +254,7 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
   try {
     const { eventoId } = req.params;
     const empresaId = req.user.empresaId; // ✅ Pegar empresaId do token
-    const { id, name, type, zone, ip, points, status, authorizedTags, mapX, mapY } = req.body;
+    const { id, nome, tipo, zone, ip, points, status, authorizedTags, mapX, mapY } = req.body;
 
     // Validar campos obrigatórios
     if (!id || !name) {
@@ -287,13 +287,13 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
 
     // ✅ Inserir novo checkpoint COM empresaId
     await query(`
-      INSERT INTO pontoVerificacao (id, eventoId, empresaId, name, type, propositoCheckpoint, zone, ip, points, status, tagsAutorizadas, mapaX, mapaY)
-      VALUES (@id, @eventoId, @empresaId, @name, @type, @propositoCheckpoint, @zone, @ip, @points, @status, @tagsAutorizadas, @mapaX, @mapaY)
+      INSERT INTO pontoVerificacao (id, eventoId, empresaId, nome, tipo, propositoCheckpoint, zone, ip, points, status, tagsAutorizadas, mapaX, mapaY)
+      VALUES (@id, @eventoId, @empresaId, @nome, @tipo, @propositoCheckpoint, @zone, @ip, @points, @status, @tagsAutorizadas, @mapaX, @mapaY)
     `, {
       id,
       eventoId,
       empresaId, // ✅ NOVO: Incluir empresaId
-      name,
+      nome,
       type: type || 'NFC',
       propositoCheckpoint: 'game',
       zone: zone || null,
@@ -517,7 +517,7 @@ router.post('/evento/:eventoId/config/:id', verifyToken, async (req, res) => {
   try {
     const { eventoId, id } = req.params;
     const empresaId = req.user.empresaId; // ✅ Pegar empresaId do token
-    const { name, status, location, type, zone, ip, points, authorizedTags, mapX, mapY } = req.body;
+    const { nome, status, location, tipo, zone, ip, points, authorizedTags, mapX, mapY } = req.body;
 
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(

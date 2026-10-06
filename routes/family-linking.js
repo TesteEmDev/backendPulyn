@@ -78,7 +78,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     console.log(`   🔍 Buscando código QR no banco: "${codigoQR}"`);
     // Buscar código QR ativo
     const codigoVinculacao = await queryOne(
-      `SELECT flc.*, c.name, c.nickname, c.age, e.name as evento_nome, e.id as eventoId, c.empresaId
+      `SELECT flc.*, c.nome, c.nicknome, c.age, e.nome as evento_nome, e.id as eventoId, c.empresaId
        FROM familyLinkingCodes flc
        JOIN criancas c ON flc.criancaId = c.id
        JOIN eventos e ON flc.eventoId = e.id
@@ -164,8 +164,8 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       message: 'Criança vinculada com sucesso!',
       linkedChild: {
         id: codigoVinculacao.criancaId,
-        name: codigoVinculacao.name,
-        nickname: codigoVinculacao.nickname,
+        name: codigoVinculacao.nome,
+        nickname: codigoVinculacao.nicknome,
         age: codigoVinculacao.age,
         evento: codigoVinculacao.evento_nome
       }
@@ -221,8 +221,8 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
     // indistinguível de pulseira que não existe.
     const row = await queryOne(
       `SELECT p.codigo, p.status, p.criancaId, p.empresaId,
-              c.name, c.nickname, c.age, c.eventoId,
-              e.name AS evento_nome, e.status AS evento_status
+              c.nome, c.nicknome, c.age, c.eventoId,
+              e.nome AS evento_nome, e.status AS evento_status
        FROM pulseiras p
        JOIN criancas c ON c.id = p.criancaId
        LEFT JOIN eventos e ON e.id = c.eventoId
@@ -277,8 +277,8 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       message: 'Criança vinculada com sucesso!',
       linkedChild: {
         id: row.criancaId,
-        name: row.name,
-        nickname: row.nickname,
+        name: row.nome,
+        nickname: row.nicknome,
         age: row.age,
         evento: row.evento_nome,
       },

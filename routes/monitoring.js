@@ -22,7 +22,7 @@ function formatEvent(event) {
   const date = asDate(event.event_date || event.criadoEm);
   const dateLabel = date ? date.toLocaleDateString('pt-BR') : '';
   const timeLabel = event.event_time ? String(event.event_time).slice(0, 5) : '';
-  return [event.name, dateLabel, timeLabel].filter(Boolean).join(' - ');
+  return [event.nome, dateLabel, timeLabel].filter(Boolean).join(' - ');
 }
 
 async function loadMonitoringData() {
@@ -34,12 +34,12 @@ async function loadMonitoringData() {
       ORDER BY nome
     `, { masterName: 'Master Admin' }),
     allQuery(`
-      SELECT id, eventoId, empresaId, name, status, ultimoVisto, ip, zone, points
+      SELECT id, eventoId, empresaId, nome, status, ultimoVisto, ip, zone, points
       FROM pontoVerificacao
       WHERE LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'
     `),
     allQuery(`
-      SELECT id, empresaId, name, [date] AS event_date, [time] AS event_time, criadoEm
+      SELECT id, empresaId, nome, [date] AS event_date, [time] AS event_time, criadoEm
       FROM eventos
       WHERE empresaId IS NOT NULL
     `),
@@ -76,7 +76,7 @@ async function loadMonitoringData() {
       const online = statusValue === 'online' && (!lastSeen || lastSeen.getTime() >= staleLimit);
       return {
         id: checkpoint.id,
-        name: checkpoint.name,
+        name: checkpoint.nome,
         status: online ? 'online' : 'offline',
         lastSeen: checkpoint.ultimoVisto || null,
         ip: checkpoint.ip || null,
@@ -87,15 +87,15 @@ async function loadMonitoringData() {
     const onlineCount = checkpointItems.filter(checkpoint => checkpoint.status === 'online').length;
     const alerts = checkpointItems
       .filter(checkpoint => checkpoint.status !== 'online')
-      .map(checkpoint => `${checkpoint.name || checkpoint.id} offline`);
+      .map(checkpoint => `${checkpoint.nome || checkpoint.id} offline`);
     if (checkpointItems.length === 0) alerts.push('Nenhum checkpoint cadastrado');
     if (String(company.status || '').toLowerCase() !== 'active') alerts.push(`Empresa ${company.status || 'inativa'}`);
 
     return {
       id: company.id,
       name: company.nome,
-      city: company.cidade,
-      state: company.estado,
+      cidade: company.cidade,
+      estado: company.estado,
       status: onlineCount > 0 ? 'online' : 'offline',
       checkpointsActive: onlineCount,
       checkpointsTotal: checkpointItems.length,

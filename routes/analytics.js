@@ -27,7 +27,7 @@ function monthKeyOf(value) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  const parts = Object.fromEntries(monthFormatter.formatToParts(date).map((p) => [p.type, p.value]));
+  const parts = Object.fromEntries(monthFormatter.formatToParts(date).map((p) => [p.tipo, p.value]));
   return `${parts.year}-${parts.month}`;
 }
 
@@ -157,9 +157,9 @@ router.get('/cliente-growth', verifyToken, requireMaster('Acesso negado: apenas 
 router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apenas master pode ver eventos globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
-      SELECT TO_CHAR(e.date, 'YYYY-MM') AS month, LOWER(COALESCE(e.status, '')) AS status
+      SELECT TO_CHAR(e.data, 'YYYY-MM') AS month, LOWER(COALESCE(e.status, '')) AS status
       FROM eventos e
-      WHERE e.date IS NOT NULL AND ${CUSTOMER_EVENTS}
+      WHERE e.data IS NOT NULL AND ${CUSTOMER_EVENTS}
     `);
     if (!rows.length) return res.json([]);
 
@@ -238,7 +238,7 @@ router.get('/revenue-by-plan', verifyToken, requireMaster('Acesso negado: apenas
       Array.from(byPlan.entries())
         .map(([plan, clientCount]) => ({
           plan,
-          name: PLAN_DEFINITIONS[plan].name,
+          name: PLAN_DEFINITIONS[plan].nome,
           clientCount,
           price: PLAN_DEFINITIONS[plan].price,
           revenue: clientCount * PLAN_DEFINITIONS[plan].price,

@@ -21,7 +21,7 @@ router.get('/', verifyToken, async (req, res) => {
     const [clientRows, ticketRows, checkpointRows] = await Promise.all([
       master
         ? listPlatformClients().then((list) =>
-            list.map((c) => ({ id: c.id, empresa_nome: c.name, dataCriacao: c.createdAt })))
+            list.map((c) => ({ id: c.id, empresa_nome: c.nome, dataCriacao: c.createdAt })))
         : allQuery(`
             SELECT id, nome as empresa_nome, dataCriacao
             FROM empresas
@@ -33,7 +33,7 @@ router.get('/', verifyToken, async (req, res) => {
         WHERE 1=1 ${master ? '' : 'AND empresaId = @empresaId'}
       `, { empresaId }),
       allQuery(`
-        SELECT c.id, c.name, c.zone, c.ultimoVisto, emp.nome as empresa_nome
+        SELECT c.id, c.nome, c.zone, c.ultimoVisto, emp.nome as empresa_nome
         FROM pontoVerificacao c
         LEFT JOIN empresas emp ON c.empresaId = emp.id
         WHERE c.status = 'offline'

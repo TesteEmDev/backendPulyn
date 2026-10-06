@@ -7,7 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne } = require('../database');
-const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
 
 function resolveEmpresaId(req) {
   if (isMaster(req) && req.query.empresaId) return String(req.query.empresaId);
@@ -44,7 +44,7 @@ router.get('/floor-plan', verifyToken, async (req, res) => {
 
 router.post('/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
-    const { dataUrl, name, type } = req.body || {};
+    const { dataUrl, nome, type } = req.body || {};
     if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
       return res.status(400).json({ error: 'A planta deve ser enviada como uma imagem válida' });
     }
@@ -56,7 +56,7 @@ router.post('/floor-plan', verifyToken, requireRole('admin', 'master'), async (r
     await query(
       `UPDATE empresas
        SET dadosPlanoPiso = @dataUrl,
-           nomePlanoPiso = @name,
+           nomePlanoPiso = @nome,
            tipoPlanoPiso = @type
        WHERE id = @id`,
       {

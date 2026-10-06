@@ -22,13 +22,13 @@ router.get('/', verifyToken, async (req, res) => {
         FROM times t
         LEFT JOIN empresas e ON t.empresaId = e.id
         WHERE e.nome != 'Master Admin'
-        ORDER BY t.name
+        ORDER BY t.nome
       `);
       console.log(`✅ ${times.length} times (master - TODAS as empresas, exceto Master Admin)`);
     } else {
       times = await allQuery(
         `SELECT t.*, (SELECT COUNT(*) FROM criancas c WHERE c.timeId = t.id) AS members_count
-         FROM times t WHERE t.empresaId = @empresaId ORDER BY t.name`,
+         FROM times t WHERE t.empresaId = @empresaId ORDER BY t.nome`,
         { empresaId }
       );
       console.log(`✅ ${times.length} times da empresa ${empresaId}`);
@@ -45,7 +45,7 @@ router.get('/', verifyToken, async (req, res) => {
 router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const templates = await allQuery(
-      'SELECT id, name, color, criadoEm FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
+      'SELECT id, nome, color, criadoEm FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
       { empresaId: req.user.empresaId }
     );
     res.json(templates);
@@ -69,7 +69,7 @@ router.post('/eventos/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_M
 
     const result = await withTransaction(async (tx) => {
       const templates = await tx.allQuery(
-        'SELECT name, color FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
+        'SELECT nome, color FROM times WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, name',
         { empresaId: evento.empresaId }
       );
       if (templates.length === 0) return { error: 'Cadastre os times padrão antes de aplicá-los a um evento.' };
@@ -82,9 +82,9 @@ router.post('/eventos/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_M
       for (const team of toCreate) {
         await tx.query(
           // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
-          `INSERT INTO times (id, eventoId, empresaId, name, color, points)
-           VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
-          { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresaId, name: team.name, color: team.color }
+          `INSERT INTO times (id, eventoId, empresaId, nome, color, points)
+           VALUES (@id, @eventoId, @empresaId, @nome, @color, 0)`,
+          { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresaId, name: team.nome, color: team.color }
         );
       }
       return { created: toCreate.length, skipped: templates.length - toCreate.length };
@@ -125,7 +125,7 @@ router.get('/eventos/:eventoId/times', verifyToken, async (req, res) => {
 // Criar time/equipe
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, color, eventoId } = req.body;
+    const { nome, color, eventoId } = req.body;
     const empresaId = req.user.empresaId;
 
     if (!name || !color) {
@@ -148,13 +148,13 @@ router.post('/', verifyToken, async (req, res) => {
 
     await query(
       // A pontuação nunca vem do cliente: todo time novo começa com 0 ponto.
-      `INSERT INTO times (id, eventoId, empresaId, name, color, points) 
-       VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
-      { id, eventoId: eventoId || null, empresaId: targetEmpresaId, name, color }
+      `INSERT INTO times (id, eventoId, empresaId, nome, color, points) 
+       VALUES (@id, @eventoId, @empresaId, @nome, @color, 0)`,
+      { id, eventoId: eventoId || null, empresaId: targetEmpresaId, nome, color }
     );
 
     console.log(`✅ Time criado: ${name} (empresa: ${empresaId}${eventoId ? `, evento: ${eventoId}` : ', sem evento'})`);
-    res.json({ id, eventoId: eventoId || null, empresaId: targetEmpresaId, name, color, points: 0 });
+    res.json({ id, eventoId: eventoId || null, empresaId: targetEmpresaId, nome, color, points: 0 });
   } catch (err) {
     console.error('❌ Erro ao criar time:', err);
     res.status(500).json({ error: err.message });
@@ -164,7 +164,7 @@ router.post('/', verifyToken, async (req, res) => {
 // Atualizar time
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, color } = req.body;
+    const { nome, color } = req.body;
     const empresaId = req.user.empresaId;
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
@@ -183,8 +183,8 @@ router.put('/:id', verifyToken, async (req, res) => {
 
     // ✅ ATUALIZAR
     await query(
-      'UPDATE times SET name = @name, color = @color WHERE id = @id',
-      { name, color, id: req.params.id }
+      'UPDATE times SET name = @nome, color = @color WHERE id = @id',
+      { nome, color, id: req.params.id }
     );
 
     console.log(`✅ Time atualizado: ${req.params.id}`);
@@ -284,7 +284,7 @@ router.post(
           mode,
           distributed: assignments.length,
           totalChildren: children.length,
-          teams: teams.map(team => ({ id: team.id, name: team.name, members: totalByTeam.get(team.id) || 0 })),
+          teams: teams.map(team => ({ id: team.id, name: team.nome, members: totalByTeam.get(team.id) || 0 })),
         };
       });
 

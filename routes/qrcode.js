@@ -48,7 +48,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, name, eventoId, empresaId FROM criancas WHERE id = @criancaId',
+      'SELECT id, nome, eventoId, empresaId FROM criancas WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -89,7 +89,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
       qrCode,
       trackingUrl,
       criancaId: crianca.id,
-      criancaNome: crianca.name,
+      criancaNome: crianca.nome,
       eventoId: crianca.eventoId,
     });
   } catch (error) {
@@ -114,7 +114,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Buscar informações da criança
     const crianca = await queryOne(
-      'SELECT id, name, eventoId, empresaId FROM criancas WHERE id = @criancaId',
+      'SELECT id, nome, eventoId, empresaId FROM criancas WHERE id = @criancaId',
       { criancaId }
     );
 
@@ -155,7 +155,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
       qrCode,
       trackingUrl,
       criancaId: crianca.id,
-      criancaNome: crianca.name,
+      criancaNome: crianca.nome,
       eventoId: crianca.eventoId,
     });
   } catch (error) {

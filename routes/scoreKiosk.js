@@ -90,7 +90,7 @@ router.get('/events/:eventId/score-readings', async (req, res) => {
 router.get('/events', async (req, res) => {
   try {
     const events = await allQuery(
-      `SELECT id, name, date, time, duration, status
+      `SELECT id, nome, date, time, duration, status
        FROM eventos
        WHERE empresaId = @empresaId
          AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
@@ -130,7 +130,7 @@ router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
     if (!codigo) return res.status(400).json({ error: 'Código da pulseira inválido' });
 
     const event = await queryOne(
-      `SELECT id, empresaId, name, status
+      `SELECT id, empresaId, nome, status
        FROM eventos
        WHERE id = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
@@ -139,8 +139,8 @@ router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const child = await queryOne(
-      `SELECT c.id, c.name, c.nickname, c.avatar, c.scores, c.eventoId,
-              t.name AS team_name, t.color AS team_color
+      `SELECT c.id, c.nome, c.nicknome, c.avatar, c.scores, c.eventoId,
+              t.nome AS team_nome, t.cor AS team_color
        FROM pulseiras p
        JOIN criancas c ON c.id = p.criancaId
          AND c.empresaId = p.empresaId
@@ -171,8 +171,8 @@ router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
 
     res.json({
       child: {
-        name: child.nickname || child.name,
-        fullName: child.name,
+        name: child.nickname || child.nome,
+        fullName: child.nome,
         avatar: child.avatar || '👤',
         scores: Number(child.scores || 0),
         teamName: child.team_name || null,

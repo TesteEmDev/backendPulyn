@@ -13,7 +13,7 @@ router.get('/', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master vê todas as pulseiras (exceto as da Master Admin)
       pulseiras = await allQuery(`
-        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_name, p.empresaId
+        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_nome, p.empresaId
         FROM pulseiras p
         LEFT JOIN criancas c ON p.criancaId = c.id
         LEFT JOIN empresas e ON p.empresaId = e.id
@@ -22,7 +22,7 @@ router.get('/', verifyToken, async (req, res) => {
       `);
     } else {
       pulseiras = await allQuery(`
-        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_name, p.empresaId
+        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_nome, p.empresaId
         FROM pulseiras p
         LEFT JOIN criancas c ON p.criancaId = c.id
         WHERE p.empresaId = @empresaId
@@ -78,7 +78,7 @@ router.put('/:codigo/status', verifyToken, async (req, res) => {
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({ error: 'Status de pulseira inválido' });
     }
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
       return res.status(403).json({ error: 'Acesso negado para alterar pulseiras' });
     }
     

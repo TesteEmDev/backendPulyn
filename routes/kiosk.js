@@ -29,7 +29,7 @@ router.use(verifyToken, requireRole('kiosk'));
 router.get('/events', async (req, res) => {
   try {
     const events = await require('../database').allQuery(
-      `SELECT e.id, e.name, e.date, e.time, e.duration, e.status,
+      `SELECT e.id, e.nome, e.data, e.hora, e.duracao, e.status,
               CASE WHEN EXISTS (
                 SELECT 1
                 FROM pontoVerificacao c
@@ -39,7 +39,7 @@ router.get('/events', async (req, res) => {
        FROM eventos e
        WHERE e.empresaId = @empresaId
          AND LOWER(COALESCE(e.status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
-       ORDER BY e.date DESC`,
+       ORDER BY e.data DESC`,
       { empresaId: req.user.empresaId }
     );
     res.json(events || []);
@@ -86,7 +86,7 @@ router.get('/events/:eventId/teams', async (req, res) => {
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
 
     const teams = await allQuery(
-      `SELECT id, name, color, points
+      `SELECT id, nome, color, points
        FROM times
        WHERE eventoId = @eventId AND empresaId = @empresaId
        ORDER BY name`,
@@ -131,7 +131,7 @@ router.get('/bracelets/:codigo', async (req, res) => {
 // Cadastro atômico: cria (se necessário) e vincula a pulseira junto com a criança.
 router.post('/participants', async (req, res) => {
   try {
-    const { eventId, name, nickname, age, avatar, braceletCode, timeId } = req.body || {};
+    const { eventId, nome, nicknome, age, avatar, braceletCode, timeId } = req.body || {};
     const codigo = normalizeUid(braceletCode);
     const cleanName = String(name || '').trim();
     const avatarValue = getAvatarForCreate(avatar);
@@ -193,14 +193,14 @@ router.post('/participants', async (req, res) => {
       const childId = uuidv4();
       await tx.query(
         `INSERT INTO criancas
-          (id, eventoId, empresaId, timeId, name, nickname, age, avatar, codigoPulseira, scores)
-         VALUES (@id, @eventId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @codigo, 0)`,
+          (id, eventoId, empresaId, timeId, nome, nicknome, age, avatar, codigoPulseira, scores)
+         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @nicknome, @age, @avatar, @codigo, 0)`,
         {
           id: childId,
           eventId: event.id,
           empresaId: event.empresaId,
           timeId: team ? team.id : null,
-          name: cleanName,
+          name: cleanNome,
           nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
           age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
           avatar: avatarValue,
@@ -223,7 +223,7 @@ router.post('/participants', async (req, res) => {
 
       return {
         id: childId,
-        name: cleanName,
+        name: cleanNome,
         nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
         age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
         avatar: avatarValue,

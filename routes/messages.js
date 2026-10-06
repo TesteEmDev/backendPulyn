@@ -11,7 +11,7 @@ const MESSAGE_TYPES = new Set(['preset', 'custom']);
 
 function requireRole(roles) {
   return (req, res, next) => {
-    if (!roles.has(req.user?.role)) {
+    if (!roles.has(req.user?.perfil)) {
       return res.status(403).json({ error: 'Acesso negado para este perfil' });
     }
     return next();
@@ -35,7 +35,7 @@ function serializeMessage(message) {
     id: message.id,
     eventoId: message.eventoId,
     texto: message.texto,
-    type: message.type,
+    type: message.tipo,
     remetente: message.remetente || null,
     timestamp: message.enviadoEm,
     enviadoEm: message.enviadoEm,
@@ -51,7 +51,7 @@ router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (re
     const rawLimit = Number.parseInt(req.query.limit, 10);
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
     const messages = await allQuery(`
-      SELECT TOP (@limit) id, eventoId, texto, type, remetente, enviadoEm
+      SELECT TOP (@limit) id, eventoId, texto, tipo, remetente, enviadoEm
       FROM mensagensDisplay
       WHERE eventoId = @eventoId
       ORDER BY enviadoEm DESC
@@ -77,18 +77,18 @@ router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (
 
     const messageId = uuidv4();
     await query(`
-      INSERT INTO mensagensDisplay (id, eventoId, texto, type, remetente, enviadoEm)
-      VALUES (@id, @eventoId, @texto, @type, @remetente, CURRENT_TIMESTAMP)
+      INSERT INTO mensagensDisplay (id, eventoId, texto, tipo, remetente, enviadoEm)
+      VALUES (@id, @eventoId, @texto, @tipo, @remetente, CURRENT_TIMESTAMP)
     `, {
       id: messageId,
       eventoId: req.params.eventoId,
       texto,
-      type,
+      tipo,
       remetente: req.user.email || req.user.id || null,
     });
 
     const message = await queryOne(
-      'SELECT id, eventoId, texto, type, remetente, enviadoEm FROM mensagensDisplay WHERE id = @id',
+      'SELECT id, eventoId, texto, tipo, remetente, enviadoEm FROM mensagensDisplay WHERE id = @id',
       { id: messageId }
     );
     const serialized = serializeMessage(message);

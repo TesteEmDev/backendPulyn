@@ -2,12 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
-const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { verifyToken, requirePerfil, isMaster } = require('../utils/middleware');
 
 const MONSTER_COOLDOWN_MIN_SECONDS = 1;
 const MONSTER_COOLDOWN_MAX_SECONDS = 120;
 
-function normalizeCheckpointConfigs(type, pontoVerificacao) {
+function normalizeCheckpointConfigs(tipo, pontoVerificacao) {
   if (type !== 'monster_hunt' || !Array.isArray(pontoVerificacao)) return pontoVerificacao;
 
   return pontoVerificacao.map((checkpoint) => {
@@ -69,11 +69,11 @@ router.get('/', verifyToken, async (req, res) => {
 
     console.log(`📋 [BRINCADEIRAS] Buscando jogos${eventoId ? ` do evento ${eventoId}` : ''}`);
     const brincadeiras = await allQuery(
-      `SELECT b.id, b.name, b.description, b.rules, b.type, b.duration, b.pontosPadrao,
+      `SELECT b.id, b.nome, b.descricao, b.regras, b.tipo, b.duracao, b.pontosPadrao,
               b.empresaId, b.status, ${eventoSelect}, b.pontoVerificacao
        FROM brincadeiras b
        WHERE ${whereClause}
-       ORDER BY b.name`,
+       ORDER BY b.nome`,
       params
     );
 
@@ -92,7 +92,7 @@ router.get('/', verifyToken, async (req, res) => {
 // Criar brincadeira
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, description, rules, type, duration, pontosPadrao, eventoId, pontoVerificacao } = req.body;
+    const { nome, description, rules, tipo, duration, pontosPadrao, eventoId, pontoVerificacao } = req.body;
     const empresaId = req.user.empresaId;
     const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
 
@@ -112,7 +112,7 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
-    const normalizedCheckpoints = normalizeCheckpointConfigs(type, pontoVerificacao);
+    const normalizedCheckpoints = normalizeCheckpointConfigs(tipo, pontoVerificacao);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
       ? normalizedCheckpoints.map(cp => String(cp.id || cp)).filter(Boolean)
       : [];
@@ -134,13 +134,13 @@ router.post('/', verifyToken, async (req, res) => {
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
     
     await query(
-      'INSERT INTO brincadeiras (id, name, description, rules, type, duration, pontosPadrao, empresaId, status, eventoId, pontoVerificacao) VALUES (@id, @name, @description, @rules, @type, @duration, @pontosPadrao, @empresaId, @status, @eventoId, @pontoVerificacao)',
+      'INSERT INTO brincadeiras (id, nome, description, rules, tipo, duration, pontosPadrao, empresaId, status, eventoId, pontoVerificacao) VALUES (@id, @nome, @description, @rules, @tipo, @duration, @pontosPadrao, @empresaId, @status, @eventoId, @pontoVerificacao)',
       { 
         id, 
-        name, 
+        nome, 
         description, 
         rules, 
-        type, 
+        tipo, 
         duration: parseInt(duration), 
         pontosPadrao: pontosPadrao || 10, 
         empresaId: evento.empresaId, 
@@ -151,7 +151,7 @@ router.post('/', verifyToken, async (req, res) => {
     );
     
     console.log(`✅ Jogo criado: ${name}`);
-    res.json({ id, name, description, rules, type, duration, pontosPadrao, empresaId: evento.empresaId, status: 'active', eventoId, pontoVerificacao: normalizedCheckpoints });
+    res.json({ id, nome, description, rules, tipo, duration, pontosPadrao, empresaId: evento.empresaId, status: 'active', eventoId, pontoVerificacao: normalizedCheckpoints });
   } catch (err) {
     console.error('❌ Erro ao criar brincadeira:', err);
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -161,7 +161,7 @@ router.post('/', verifyToken, async (req, res) => {
 // Atualizar brincadeira
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, description, rules, type, duration, pontosPadrao, status, eventoId, pontoVerificacao } = req.body;
+    const { nome, description, rules, tipo, duration, pontosPadrao, status, eventoId, pontoVerificacao } = req.body;
     const empresaId = req.user.empresaId;
     const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
     if (!validTypes.includes(type)) {
@@ -202,7 +202,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'O jogo e o evento devem pertencer à mesma empresa' });
     }
     
-    const normalizedCheckpoints = normalizeCheckpointConfigs(type, pontoVerificacao);
+    const normalizedCheckpoints = normalizeCheckpointConfigs(tipo, pontoVerificacao);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
       ? normalizedCheckpoints.map(cp => String(cp.id || cp)).filter(Boolean)
       : [];
@@ -221,15 +221,15 @@ router.put('/:id', verifyToken, async (req, res) => {
     }
 
     await query(
-      `UPDATE brincadeiras SET name = @name, description = @description, rules = @rules, 
-       type = @type, duration = @duration, pontosPadrao = @pontosPadrao, status = @status,
+      `UPDATE brincadeiras SET name = @nome, description = @description, rules = @rules, 
+       type = @tipo, duration = @duration, pontosPadrao = @pontosPadrao, status = @status,
        eventoId = @eventoId, pontoVerificacao = @pontoVerificacao
        WHERE id = @id`,
       {
-        name,
+        nome,
         description,
         rules,
-        type,
+        tipo,
         duration: parseInt(duration),
         pontosPadrao,
         status,
@@ -289,7 +289,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
 
     const result = await withTransaction(async (tx) => {
       const brincadeira = await tx.queryOne(
-        `SELECT id, name, type, empresaId, status
+        `SELECT id, nome, tipo, empresaId, status
          FROM brincadeiras
          WHERE LOWER(id) = LOWER(@id)`,
         { id: gameId }
@@ -328,14 +328,14 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
         throw error;
       }
 
-      const activeState = await tx.queryOne(
+      const activeEstado = await tx.queryOne(
         `SELECT TOP 1 eventoId
-         FROM eventoGameState
+         FROM eventoGameEstado
          WHERE LOWER(game_id) = LOWER(@id)
            AND LOWER(COALESCE(mode, 'idle')) = 'game'`,
         { id: gameId }
       );
-      if (activeState) {
+      if (activeEstado) {
         const error = new Error('Finalize o jogo antes de arquivá-lo');
         error.statusCode = 409;
         throw error;

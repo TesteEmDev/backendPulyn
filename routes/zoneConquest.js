@@ -1,4 +1,4 @@
-// routes/zoneConquest.js - API endpoints para Zone Conquest game state
+// routes/zoneConquest.js - API endpoints para Zone Conquest game estado
 // Gerencia persistência e recuperação de estado de pontoVerificacao e zonas
 
 const express = require('express');
@@ -6,40 +6,40 @@ const router = express.Router();
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { allQuery, queryOne } = require('../database');
 const {
-  initializeCheckpointStates,
-  getCheckpointStates,
-  updateCheckpointState,
-  getCheckpointState,
-  initializeZoneStates,
-  getZoneStates,
-  updateZoneState,
-  getZoneState,
-  clearPartidaStates,
-} = require('../utils/zoneConquestStateManager');
+  initializeCheckpointEstados,
+  getCheckpointEstados,
+  updateCheckpointEstado,
+  getCheckpointEstado,
+  initializeZoneEstados,
+  getZoneEstados,
+  updateZoneEstado,
+  getZoneEstado,
+  clearPartidaEstados,
+} = require('../utils/zoneConquestEstadoManager');
 
-// ==================== CHECKPOINT STATE ====================
+// ==================== CHECKPOINT Estado ====================
 
 /**
- * GET /api/zone-conquest/checkpoint-states/:eventoId/:partidaId
+ * GET /api/zone-conquest/checkpoint-estados/:eventoId/:partidaId
  * Recupera todos os estados de checkpoint para uma partida
  */
 router.get(
-  '/checkpoint-states/:eventoId/:partidaId',
+  '/checkpoint-estados/:eventoId/:partidaId',
   verifyToken,
   requireRole('admin', 'game_master', 'display', 'master'),
   async (req, res) => {
     try {
       const { eventoId, partidaId } = req.params;
 
-      const states = await getCheckpointStates(partidaId, eventoId);
+      const estados = await getCheckpointEstados(partidaId, eventoId);
 
       res.json({
         success: true,
-        data: states,
-        count: states.length,
+        data: estados,
+        count: estados.length,
       });
     } catch (error) {
-      console.error('❌ Erro ao recuperar checkpoint states:', error.message);
+      console.error('❌ Erro ao recuperar checkpoint estados:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -49,32 +49,32 @@ router.get(
 );
 
 /**
- * GET /api/zone-conquest/checkpoint-state/:eventoId/:checkpointId/:partidaId
+ * GET /api/zone-conquest/checkpoint-estado/:eventoId/:checkpointId/:partidaId
  * Recupera estado de um checkpoint específico
  */
 router.get(
-  '/checkpoint-state/:eventoId/:checkpointId/:partidaId',
+  '/checkpoint-estado/:eventoId/:checkpointId/:partidaId',
   verifyToken,
   requireRole('admin', 'game_master', 'display', 'master'),
   async (req, res) => {
     try {
       const { eventoId, checkpointId, partidaId } = req.params;
 
-      const state = await getCheckpointState(checkpointId, partidaId);
+      const estado = await getCheckpointEstado(checkpointId, partidaId);
 
-      if (!state) {
+      if (!estado) {
         return res.status(404).json({
           success: false,
-          error: 'Checkpoint state não encontrado',
+          error: 'Checkpoint estado não encontrado',
         });
       }
 
       res.json({
         success: true,
-        data: state,
+        data: estado,
       });
     } catch (error) {
-      console.error('❌ Erro ao recuperar checkpoint state:', error.message);
+      console.error('❌ Erro ao recuperar checkpoint estado:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -84,27 +84,27 @@ router.get(
 );
 
 /**
- * PUT /api/zone-conquest/checkpoint-state/:stateId
+ * PUT /api/zone-conquest/checkpoint-estado/:estadoId
  * Atualiza o estado de um checkpoint
  * Body: { current_owner_id?, protected_until?, ultimoConquistadoEm?, conquest_count? }
  */
 router.put(
-  '/checkpoint-state/:stateId',
+  '/checkpoint-estado/:estadoId',
   verifyToken,
   requireRole('admin', 'game_master', 'master'),
   async (req, res) => {
     try {
-      const { stateId } = req.params;
+      const { estadoId } = req.params;
       const updates = req.body;
 
-      await updateCheckpointState(stateId, updates);
+      await updateCheckpointEstado(estadoId, updates);
 
       res.json({
         success: true,
-        message: 'Checkpoint state atualizado com sucesso',
+        message: 'Checkpoint estado atualizado com sucesso',
       });
     } catch (error) {
-      console.error('❌ Erro ao atualizar checkpoint state:', error.message);
+      console.error('❌ Erro ao atualizar checkpoint estado:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -113,7 +113,7 @@ router.put(
   }
 );
 
-// ==================== ZONE STATE ====================
+// ==================== ZONE Estado ====================
 
 /**
  * GET /api/zone-conquest/team-partidas/:eventoId
@@ -185,24 +185,24 @@ router.get(
   }
 );
 
-// ==================== ZONE STATE ====================
+// ==================== ZONE Estado ====================
 router.get(
-  '/zone-states/:eventoId/:partidaId',
+  '/zone-estados/:eventoId/:partidaId',
   verifyToken,
   requireRole('admin', 'game_master', 'display', 'master'),
   async (req, res) => {
     try {
       const { eventoId, partidaId } = req.params;
 
-      const states = await getZoneStates(partidaId, eventoId);
+      const estados = await getZoneEstados(partidaId, eventoId);
 
       res.json({
         success: true,
-        data: states,
-        count: states.length,
+        data: estados,
+        count: estados.length,
       });
     } catch (error) {
-      console.error('❌ Erro ao recuperar zone states:', error.message);
+      console.error('❌ Erro ao recuperar zone estados:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -212,32 +212,32 @@ router.get(
 );
 
 /**
- * GET /api/zone-conquest/zone-state/:eventoId/:zoneId/:partidaId
+ * GET /api/zone-conquest/zone-estado/:eventoId/:zoneId/:partidaId
  * Recupera estado de uma zona específica
  */
 router.get(
-  '/zone-state/:eventoId/:zoneId/:partidaId',
+  '/zone-estado/:eventoId/:zoneId/:partidaId',
   verifyToken,
   requireRole('admin', 'game_master', 'display', 'master'),
   async (req, res) => {
     try {
       const { eventoId, zoneId, partidaId } = req.params;
 
-      const state = await getZoneState(zoneId, partidaId);
+      const estado = await getZoneEstado(zoneId, partidaId);
 
-      if (!state) {
+      if (!estado) {
         return res.status(404).json({
           success: false,
-          error: 'Zone state não encontrado',
+          error: 'Zone estado não encontrado',
         });
       }
 
       res.json({
         success: true,
-        data: state,
+        data: estado,
       });
     } catch (error) {
-      console.error('❌ Erro ao recuperar zone state:', error.message);
+      console.error('❌ Erro ao recuperar zone estado:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -247,27 +247,27 @@ router.get(
 );
 
 /**
- * PUT /api/zone-conquest/zone-state/:stateId
+ * PUT /api/zone-conquest/zone-estado/:estadoId
  * Atualiza o estado de uma zona
  * Body: { current_owner_id?, is_disputed?, checkpoints_owned?, last_updated_at? }
  */
 router.put(
-  '/zone-state/:stateId',
+  '/zone-estado/:estadoId',
   verifyToken,
   requireRole('admin', 'game_master', 'master'),
   async (req, res) => {
     try {
-      const { stateId } = req.params;
+      const { estadoId } = req.params;
       const updates = req.body;
 
-      await updateZoneState(stateId, updates);
+      await updateZoneEstado(estadoId, updates);
 
       res.json({
         success: true,
-        message: 'Zone state atualizado com sucesso',
+        message: 'Zone estado atualizado com sucesso',
       });
     } catch (error) {
-      console.error('❌ Erro ao atualizar zone state:', error.message);
+      console.error('❌ Erro ao atualizar zone estado:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -280,7 +280,7 @@ router.put(
 
 /**
  * POST /api/zone-conquest/initialize/:eventoId/:partidaId
- * Inicializa todos os checkpoint e zone states para uma nova partida
+ * Inicializa todos os checkpoint e zone estados para uma nova partida
  * Query: ?gameType=team|individual (padrão: 'team')
  */
 router.post(
@@ -301,7 +301,7 @@ router.post(
       }
 
       // Inicializar pontoVerificacao
-      const cpCount = await initializeCheckpointStates(
+      const cpCount = await initializeCheckpointEstados(
         partidaId,
         empresaId,
         eventoId,
@@ -309,7 +309,7 @@ router.post(
       );
 
       // Inicializar zonas
-      const zoneCount = await initializeZoneStates(
+      const zoneCount = await initializeZoneEstados(
         partidaId,
         empresaId,
         eventoId,
@@ -318,15 +318,15 @@ router.post(
 
       res.json({
         success: true,
-        message: 'Game state inicializado com sucesso',
+        message: 'Game estado inicializado com sucesso',
         data: {
           checkpointsInitialized: cpCount,
           zonesInitialized: zoneCount,
-          gameType,
+          gameTipo,
         },
       });
     } catch (error) {
-      console.error('❌ Erro ao inicializar game state:', error.message);
+      console.error('❌ Erro ao inicializar game estado:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,
@@ -348,14 +348,14 @@ router.delete(
     try {
       const { eventoId, partidaId } = req.params;
 
-      await clearPartidaStates(partidaId, eventoId);
+      await clearPartidaEstados(partidaId, eventoId);
 
       res.json({
         success: true,
-        message: 'Game state limpo com sucesso',
+        message: 'Game estado limpo com sucesso',
       });
     } catch (error) {
-      console.error('❌ Erro ao limpar game state:', error.message);
+      console.error('❌ Erro ao limpar game estado:', error.message);
       res.status(500).json({
         success: false,
         error: error.message,

@@ -44,8 +44,8 @@ async function findProcessedReading(readingId, checkpoint) {
   const existing = await queryOne(
     `SELECT l.id, l.checkpointId, l.autorizado, l.pontosAtribuidos,
             l.uid, l.criancaId, l.brincadeiraId, c.eventoId,
-            c.name AS crianca_name, c.timeId, t.name AS team_name, t.color AS team_color,
-            ms.attack_type AS monster_attack_type, ms.damage AS monster_damage,
+            c.name AS crianca_nome, c.timeId, t.nome AS team_nome, t.cor AS team_color,
+            ms.attack_type AS monster_attack_tipo, ms.damage AS monster_damage,
             ms.monster_hp_after, ms.monster_defeated, mp.max_hp AS monster_max_hp
      FROM leituras l
      LEFT JOIN criancas c ON c.id = l.criancaId
@@ -117,7 +117,7 @@ function broadcast(data) {
   } else if (global.wsServer) {
     // Fallback: broadcast global
     global.wsServer.clients.forEach((cliente) => {
-      if (cliente.readyState === 1) {
+      if (cliente.readyEstado === 1) {
         cliente.send(JSON.stringify(data));
       }
     });
@@ -138,7 +138,7 @@ function broadcastEvent(data) {
  * errado no modo individual. Nunca lança erro — o rastreio não pode derrubar
  * uma leitura já confirmada.
  */
-async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameType, teamColor, leituraId, uid, now }) {
+async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameTipo, teamColor, leituraId, uid, now }) {
   try {
     const coords = await queryOne(
       'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
@@ -161,12 +161,12 @@ async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId,
         checkpointId,
         uid,
         criancaId: crianca.id,
-        criancaName: crianca.name,
+        criancaName: crianca.nome,
         timeId: crianca.timeId || null,
         teamColor: color || '#1E9BD7',
         timestamp: now.toISOString(),
         eventoId,
-        gameType,
+        gameTipo,
         mapX: coords?.mapaX ?? null,
         mapY: coords?.mapaY ?? null,
       },
@@ -494,12 +494,12 @@ router.post('/', async (req, res) => {
                 ? 'MONSTER_SPECIAL_ATTACK'
                 : 'MONSTER_PROGRESS';
           broadcastEvent({
-            type: eventType,
+            type: eventTipo,
             payload: {
               ...monsterResult,
               checkpointId,
               criancaId: crianca.id,
-              criancaName: crianca.name,
+              criancaName: crianca.nome,
               timeId: crianca.timeId,
               eventoId: checkpoint.eventoId,
             },
@@ -529,7 +529,7 @@ router.post('/', async (req, res) => {
               checkpointId,
               uid: normalizedUid,
               criancaId: crianca.id,
-              criancaName: crianca.name,
+              criancaName: crianca.nome,
               timeId: crianca.timeId,
               teamColor: monsterResult.teamColor || '#FF0000',
               points: 0,
@@ -555,8 +555,8 @@ router.post('/', async (req, res) => {
           });
         }
 
-        if (monsterResult.gameCompleted && typeof global.finishMonsterGameState === 'function') {
-          global.finishMonsterGameState(checkpoint.eventoId, now.toISOString());
+        if (monsterResult.gameCompleted && typeof global.finishMonsterGameEstado === 'function') {
+          global.finishMonsterGameEstado(checkpoint.eventoId, now.toISOString());
         }
 
         return res.json({
@@ -646,12 +646,12 @@ router.post('/', async (req, res) => {
           ? 'TREASURE_ROUND_COMPLETED'
           : 'TREASURE_PROGRESS';
         broadcast({
-          type: eventType,
+          type: eventTipo,
           payload: {
             ...treasureResult,
             checkpointId,
             criancaId: crianca.id,
-            criancaName: crianca.name,
+            criancaName: crianca.nome,
             timeId: crianca.timeId,
             eventoId: checkpoint.eventoId,
           },
@@ -682,7 +682,7 @@ router.post('/', async (req, res) => {
               checkpointId,
               uid: normalizedUid,
               criancaId: crianca.id,
-              criancaName: crianca.name,
+              criancaName: crianca.nome,
               timeId: crianca.timeId,
               teamColor: treasureResult.teamColor || '#00AA00',
               points: 0,
@@ -708,8 +708,8 @@ router.post('/', async (req, res) => {
           });
         }
 
-        if (treasureResult.finished && typeof global.finishTreasureGameState === 'function') {
-          global.finishTreasureGameState(checkpoint.eventoId, now.toISOString());
+        if (treasureResult.finished && typeof global.finishTreasureGameEstado === 'function') {
+          global.finishTreasureGameEstado(checkpoint.eventoId, now.toISOString());
         }
 
         return res.json({
@@ -786,7 +786,7 @@ router.post('/', async (req, res) => {
             ...zoneResult,
             checkpointId,
             criancaId: crianca.id,
-            criancaName: crianca.name,
+            criancaName: crianca.nome,
             timeId: crianca.timeId,
             eventoId: checkpoint.eventoId,
           },
@@ -879,7 +879,7 @@ router.post('/', async (req, res) => {
         payload: {
           checkpointId,
           criancaId: crianca.id,
-          criancaName: crianca.name,
+          criancaName: crianca.nome,
           timeId: crianca.timeId,
           teamColor: crianca.teamColor,
           pointsGained: scanResult.points,
@@ -900,7 +900,7 @@ router.post('/', async (req, res) => {
         readingId: leituraId,
         gameMode: 'zone_conquest_team',
         pointsGained: scanResult.points,
-        criancaName: crianca.name,
+        criancaName: crianca.nome,
         message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt`,
       });
     }
@@ -948,7 +948,7 @@ router.post('/', async (req, res) => {
         payload: {
           checkpointId,
           criancaId: crianca.id,
-          criancaName: crianca.name,
+          criancaName: crianca.nome,
           pointsGained: scanResult.points,
           totalPoints: scanResult.totalPoints,
           checkpointsRead: scanResult.checkpointsRead,
@@ -974,7 +974,7 @@ router.post('/', async (req, res) => {
         totalPoints: scanResult.totalPoints,
         checkpointsRead: scanResult.checkpointsRead,
         version: scanResult.version,
-        criancaName: crianca.name,
+        criancaName: crianca.nome,
         message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt (Total: ${scanResult.totalPoints}pt)`,
       });
     }
@@ -1180,7 +1180,7 @@ router.post('/', async (req, res) => {
         checkpointId,
         uid: normalizedUid,
         criancaId: crianca.id,
-        criancaName: crianca.name,
+        criancaName: crianca.nome,
         timeId: crianca.timeId,
         teamColor,
         points: pointsAwarded,
@@ -1214,7 +1214,7 @@ router.post('/', async (req, res) => {
       autorizado: true,
       teamColor, 
       points: pointsAwarded,
-      criancaName: crianca.name, 
+      criancaName: crianca.nome, 
       readingId: leituraId,
       message: `${crianca.name} conquistou o território! +${pointsAwarded}pt`
     });
@@ -1304,13 +1304,13 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
           l.id,
           c.eventoId,
           l.criancaId AS child_id,
-          c.name AS child_name,
-          c.nickname AS child_nickname,
+          c.name AS child_nome,
+          c.nickname AS child_nicknome,
           l.checkpointId,
-          cp.name AS checkpoint_name,
+          cp.name AS checkpoint_nome,
           l.pontosAtribuidos AS points,
           l.criadoEm,
-          t.color AS team_color
+          t.cor AS team_color
         FROM leituras l
         LEFT JOIN criancas c ON c.id = l.criancaId
         LEFT JOIN pontoVerificacao cp ON cp.id = l.checkpointId
@@ -1326,13 +1326,13 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
           p.id,
           p.eventoId,
           p.criancaId AS child_id,
-          c.name AS child_name,
-          c.nickname AS child_nickname,
+          c.name AS child_nome,
+          c.nickname AS child_nicknome,
           p.checkpointId,
-          cp.name AS checkpoint_name,
+          cp.name AS checkpoint_nome,
           p.points,
           p.criadoEm,
-          t.color AS team_color
+          t.cor AS team_color
         FROM pontuacoes p
         LEFT JOIN criancas c ON c.id = p.criancaId
         LEFT JOIN pontoVerificacao cp ON cp.id = p.checkpointId
@@ -1353,13 +1353,13 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
             l.id,
             c.eventoId,
             l.criancaId AS child_id,
-            c.name AS child_name,
-            c.nickname AS child_nickname,
+            c.name AS child_nome,
+            c.nickname AS child_nicknome,
             l.checkpointId,
-            cp.name AS checkpoint_name,
+            cp.name AS checkpoint_nome,
             l.pontosAtribuidos AS points,
             l.criadoEm,
-            t.color AS team_color
+            t.cor AS team_color
           FROM leituras l
           LEFT JOIN criancas c ON c.id = l.criancaId
           LEFT JOIN pontoVerificacao cp ON cp.id = l.checkpointId

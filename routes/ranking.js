@@ -30,8 +30,8 @@ router.get('/eventos/:eventoId/ranking/criancas', verifyToken, async (req, res) 
     }
     
     const ranking = await allQuery(`
-      SELECT c.id, c.name, c.nickname, c.avatar, c.scores, 
-             t.name as time_name, t.color as time_color
+      SELECT c.id, c.nome, c.nicknome, c.avatar, c.scores, 
+             t.nome as time_nome, t.cor as time_color
       FROM criancas c
       LEFT JOIN times t ON c.timeId = t.id
       WHERE c.eventoId = @eventoId 
@@ -73,7 +73,7 @@ router.get('/eventos/:eventoId/ranking/times', verifyToken, async (req, res) => 
       LEFT JOIN criancas c ON c.timeId = t.id AND c.status = 'active'
       WHERE t.eventoId = @eventoId
         AND (t.empresaId = @empresaId OR @isMaster = 1)
-      GROUP BY t.id, t.name, t.color, t.points, t.criadoEm, t.eventoId, t.empresaId
+      GROUP BY t.id, t.nome, t.cor, t.points, t.criadoEm, t.eventoId, t.empresaId
       ORDER BY t.points DESC
     `, { eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     

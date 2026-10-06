@@ -86,9 +86,9 @@ router.get('/clients', verifyToken, async (req, res) => {
     // `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
     const clients = (await listPlatformClients()).map((c) => ({
       id: c.id,
-      name: c.name,
-      city: c.city,
-      state: c.state,
+      name: c.nome,
+      cidade: c.cidade,
+      estado: c.estado,
       status: c.status,
       plan: c.plan,
     }));
@@ -119,19 +119,19 @@ router.get('/active-events', verifyToken, async (req, res) => {
     const rows = await allQuery(`
       SELECT TOP 10
         e.id,
-        e.name,
+        e.nome,
         e.empresaId,
         e2.nome as cliente,
         (SELECT COUNT(*) FROM criancas WHERE eventoId = e.id) as children_count,
         e.status,
-        e.date as event_date,
+        e.data as event_date,
         e.criadoEm
       FROM eventos e
       LEFT JOIN empresas e2 ON e.empresaId = e2.id
       WHERE e.status IN ('active', 'scheduled')
         AND e.empresaId IS NOT NULL
         AND e2.nome != 'Master Admin'
-      ORDER BY e.date DESC
+      ORDER BY e.data DESC
     `);
 
     const now = Date.now();
@@ -139,7 +139,7 @@ router.get('/active-events', verifyToken, async (req, res) => {
       const startedAt = new Date(e.criadoEm || e.event_date).getTime();
       return {
         id: e.id,
-        name: e.name,
+        name: e.nome,
         clientId: e.empresaId,
         cliente: e.cliente,
         childrenCount: Number(e.children_count) || 0,
@@ -175,7 +175,7 @@ router.get('/alerts', verifyToken, async (req, res) => {
     const offlineCheckpoints = await allQuery(`
       SELECT TOP 5
         c.id,
-        c.name,
+        c.nome,
         c.zone,
         c.ultimoVisto,
         emp.nome as empresa_nome
