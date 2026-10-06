@@ -4,6 +4,7 @@ const router = express.Router();
 const { queryOne } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { getParallelGameOverview, startParallelGame, stopParallelGame } = require('../utils/parallelGame');
+const { listObjects, addObject, renameObject, removeObject } = require('../utils/parallelObjects');
 
 router.use(verifyToken, requireRole('admin', 'game_master', 'master'));
 
@@ -26,6 +27,40 @@ const sendError = (res, err, label) => {
   console.error(`❌ [PARALELA] ${label}:`, err);
   return res.status(500).json({ error: err.message });
 };
+
+// ---- Lista de objetos da brincadeira "Ache o objeto" (por empresa) ----
+router.get('/objects', async (req, res) => {
+  try {
+    res.json(await listObjects(req.user.empresa_id));
+  } catch (err) {
+    sendError(res, err, 'Erro ao listar os objetos');
+  }
+});
+
+router.post('/objects', async (req, res) => {
+  try {
+    res.status(201).json(await addObject(req.user.empresa_id, req.body?.name));
+  } catch (err) {
+    sendError(res, err, 'Erro ao adicionar o objeto');
+  }
+});
+
+router.put('/objects/:id', async (req, res) => {
+  try {
+    res.json(await renameObject(req.user.empresa_id, req.params.id, req.body?.name));
+  } catch (err) {
+    sendError(res, err, 'Erro ao editar o objeto');
+  }
+});
+
+router.delete('/objects/:id', async (req, res) => {
+  try {
+    await removeObject(req.user.empresa_id, req.params.id);
+    res.json({ ok: true });
+  } catch (err) {
+    sendError(res, err, 'Erro ao remover o objeto');
+  }
+});
 
 router.get('/eventos/:eventoId', async (req, res) => {
   try {

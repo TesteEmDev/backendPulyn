@@ -39,6 +39,18 @@ async function ensureParallelGamesSchema() {
       won_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `);
+  // "Ache o objeto": o objeto sorteado pela roleta fica gravado na disputa, e a lista de objetos é por empresa.
+  await query('ALTER TABLE parallel_games ADD COLUMN IF NOT EXISTS object_name varchar(100)');
+  await query(`
+    CREATE TABLE IF NOT EXISTS parallel_objects (
+      id varchar(36) PRIMARY KEY,
+      empresa_id varchar(36) NOT NULL,
+      name varchar(80) NOT NULL,
+      status varchar(10) NOT NULL DEFAULT 'active',
+      created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_parallel_object_name ON parallel_objects (empresa_id, LOWER(name)) WHERE status = 'active'`);
   // Uma disputa ativa por evento; cada criança ganha uma vez e cada posição tem um dono só.
   await query(`CREATE UNIQUE INDEX IF NOT EXISTS uq_parallel_active_event ON parallel_games (evento_id) WHERE status = 'active'`);
   await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_parallel_winner_child ON parallel_game_winners (parallel_id, crianca_id)');

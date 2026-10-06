@@ -4,9 +4,12 @@
 // primeiros participantes a lê-lo ganham 50, 40 e 30 pontos. Enquanto a disputa está ativa, a leitura
 // desse checkpoint vale só para ela (não conta para o jogo principal); quando o 3º lugar é preenchido
 // (ou o recreacionista encerra) o checkpoint volta ao jogo principal.
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { PARALLEL_PRIZES, planParallelAward, positionLabel } = require('./parallelRules');
+const { listObjects } = require('./parallelObjects');
+const { buildWheel } = require('./parallelObjectsRules');
 
 function httpError(message, statusCode) {
   const error = new Error(message);
@@ -73,6 +76,7 @@ async function serializeGame(row) {
     eventoId: row.evento_id,
     checkpointId: row.checkpoint_id,
     checkpointName: row.checkpoint_name || '',
+    objectName: row.object_name || '',
     status: row.status,
     prizes: String(row.prizes || '').split(',').map(Number),
     startedAt: row.started_at,
@@ -143,12 +147,19 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
     throw httpError('Já existe uma brincadeira paralela em andamento neste evento', 409);
   }
 
+  // A roleta: o objeto é sorteado aqui no servidor (todas as telas veem o mesmo resultado) e a
+  // animação só mostra o sorteio já feito.
+  const objects = await listObjects(evento.empresa_id);
+  if (objects.length === 0) throw httpError('Cadastre pelo menos um objeto na lista antes de iniciar', 409);
+  const chosen = objects[crypto.randomInt(objects.length)];
+  const wheel = buildWheel(objects, chosen.id);
+
   const id = uuidv4();
   try {
     await query(
-      `INSERT INTO parallel_games (id, empresa_id, evento_id, checkpoint_id, status, prizes, started_by)
-       VALUES (@id, @empresaId, @eventoId, @checkpointId, 'active', @prizes, @userId)`,
-      { id, empresaId: evento.empresa_id, eventoId: evento.id, checkpointId: checkpoint.id, prizes: PARALLEL_PRIZES.join(','), userId: userId || null }
+      `INSERT INTO parallel_games (id, empresa_id, evento_id, checkpoint_id, status, prizes, started_by, object_name)
+       VALUES (@id, @empresaId, @eventoId, @checkpointId, 'active', @prizes, @userId, @objectName)`,
+      { id, empresaId: evento.empresa_id, eventoId: evento.id, checkpointId: checkpoint.id, prizes: PARALLEL_PRIZES.join(','), userId: userId || null, objectName: chosen.name }
     );
   } catch (err) {
     // O índice único (um ativo por evento) protege duas partidas começando ao mesmo tempo.
@@ -157,10 +168,25 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
   }
 
   const [first, second, third] = PARALLEL_PRIZES;
-  broadcastEvent(evento.id, { type: 'PARALLEL_GAME_STARTED', payload: { eventoId: evento.id, parallelId: id, checkpointId: checkpoint.id, checkpointName: checkpoint.name } });
-  await announceOnDisplay(evento.id, `Brincadeira paralela! Os 3 primeiros a ler "${checkpoint.name}" ganham ${first}, ${second} e ${third} pontos`);
+  broadcastEvent(evento.id, {
+    type: 'PARALLEL_GAME_STARTED',
+    payload: {
+      eventoId: evento.id,
+      parallelId: id,
+      checkpointId: checkpoint.id,
+      checkpointName: checkpoint.name,
+      objectName: chosen.name,
+      // O telão também gira a roleta e para no mesmo objeto.
+      roulette: { segments: wheel.segments, winnerIndex: wheel.winnerIndex },
+    },
+  });
+  await announceOnDisplay(
+    evento.id,
+    `Brincadeira paralela! Achem: ${chosen.name}. Os 3 primeiros a levar até "${checkpoint.name}" e ler a pulseira ganham ${first}, ${second} e ${third} pontos`
+  );
 
-  return serializeGame({ ...(await getActiveParallelGame(evento.id)) });
+  const game = await serializeGame({ ...(await getActiveParallelGame(evento.id)) });
+  return { ...game, roulette: { segments: wheel.segments, winnerIndex: wheel.winnerIndex, objectName: chosen.name } };
 }
 
 // Encerra a disputa ativa do evento (manual, ao parar a brincadeira principal ou ao fechar o evento).
