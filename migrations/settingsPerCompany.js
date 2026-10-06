@@ -13,24 +13,24 @@ async function ensureSettingsPerCompanySchema() {
     return;
   }
 
-  await query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS empresa_id text');
+  await query('ALTER TABLE configuracao ADD COLUMN IF NOT EXISTS empresaId text');
 
   // Remove a unicidade antiga, só de setting_key, qualquer que seja o nome da constraint.
   const oldConstraints = await allQuery(`
     SELECT conname
     FROM pg_constraint
-    WHERE conrelid = 'settings'::regclass
+    WHERE conrelid = 'configuracao'::regclass
       AND contype = 'u'
-      AND pg_get_constraintdef(oid) = 'UNIQUE (setting_key)'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (chave)'
   `);
   for (const { conname } of oldConstraints) {
-    await query(`ALTER TABLE settings DROP CONSTRAINT "${conname}"`);
+    await query(`ALTER TABLE configuracao DROP CONSTRAINT "${conname}"`);
     console.log(`✅ settings: constraint ${conname} (setting_key único global) removida`);
   }
 
   await query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_settings_empresa_key
-    ON settings ((COALESCE(empresa_id, '')), setting_key)
+    ON configuracao ((COALESCE(empresaId, '')), chave)
   `);
 }
 

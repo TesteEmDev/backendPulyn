@@ -7,8 +7,8 @@ async function addColorToParticipantStates() {
 
     // PostgreSQL - Adicionar coluna se não existir
     await query(`
-      ALTER TABLE "zone_conquest_individual_participant_states"
-      ADD COLUMN IF NOT EXISTS "color" varchar(50)
+      ALTER TABLE "zonaConquistaEstadoParticipanteIndividual"
+      ADD COLUMN IF NOT EXISTS "cor" varchar(50)
     `);
 
     console.log('✅ Coluna color adicionada (ou já existe)');

@@ -7,8 +7,8 @@ async function addTerritoryOwnerCriancaIdColumn() {
 
     // PostgreSQL - Adicionar coluna se não existir
     await query(`
-      ALTER TABLE "checkpoints"
-      ADD COLUMN IF NOT EXISTS "territory_owner_crianca_id" varchar(36)
+      ALTER TABLE "pontoVerificacao"
+      ADD COLUMN IF NOT EXISTS "territorioDonosCriancaId" varchar(36)
     `);
 
     console.log('✅ Coluna territory_owner_crianca_id adicionada (ou já existe)');
@@ -17,9 +17,9 @@ async function addTerritoryOwnerCriancaIdColumn() {
     await query(`
       DO $$ BEGIN 
         IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__checkpoin__owner_crianca') THEN
-          ALTER TABLE "checkpoints" 
+          ALTER TABLE "pontoVerificacao" 
           ADD CONSTRAINT "FK__checkpoin__owner_crianca" 
-          FOREIGN KEY ("territory_owner_crianca_id") REFERENCES "criancas" ("id");
+          FOREIGN KEY ("territorioDonosCriancaId") REFERENCES "crianca" ("criancaId");
         END IF; 
       END $$
     `);

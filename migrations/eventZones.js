@@ -10,7 +10,7 @@ async function ensureEventZonesSchema() {
         IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS 
           WHERE TABLE_NAME = 'eventos' AND COLUMN_NAME = 'zones_data')
         BEGIN
-          ALTER TABLE eventos ADD zones_data NVARCHAR(MAX) NULL;
+          ALTER TABLE evento ADD dadosZonas NVARCHAR(MAX) NULL;
           PRINT 'Coluna zones_data adicionada ao SQL Server';
         END
       `);
@@ -18,8 +18,8 @@ async function ensureEventZonesSchema() {
     } else if (DB_DRIVER === 'postgres') {
       // PostgreSQL
       await query(`
-        ALTER TABLE eventos 
-        ADD COLUMN IF NOT EXISTS zones_data TEXT
+        ALTER TABLE evento 
+        ADD COLUMN IF NOT EXISTS dadosZonas TEXT
       `);
       console.log('✅ Coluna zones_data verificada (PostgreSQL)');
     }

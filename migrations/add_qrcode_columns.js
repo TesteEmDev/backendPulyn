@@ -13,7 +13,7 @@ async function up() {
       // SQL Server
       console.log('  → SQL Server: Adicionando coluna qrcode à tabela criancas...');
       try {
-        await query(`ALTER TABLE criancas ADD qrcode VARCHAR(50) NULL;`);
+        await query(`ALTER TABLE crianca ADD codigoQr VARCHAR(50) NULL;`);
         console.log('  ✅ Coluna qrcode adicionada à tabela criancas');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('coluna já existe')) {
@@ -25,7 +25,7 @@ async function up() {
 
       console.log('  → SQL Server: Adicionando coluna qrcode à tabela family_child_links...');
       try {
-        await query(`ALTER TABLE family_child_links ADD qrcode VARCHAR(50) NULL;`);
+        await query(`ALTER TABLE vinculoFamiliar ADD qrcode VARCHAR(50) NULL;`);
         console.log('  ✅ Coluna qrcode adicionada à tabela family_child_links');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('coluna já existe')) {
@@ -37,7 +37,7 @@ async function up() {
 
       console.log('  → SQL Server: Criando índices...');
       try {
-        await query(`CREATE INDEX idx_criancas_qrcode ON criancas(qrcode);`);
+        await query(`CREATE INDEX idx_criancas_qrcode ON crianca(codigoQr);`);
         console.log('  ✅ Índice criado em criancas.qrcode');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('já existe')) {
@@ -48,7 +48,7 @@ async function up() {
       }
 
       try {
-        await query(`CREATE INDEX idx_family_child_links_qrcode ON family_child_links(qrcode);`);
+        await query(`CREATE INDEX idx_family_child_links_qrcode ON vinculoFamiliar(qrcode);`);
         console.log('  ✅ Índice criado em family_child_links.qrcode');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('já existe')) {
@@ -61,7 +61,7 @@ async function up() {
       // PostgreSQL
       console.log('  → PostgreSQL: Adicionando coluna qrcode à tabela criancas...');
       try {
-        await query(`ALTER TABLE criancas ADD COLUMN qrcode VARCHAR(50) NULL;`);
+        await query(`ALTER TABLE crianca ADD COLUMN codigoQr VARCHAR(50) NULL;`);
         console.log('  ✅ Coluna qrcode adicionada à tabela criancas');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('já existe')) {
@@ -73,7 +73,7 @@ async function up() {
 
       console.log('  → PostgreSQL: Adicionando coluna qrcode à tabela family_child_links...');
       try {
-        await query(`ALTER TABLE family_child_links ADD COLUMN qrcode VARCHAR(50) NULL;`);
+        await query(`ALTER TABLE vinculoFamiliar ADD COLUMN qrcode VARCHAR(50) NULL;`);
         console.log('  ✅ Coluna qrcode adicionada à tabela family_child_links');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('já existe')) {
@@ -85,7 +85,7 @@ async function up() {
 
       console.log('  → PostgreSQL: Criando índices...');
       try {
-        await query(`CREATE INDEX idx_criancas_qrcode ON criancas(qrcode);`);
+        await query(`CREATE INDEX idx_criancas_qrcode ON crianca(codigoQr);`);
         console.log('  ✅ Índice criado em criancas.qrcode');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('já existe')) {
@@ -96,7 +96,7 @@ async function up() {
       }
 
       try {
-        await query(`CREATE INDEX idx_family_child_links_qrcode ON family_child_links(qrcode);`);
+        await query(`CREATE INDEX idx_family_child_links_qrcode ON vinculoFamiliar(qrcode);`);
         console.log('  ✅ Índice criado em family_child_links.qrcode');
       } catch (err) {
         if (err.message.includes('already exists') || err.message.includes('já existe')) {
@@ -122,7 +122,7 @@ async function down() {
     if (DB_DRIVER === 'mssql') {
       console.log('  → SQL Server: Removendo coluna qrcode de criancas...');
       try {
-        await query(`ALTER TABLE criancas DROP COLUMN qrcode;`);
+        await query(`ALTER TABLE crianca DROP COLUMN codigoQr;`);
         console.log('  ✅ Coluna qrcode removida de criancas');
       } catch (err) {
         console.log('  ⚠️  Erro ao remover:', err.message);
@@ -130,7 +130,7 @@ async function down() {
 
       console.log('  → SQL Server: Removendo coluna qrcode de family_child_links...');
       try {
-        await query(`ALTER TABLE family_child_links DROP COLUMN qrcode;`);
+        await query(`ALTER TABLE vinculoFamiliar DROP COLUMN qrcode;`);
         console.log('  ✅ Coluna qrcode removida de family_child_links');
       } catch (err) {
         console.log('  ⚠️  Erro ao remover:', err.message);
@@ -138,7 +138,7 @@ async function down() {
     } else if (DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql') {
       console.log('  → PostgreSQL: Removendo coluna qrcode de criancas...');
       try {
-        await query(`ALTER TABLE criancas DROP COLUMN qrcode;`);
+        await query(`ALTER TABLE crianca DROP COLUMN codigoQr;`);
         console.log('  ✅ Coluna qrcode removida de criancas');
       } catch (err) {
         console.log('  ⚠️  Erro ao remover:', err.message);
@@ -146,7 +146,7 @@ async function down() {
 
       console.log('  → PostgreSQL: Removendo coluna qrcode de family_child_links...');
       try {
-        await query(`ALTER TABLE family_child_links DROP COLUMN qrcode;`);
+        await query(`ALTER TABLE vinculoFamiliar DROP COLUMN qrcode;`);
         console.log('  ✅ Coluna qrcode removida de family_child_links');
       } catch (err) {
         console.log('  ⚠️  Erro ao remover:', err.message);

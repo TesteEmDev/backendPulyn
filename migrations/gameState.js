@@ -5,35 +5,35 @@ async function ensureGameStateSchema() {
 
   if (isPostgres) {
     await query(`
-      CREATE TABLE IF NOT EXISTS event_game_state (
-        evento_id varchar(36) PRIMARY KEY,
-        empresa_id varchar(36) NOT NULL,
-        mode varchar(20) NOT NULL DEFAULT 'idle',
-        game_type varchar(50) NOT NULL DEFAULT 'none',
-        game_id varchar(36),
-        game_name varchar(255),
-        started_at timestamptz,
-        stopped_at timestamptz,
-        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      CREATE TABLE IF NOT EXISTS estadoJogoEvento (
+        eventoId varchar(36) PRIMARY KEY,
+        empresaId varchar(36) NOT NULL,
+        modo varchar(20) NOT NULL DEFAULT 'idle',
+        tipoJogo varchar(50) NOT NULL DEFAULT 'none',
+        brincadeiraId varchar(36),
+        nomeBrincadeira varchar(255),
+        iniciadoEm timestamptz,
+        paradoEm timestamptz,
+        atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await query('CREATE INDEX IF NOT EXISTS idx_event_game_state_empresa ON event_game_state (empresa_id)');
+    await query('CREATE INDEX IF NOT EXISTS idx_event_game_state_empresa ON estadoJogoEvento (empresaId)');
     return;
   }
 
   await query(`
     IF OBJECT_ID('dbo.event_game_state', 'U') IS NULL
     BEGIN
-      CREATE TABLE event_game_state (
-        evento_id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        empresa_id NVARCHAR(36) NOT NULL,
-        mode NVARCHAR(20) NOT NULL DEFAULT 'idle',
-        game_type NVARCHAR(50) NOT NULL DEFAULT 'none',
-        game_id NVARCHAR(36) NULL,
-        game_name NVARCHAR(255) NULL,
-        started_at DATETIME2 NULL,
-        stopped_at DATETIME2 NULL,
-        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+      CREATE TABLE estadoJogoEvento (
+        eventoId NVARCHAR(36) NOT NULL PRIMARY KEY,
+        empresaId NVARCHAR(36) NOT NULL,
+        modo NVARCHAR(20) NOT NULL DEFAULT 'idle',
+        tipoJogo NVARCHAR(50) NOT NULL DEFAULT 'none',
+        brincadeiraId NVARCHAR(36) NULL,
+        nomeBrincadeira NVARCHAR(255) NULL,
+        iniciadoEm DATETIME2 NULL,
+        paradoEm DATETIME2 NULL,
+        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);

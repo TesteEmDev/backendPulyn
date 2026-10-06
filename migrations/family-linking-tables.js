@@ -13,26 +13,26 @@ async function up() {
     await query(`
       IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='family_linking_codes' AND xtype='U')
       BEGIN
-        CREATE TABLE [family_linking_codes] (
+        CREATE TABLE [codigoVinculoFamiliar] (
           [id] UNIQUEIDENTIFIER PRIMARY KEY,
-          [crianca_id] UNIQUEIDENTIFIER NOT NULL,
-          [evento_id] UNIQUEIDENTIFIER NOT NULL,
-          [empresa_id] UNIQUEIDENTIFIER NOT NULL,
-          [qr_code_value] VARCHAR(50) NOT NULL UNIQUE,
-          [tracking_url] VARCHAR(500) NOT NULL,
+          [criancaId] UNIQUEIDENTIFIER NOT NULL,
+          [eventoId] UNIQUEIDENTIFIER NOT NULL,
+          [empresaId] UNIQUEIDENTIFIER NOT NULL,
+          [valorQrCode] VARCHAR(50) NOT NULL UNIQUE,
+          [urlRastreio] VARCHAR(500) NOT NULL,
           [status] VARCHAR(20) DEFAULT 'active',  -- active, used, expired
-          [created_at] DATETIME2 DEFAULT GETDATE(),
-          [expires_at] DATETIME2 NOT NULL,
-          [used_at] DATETIME2 NULL,
-          [used_by_login_id] UNIQUEIDENTIFIER NULL,
-          CONSTRAINT FK_flc_crianca FOREIGN KEY (crianca_id) REFERENCES [criancas](id),
-          CONSTRAINT FK_flc_evento FOREIGN KEY (evento_id) REFERENCES [eventos](id),
-          CONSTRAINT FK_flc_empresa FOREIGN KEY (empresa_id) REFERENCES [empresas](id),
-          CONSTRAINT FK_flc_login FOREIGN KEY (used_by_login_id) REFERENCES [logins](id)
+          [criadoEm] DATETIME2 DEFAULT GETDATE(),
+          [expiraEm] DATETIME2 NOT NULL,
+          [usadoEm] DATETIME2 NULL,
+          [usadoPorLoginId] UNIQUEIDENTIFIER NULL,
+          CONSTRAINT FK_flc_crianca FOREIGN KEY (criancaId) REFERENCES [crianca](criancaId),
+          CONSTRAINT FK_flc_evento FOREIGN KEY (eventoId) REFERENCES [evento](eventoId),
+          CONSTRAINT FK_flc_empresa FOREIGN KEY (empresaId) REFERENCES [empresa](empresaId),
+          CONSTRAINT FK_flc_login FOREIGN KEY (usadoPorLoginId) REFERENCES [login](loginId)
         )
-        CREATE INDEX idx_flc_qr_code ON [family_linking_codes]([qr_code_value])
-        CREATE INDEX idx_flc_status ON [family_linking_codes]([status])
-        CREATE INDEX idx_flc_crianca ON [family_linking_codes]([crianca_id])
+        CREATE INDEX idx_flc_qr_code ON [codigoVinculoFamiliar]([valorQrCode])
+        CREATE INDEX idx_flc_status ON [codigoVinculoFamiliar]([status])
+        CREATE INDEX idx_flc_crianca ON [codigoVinculoFamiliar]([criancaId])
         PRINT '✅ Tabela family_linking_codes criada'
       END
       ELSE
@@ -43,24 +43,24 @@ async function up() {
     await query(`
       IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='family_child_links' AND xtype='U')
       BEGIN
-        CREATE TABLE [family_child_links] (
-          [id] UNIQUEIDENTIFIER PRIMARY KEY,
+        CREATE TABLE [vinculoFamiliar] (
+          [vinculoId] UNIQUEIDENTIFIER PRIMARY KEY,
           [family_login_id] UNIQUEIDENTIFIER NOT NULL,
-          [crianca_id] UNIQUEIDENTIFIER NOT NULL,
-          [empresa_id] UNIQUEIDENTIFIER NOT NULL,
-          [relationship] VARCHAR(50) DEFAULT 'parent',  -- parent, guardian, relative
+          [criancaId] UNIQUEIDENTIFIER NOT NULL,
+          [empresaId] UNIQUEIDENTIFIER NOT NULL,
+          [relacionamento] VARCHAR(50) DEFAULT 'parent',  -- parent, guardian, relative
           [status] VARCHAR(20) DEFAULT 'active',  -- active, pending, inactive
           [linked_at] DATETIME2 DEFAULT GETDATE(),
           [unlinked_at] DATETIME2 NULL,
           [notes] VARCHAR(500) NULL,
-          CONSTRAINT FK_fcl_login FOREIGN KEY (family_login_id) REFERENCES [logins](id),
-          CONSTRAINT FK_fcl_crianca FOREIGN KEY (crianca_id) REFERENCES [criancas](id),
-          CONSTRAINT FK_fcl_empresa FOREIGN KEY (empresa_id) REFERENCES [empresas](id),
-          CONSTRAINT UQ_fcl_family_child UNIQUE (family_login_id, crianca_id)
+          CONSTRAINT FK_fcl_login FOREIGN KEY (family_login_id) REFERENCES [login](loginId),
+          CONSTRAINT FK_fcl_crianca FOREIGN KEY (criancaId) REFERENCES [crianca](criancaId),
+          CONSTRAINT FK_fcl_empresa FOREIGN KEY (empresaId) REFERENCES [empresa](empresaId),
+          CONSTRAINT UQ_fcl_family_child UNIQUE (family_login_id, criancaId)
         )
-        CREATE INDEX idx_fcl_family ON [family_child_links]([family_login_id])
-        CREATE INDEX idx_fcl_crianca ON [family_child_links]([crianca_id])
-        CREATE INDEX idx_fcl_status ON [family_child_links]([status])
+        CREATE INDEX idx_fcl_family ON [vinculoFamiliar]([family_login_id])
+        CREATE INDEX idx_fcl_crianca ON [vinculoFamiliar]([criancaId])
+        CREATE INDEX idx_fcl_status ON [vinculoFamiliar]([status])
         PRINT '✅ Tabela family_child_links criada'
       END
       ELSE
@@ -80,8 +80,8 @@ async function down() {
   console.log('🔄 Revertendo migração: family-linking-tables...');
 
   try {
-    await query('DROP TABLE IF EXISTS [family_child_links]');
-    await query('DROP TABLE IF EXISTS [family_linking_codes]');
+    await query('DROP TABLE IF EXISTS [vinculoFamiliar]');
+    await query('DROP TABLE IF EXISTS [codigoVinculoFamiliar]');
     console.log('✅ Migração revertida com sucesso!');
     return true;
   } catch (error) {

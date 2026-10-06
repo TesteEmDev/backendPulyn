@@ -12,17 +12,17 @@ async function ensureClienteUnidadeSchema() {
     return;
   }
 
-  await query('ALTER TABLE clientes ADD COLUMN IF NOT EXISTS empresa_id varchar(36)');
-  await query('ALTER TABLE clientes ADD COLUMN IF NOT EXISTS address varchar(255)');
-  await query("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS backup_frequency varchar(20) DEFAULT 'daily'");
+  await query('ALTER TABLE cliente ADD COLUMN IF NOT EXISTS empresaId varchar(36)');
+  await query('ALTER TABLE cliente ADD COLUMN IF NOT EXISTS endereco varchar(255)');
+  await query("ALTER TABLE cliente ADD COLUMN IF NOT EXISTS frequenciaBackup varchar(20) DEFAULT 'daily'");
   // Logo/foto da unidade, guardada como data URL (mesmo modelo da planta do evento).
-  await query('ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logo_data text');
-  await query('ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logo_name varchar(255)');
-  await query('ALTER TABLE clientes ADD COLUMN IF NOT EXISTS logo_type varchar(100)');
+  await query('ALTER TABLE cliente ADD COLUMN IF NOT EXISTS logoDados text');
+  await query('ALTER TABLE cliente ADD COLUMN IF NOT EXISTS logoNome varchar(255)');
+  await query('ALTER TABLE cliente ADD COLUMN IF NOT EXISTS logoTipo varchar(100)');
   // Uma empresa tem no máximo um cadastro em clientes (linhas legadas sem empresa ficam livres).
   await query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_clientes_empresa_id
-    ON clientes (empresa_id) WHERE empresa_id IS NOT NULL
+    ON cliente (empresaId) WHERE empresaId IS NOT NULL
   `);
 }
 

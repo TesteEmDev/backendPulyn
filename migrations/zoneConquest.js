@@ -2,6 +2,17 @@
 
 const { query, DB_DRIVER } = require('../database');
 
+// Garante que uma leitura não pontue duas vezes. Se o banco já tiver leituras repetidas (dados antigos),
+// o índice não pode ser criado: avisa e segue, em vez de impedir o servidor de subir.
+async function createReadingIndex(indexName, tableName) {
+  try {
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${tableName} (leituraId) WHERE leituraId IS NOT NULL`);
+  } catch (err) {
+    if (err.code !== '23505') throw err;
+    console.warn(`⚠️ ${tableName}: há leituras repetidas, o índice ${indexName} não foi criado. Remova as duplicatas para ativá-lo.`);
+  }
+}
+
 async function ensureZoneConquestSchema() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
@@ -11,56 +22,56 @@ async function ensureZoneConquestSchema() {
     // ========================================================================
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_team_partidas (
+      CREATE TABLE IF NOT EXISTS zonaConquistaPartidaTime (
         id varchar(36) PRIMARY KEY,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        brincadeira_id varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        brincadeiraId varchar(36) NOT NULL,
         status varchar(20) NOT NULL DEFAULT 'active',
-        round_number integer NOT NULL DEFAULT 1,
-        current_team_id varchar(36) NULL,
-        started_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        finished_at timestamptz NULL,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        numeroRonda integer NOT NULL DEFAULT 1,
+        timeAtualId varchar(36) NULL,
+        iniciadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finalizadoEm timestamptz NULL,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_team_tempos (
+      CREATE TABLE IF NOT EXISTS zonaConquistaTempoTime (
         id varchar(36) PRIMARY KEY,
-        partida_id varchar(36) NOT NULL,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        time_id varchar(36) NOT NULL,
+        partidaId varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        timeId varchar(36) NOT NULL,
         status varchar(20) NOT NULL DEFAULT 'active',
-        zones_dominated integer NOT NULL DEFAULT 0,
-        checkpoints_read integer NOT NULL DEFAULT 0,
-        total_points numeric(10, 2) NOT NULL DEFAULT 0,
-        started_at timestamptz NULL,
-        completed_at timestamptz NULL,
-        elapsed_ms integer NULL,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        zonasDominadas integer NOT NULL DEFAULT 0,
+        checkpointsLidos integer NOT NULL DEFAULT 0,
+        pontosTotais numeric(10, 2) NOT NULL DEFAULT 0,
+        iniciadoEm timestamptz NULL,
+        concluidoEm timestamptz NULL,
+        duracaoMs integer NULL,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_team_scans (
+      CREATE TABLE IF NOT EXISTS zonaConquistaLeituraTime (
         id varchar(36) PRIMARY KEY,
-        partida_id varchar(36) NOT NULL,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        brincadeira_id varchar(36) NOT NULL,
-        round_number integer NOT NULL,
-        checkpoint_id varchar(36) NOT NULL,
-        crianca_id varchar(36) NOT NULL,
-        time_id varchar(36) NOT NULL,
+        partidaId varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        brincadeiraId varchar(36) NOT NULL,
+        numeroRonda integer NOT NULL,
+        checkpointId varchar(36) NOT NULL,
+        criancaId varchar(36) NOT NULL,
+        timeId varchar(36) NOT NULL,
         uid varchar(255),
-        leitura_id varchar(36),
-        points_awarded numeric(10, 2) NOT NULL DEFAULT 0,
-        scanned_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        leituraId varchar(36),
+        pontosAtribuidos numeric(10, 2) NOT NULL DEFAULT 0,
+        lidoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -69,65 +80,65 @@ async function ensureZoneConquestSchema() {
     // ========================================================================
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_individual_partidas (
+      CREATE TABLE IF NOT EXISTS zonaConquistaPartidaIndividual (
         id varchar(36) PRIMARY KEY,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        brincadeira_id varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        brincadeiraId varchar(36) NOT NULL,
         status varchar(20) NOT NULL DEFAULT 'active',
-        version integer NOT NULL DEFAULT 0,
-        started_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        finished_at timestamptz NULL,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        versao integer NOT NULL DEFAULT 0,
+        iniciadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finalizadoEm timestamptz NULL,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_individual_participant_states (
+      CREATE TABLE IF NOT EXISTS zonaConquistaEstadoParticipanteIndividual (
         id varchar(36) PRIMARY KEY,
-        partida_id varchar(36) NOT NULL,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        crianca_id varchar(36) NOT NULL,
+        partidaId varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        criancaId varchar(36) NOT NULL,
         status varchar(20) NOT NULL DEFAULT 'active',
-        checkpoints_read integer NOT NULL DEFAULT 0,
-        total_points numeric(10, 2) NOT NULL DEFAULT 0,
+        checkpointsLidos integer NOT NULL DEFAULT 0,
+        pontosTotais numeric(10, 2) NOT NULL DEFAULT 0,
         ranking integer NULL,
-        version integer NOT NULL DEFAULT 0,
-        started_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        finished_at timestamptz NULL,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        versao integer NOT NULL DEFAULT 0,
+        iniciadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        finalizadoEm timestamptz NULL,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_individual_scans (
+      CREATE TABLE IF NOT EXISTS zonaConquistaLeituraIndividual (
         id varchar(36) PRIMARY KEY,
-        partida_id varchar(36) NOT NULL,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        brincadeira_id varchar(36) NOT NULL,
-        checkpoint_id varchar(36) NOT NULL,
-        crianca_id varchar(36) NOT NULL,
+        partidaId varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        brincadeiraId varchar(36) NOT NULL,
+        checkpointId varchar(36) NOT NULL,
+        criancaId varchar(36) NOT NULL,
         uid varchar(255),
-        leitura_id varchar(36),
-        points_awarded numeric(10, 2) NOT NULL DEFAULT 0,
-        version integer NOT NULL DEFAULT 0,
-        scanned_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        leituraId varchar(36),
+        pontosAtribuidos numeric(10, 2) NOT NULL DEFAULT 0,
+        versao integer NOT NULL DEFAULT 0,
+        lidoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_individual_checkpoint_protection (
+      CREATE TABLE IF NOT EXISTS zonaConquistaProtecaoCheckpointIndividual (
         id varchar(36) PRIMARY KEY,
-        partida_id varchar(36) NOT NULL,
-        checkpoint_id varchar(36) NOT NULL,
-        crianca_id varchar(36) NOT NULL,
-        protection_until timestamptz NOT NULL,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        partidaId varchar(36) NOT NULL,
+        checkpointId varchar(36) NOT NULL,
+        criancaId varchar(36) NOT NULL,
+        protegidoAte timestamptz NOT NULL,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
@@ -136,62 +147,62 @@ async function ensureZoneConquestSchema() {
     // ========================================================================
 
     // TEAM indices
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_team_partidas_evento ON zone_conquest_team_partidas (evento_id, status)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_team_tempos_partida ON zone_conquest_team_tempos (partida_id, time_id)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zone_team_scan_reading ON zone_conquest_team_scans (leitura_id) WHERE leitura_id IS NOT NULL');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_team_scans_partida ON zone_conquest_team_scans (partida_id, round_number)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_team_partidas_evento ON zonaConquistaPartidaTime (eventoId, status)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_team_tempos_partida ON zonaConquistaTempoTime (partidaId, timeId)');
+    await createReadingIndex('uq_zone_team_scan_reading', 'zonaConquistaLeituraTime');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_team_scans_partida ON zonaConquistaLeituraTime (partidaId, numeroRonda)');
 
     // INDIVIDUAL indices
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_partidas_evento ON zone_conquest_individual_partidas (evento_id, status)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_states_partida ON zone_conquest_individual_participant_states (partida_id, crianca_id)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zone_individual_scan_reading ON zone_conquest_individual_scans (leitura_id) WHERE leitura_id IS NOT NULL');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_scans_partida ON zone_conquest_individual_scans (partida_id, crianca_id)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_protection_checkpoint ON zone_conquest_individual_checkpoint_protection (checkpoint_id, protection_until)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_partidas_evento ON zonaConquistaPartidaIndividual (eventoId, status)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_states_partida ON zonaConquistaEstadoParticipanteIndividual (partidaId, criancaId)');
+    await createReadingIndex('uq_zone_individual_scan_reading', 'zonaConquistaLeituraIndividual');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_scans_partida ON zonaConquistaLeituraIndividual (partidaId, criancaId)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_protection_checkpoint ON zonaConquistaProtecaoCheckpointIndividual (checkpointId, protegidoAte)');
 
     // ========================================================================
     // CHECKPOINT & ZONE STATE TRACKING (novo para ambos os modos)
     // ========================================================================
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_checkpoint_states (
+      CREATE TABLE IF NOT EXISTS zonaConquistaEstadoCheckpoint (
         id varchar(36) PRIMARY KEY,
-        partida_id varchar(36) NOT NULL,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        checkpoint_id varchar(36) NOT NULL,
-        current_owner_id varchar(36) NULL,
-        owner_type varchar(20) NOT NULL DEFAULT 'team',
-        protected_until timestamptz NULL,
-        last_conquered_at timestamptz NULL,
-        conquest_count integer NOT NULL DEFAULT 0,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        partidaId varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        checkpointId varchar(36) NOT NULL,
+        donoAtualId varchar(36) NULL,
+        tipoDono varchar(20) NOT NULL DEFAULT 'team',
+        protegidoAte timestamptz NULL,
+        ultimoConquistadoEm timestamptz NULL,
+        totalConquistas integer NOT NULL DEFAULT 0,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     await query(`
-      CREATE TABLE IF NOT EXISTS zone_conquest_zone_states (
+      CREATE TABLE IF NOT EXISTS zonaConquistaEstadoZona (
         id varchar(36) PRIMARY KEY,
-        partida_id varchar(36) NOT NULL,
-        empresa_id varchar(36) NOT NULL,
-        evento_id varchar(36) NOT NULL,
-        zone_id varchar(36) NOT NULL,
-        current_owner_id varchar(36) NULL,
-        owner_type varchar(20) NOT NULL DEFAULT 'team',
-        is_disputed boolean NOT NULL DEFAULT false,
-        checkpoints_count integer NOT NULL DEFAULT 0,
-        checkpoints_owned integer NOT NULL DEFAULT 0,
-        last_updated_at timestamptz NULL,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        partidaId varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        zonaId varchar(36) NOT NULL,
+        donoAtualId varchar(36) NULL,
+        tipoDono varchar(20) NOT NULL DEFAULT 'team',
+        disputada boolean NOT NULL DEFAULT false,
+        totalCheckpoints integer NOT NULL DEFAULT 0,
+        checkpointsConquistados integer NOT NULL DEFAULT 0,
+        ultimaAtualizacaoEm timestamptz NULL,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
 
     // STATE TRACKING indices
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_checkpoint_state_partida ON zone_conquest_checkpoint_states (partida_id, checkpoint_id)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_checkpoint_state_owner ON zone_conquest_checkpoint_states (partida_id, current_owner_id)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_zone_state_partida ON zone_conquest_zone_states (partida_id, zone_id)');
-    await query('CREATE INDEX IF NOT EXISTS idx_zone_zone_state_owner ON zone_conquest_zone_states (partida_id, current_owner_id)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_checkpoint_state_partida ON zonaConquistaEstadoCheckpoint (partidaId, checkpointId)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_checkpoint_state_owner ON zonaConquistaEstadoCheckpoint (partidaId, donoAtualId)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_zone_state_partida ON zonaConquistaEstadoZona (partidaId, zonaId)');
+    await query('CREATE INDEX IF NOT EXISTS idx_zone_zone_state_owner ON zonaConquistaEstadoZona (partidaId, donoAtualId)');
 
     return;
   }
@@ -204,18 +215,18 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_team_partidas', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_team_partidas (
+      CREATE TABLE zonaConquistaPartidaTime (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        brincadeira_id NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        brincadeiraId NVARCHAR(36) NOT NULL,
         status NVARCHAR(20) NOT NULL DEFAULT 'active',
-        round_number INT NOT NULL DEFAULT 1,
-        current_team_id NVARCHAR(36) NULL,
-        started_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        finished_at DATETIME2 NULL,
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        numeroRonda INT NOT NULL DEFAULT 1,
+        timeAtualId NVARCHAR(36) NULL,
+        iniciadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        finalizadoEm DATETIME2 NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -223,21 +234,21 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_team_tempos', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_team_tempos (
+      CREATE TABLE zonaConquistaTempoTime (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        partida_id NVARCHAR(36) NOT NULL,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        time_id NVARCHAR(36) NOT NULL,
+        partidaId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        timeId NVARCHAR(36) NOT NULL,
         status NVARCHAR(20) NOT NULL DEFAULT 'active',
-        zones_dominated INT NOT NULL DEFAULT 0,
-        checkpoints_read INT NOT NULL DEFAULT 0,
-        total_points NUMERIC(10, 2) NOT NULL DEFAULT 0,
-        started_at DATETIME2 NULL,
-        completed_at DATETIME2 NULL,
-        elapsed_ms INT NULL,
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        zonasDominadas INT NOT NULL DEFAULT 0,
+        checkpointsLidos INT NOT NULL DEFAULT 0,
+        pontosTotais NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        iniciadoEm DATETIME2 NULL,
+        concluidoEm DATETIME2 NULL,
+        duracaoMs INT NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -245,21 +256,21 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_team_scans', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_team_scans (
+      CREATE TABLE zonaConquistaLeituraTime (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        partida_id NVARCHAR(36) NOT NULL,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        brincadeira_id NVARCHAR(36) NOT NULL,
-        round_number INT NOT NULL,
-        checkpoint_id NVARCHAR(36) NOT NULL,
-        crianca_id NVARCHAR(36) NOT NULL,
-        time_id NVARCHAR(36) NOT NULL,
+        partidaId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        brincadeiraId NVARCHAR(36) NOT NULL,
+        numeroRonda INT NOT NULL,
+        checkpointId NVARCHAR(36) NOT NULL,
+        criancaId NVARCHAR(36) NOT NULL,
+        timeId NVARCHAR(36) NOT NULL,
         uid NVARCHAR(255) NULL,
-        leitura_id NVARCHAR(36) NULL,
-        points_awarded NUMERIC(10, 2) NOT NULL DEFAULT 0,
-        scanned_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        leituraId NVARCHAR(36) NULL,
+        pontosAtribuidos NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        lidoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -268,17 +279,17 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_individual_partidas', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_individual_partidas (
+      CREATE TABLE zonaConquistaPartidaIndividual (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        brincadeira_id NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        brincadeiraId NVARCHAR(36) NOT NULL,
         status NVARCHAR(20) NOT NULL DEFAULT 'active',
-        version INT NOT NULL DEFAULT 0,
-        started_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        finished_at DATETIME2 NULL,
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        versao INT NOT NULL DEFAULT 0,
+        iniciadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        finalizadoEm DATETIME2 NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -286,21 +297,21 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_individual_participant_states', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_individual_participant_states (
+      CREATE TABLE zonaConquistaEstadoParticipanteIndividual (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        partida_id NVARCHAR(36) NOT NULL,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        crianca_id NVARCHAR(36) NOT NULL,
+        partidaId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        criancaId NVARCHAR(36) NOT NULL,
         status NVARCHAR(20) NOT NULL DEFAULT 'active',
-        checkpoints_read INT NOT NULL DEFAULT 0,
-        total_points NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        checkpointsLidos INT NOT NULL DEFAULT 0,
+        pontosTotais NUMERIC(10, 2) NOT NULL DEFAULT 0,
         ranking INT NULL,
-        version INT NOT NULL DEFAULT 0,
-        started_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        finished_at DATETIME2 NULL,
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        versao INT NOT NULL DEFAULT 0,
+        iniciadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        finalizadoEm DATETIME2 NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -308,20 +319,20 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_individual_scans', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_individual_scans (
+      CREATE TABLE zonaConquistaLeituraIndividual (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        partida_id NVARCHAR(36) NOT NULL,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        brincadeira_id NVARCHAR(36) NOT NULL,
-        checkpoint_id NVARCHAR(36) NOT NULL,
-        crianca_id NVARCHAR(36) NOT NULL,
+        partidaId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        brincadeiraId NVARCHAR(36) NOT NULL,
+        checkpointId NVARCHAR(36) NOT NULL,
+        criancaId NVARCHAR(36) NOT NULL,
         uid NVARCHAR(255) NULL,
-        leitura_id NVARCHAR(36) NULL,
-        points_awarded NUMERIC(10, 2) NOT NULL DEFAULT 0,
-        version INT NOT NULL DEFAULT 0,
-        scanned_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        leituraId NVARCHAR(36) NULL,
+        pontosAtribuidos NUMERIC(10, 2) NOT NULL DEFAULT 0,
+        versao INT NOT NULL DEFAULT 0,
+        lidoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -329,13 +340,13 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_individual_checkpoint_protection', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_individual_checkpoint_protection (
+      CREATE TABLE zonaConquistaProtecaoCheckpointIndividual (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        partida_id NVARCHAR(36) NOT NULL,
-        checkpoint_id NVARCHAR(36) NOT NULL,
-        crianca_id NVARCHAR(36) NOT NULL,
-        protection_until DATETIME2 NOT NULL,
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        partidaId NVARCHAR(36) NOT NULL,
+        checkpointId NVARCHAR(36) NOT NULL,
+        criancaId NVARCHAR(36) NOT NULL,
+        protegidoAte DATETIME2 NOT NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -347,48 +358,48 @@ async function ensureZoneConquestSchema() {
   // TEAM indices
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_team_partidas_evento' AND object_id = OBJECT_ID('dbo.zone_conquest_team_partidas'))
-      CREATE INDEX idx_zone_team_partidas_evento ON zone_conquest_team_partidas (evento_id, status)
+      CREATE INDEX idx_zone_team_partidas_evento ON zonaConquistaPartidaTime (eventoId, status)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_team_tempos_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_team_tempos'))
-      CREATE INDEX idx_zone_team_tempos_partida ON zone_conquest_team_tempos (partida_id, time_id)
+      CREATE INDEX idx_zone_team_tempos_partida ON zonaConquistaTempoTime (partidaId, timeId)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_zone_team_scan_reading' AND object_id = OBJECT_ID('dbo.zone_conquest_team_scans'))
-      CREATE UNIQUE INDEX uq_zone_team_scan_reading ON zone_conquest_team_scans (leitura_id) WHERE leitura_id IS NOT NULL
+      CREATE UNIQUE INDEX uq_zone_team_scan_reading ON zonaConquistaLeituraTime (leituraId) WHERE leituraId IS NOT NULL
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_team_scans_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_team_scans'))
-      CREATE INDEX idx_zone_team_scans_partida ON zone_conquest_team_scans (partida_id, round_number)
+      CREATE INDEX idx_zone_team_scans_partida ON zonaConquistaLeituraTime (partidaId, numeroRonda)
   `);
 
   // INDIVIDUAL indices
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_individual_partidas_evento' AND object_id = OBJECT_ID('dbo.zone_conquest_individual_partidas'))
-      CREATE INDEX idx_zone_individual_partidas_evento ON zone_conquest_individual_partidas (evento_id, status)
+      CREATE INDEX idx_zone_individual_partidas_evento ON zonaConquistaPartidaIndividual (eventoId, status)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_individual_states_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_individual_participant_states'))
-      CREATE INDEX idx_zone_individual_states_partida ON zone_conquest_individual_participant_states (partida_id, crianca_id)
+      CREATE INDEX idx_zone_individual_states_partida ON zonaConquistaEstadoParticipanteIndividual (partidaId, criancaId)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_zone_individual_scan_reading' AND object_id = OBJECT_ID('dbo.zone_conquest_individual_scans'))
-      CREATE UNIQUE INDEX uq_zone_individual_scan_reading ON zone_conquest_individual_scans (leitura_id) WHERE leitura_id IS NOT NULL
+      CREATE UNIQUE INDEX uq_zone_individual_scan_reading ON zonaConquistaLeituraIndividual (leituraId) WHERE leituraId IS NOT NULL
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_individual_scans_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_individual_scans'))
-      CREATE INDEX idx_zone_individual_scans_partida ON zone_conquest_individual_scans (partida_id, crianca_id)
+      CREATE INDEX idx_zone_individual_scans_partida ON zonaConquistaLeituraIndividual (partidaId, criancaId)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_individual_protection_checkpoint' AND object_id = OBJECT_ID('dbo.zone_conquest_individual_checkpoint_protection'))
-      CREATE INDEX idx_zone_individual_protection_checkpoint ON zone_conquest_individual_checkpoint_protection (checkpoint_id, protection_until)
+      CREATE INDEX idx_zone_individual_protection_checkpoint ON zonaConquistaProtecaoCheckpointIndividual (checkpointId, protegidoAte)
   `);
 
   // ========================================================================
@@ -398,19 +409,19 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_checkpoint_states', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_checkpoint_states (
+      CREATE TABLE zonaConquistaEstadoCheckpoint (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        partida_id NVARCHAR(36) NOT NULL,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        checkpoint_id NVARCHAR(36) NOT NULL,
-        current_owner_id NVARCHAR(36) NULL,
-        owner_type NVARCHAR(20) NOT NULL DEFAULT 'team',
-        protected_until DATETIME2 NULL,
-        last_conquered_at DATETIME2 NULL,
-        conquest_count INT NOT NULL DEFAULT 0,
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        partidaId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        checkpointId NVARCHAR(36) NOT NULL,
+        donoAtualId NVARCHAR(36) NULL,
+        tipoDono NVARCHAR(20) NOT NULL DEFAULT 'team',
+        protegidoAte DATETIME2 NULL,
+        ultimoConquistadoEm DATETIME2 NULL,
+        totalConquistas INT NOT NULL DEFAULT 0,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -418,20 +429,20 @@ async function ensureZoneConquestSchema() {
   await query(`
     IF OBJECT_ID('dbo.zone_conquest_zone_states', 'U') IS NULL
     BEGIN
-      CREATE TABLE zone_conquest_zone_states (
+      CREATE TABLE zonaConquistaEstadoZona (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        partida_id NVARCHAR(36) NOT NULL,
-        empresa_id NVARCHAR(36) NOT NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        zone_id NVARCHAR(36) NOT NULL,
-        current_owner_id NVARCHAR(36) NULL,
-        owner_type NVARCHAR(20) NOT NULL DEFAULT 'team',
-        is_disputed BIT NOT NULL DEFAULT 0,
-        checkpoints_count INT NOT NULL DEFAULT 0,
-        checkpoints_owned INT NOT NULL DEFAULT 0,
-        last_updated_at DATETIME2 NULL,
-        created_at DATETIME2 NOT NULL DEFAULT GETDATE(),
-        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
+        partidaId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        zonaId NVARCHAR(36) NOT NULL,
+        donoAtualId NVARCHAR(36) NULL,
+        tipoDono NVARCHAR(20) NOT NULL DEFAULT 'team',
+        disputada BIT NOT NULL DEFAULT 0,
+        totalCheckpoints INT NOT NULL DEFAULT 0,
+        checkpointsConquistados INT NOT NULL DEFAULT 0,
+        ultimaAtualizacaoEm DATETIME2 NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE(),
+        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);
@@ -439,22 +450,22 @@ async function ensureZoneConquestSchema() {
   // STATE TRACKING indices
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_checkpoint_state_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_checkpoint_states'))
-      CREATE INDEX idx_zone_checkpoint_state_partida ON zone_conquest_checkpoint_states (partida_id, checkpoint_id)
+      CREATE INDEX idx_zone_checkpoint_state_partida ON zonaConquistaEstadoCheckpoint (partidaId, checkpointId)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_checkpoint_state_owner' AND object_id = OBJECT_ID('dbo.zone_conquest_checkpoint_states'))
-      CREATE INDEX idx_zone_checkpoint_state_owner ON zone_conquest_checkpoint_states (partida_id, current_owner_id)
+      CREATE INDEX idx_zone_checkpoint_state_owner ON zonaConquistaEstadoCheckpoint (partidaId, donoAtualId)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_zone_state_partida' AND object_id = OBJECT_ID('dbo.zone_conquest_zone_states'))
-      CREATE INDEX idx_zone_zone_state_partida ON zone_conquest_zone_states (partida_id, zone_id)
+      CREATE INDEX idx_zone_zone_state_partida ON zonaConquistaEstadoZona (partidaId, zonaId)
   `);
 
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'idx_zone_zone_state_owner' AND object_id = OBJECT_ID('dbo.zone_conquest_zone_states'))
-      CREATE INDEX idx_zone_zone_state_owner ON zone_conquest_zone_states (partida_id, current_owner_id)
+      CREATE INDEX idx_zone_zone_state_owner ON zonaConquistaEstadoZona (partidaId, donoAtualId)
   `);
 }
 

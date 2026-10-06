@@ -7,8 +7,8 @@ async function addCheckpointTerritoryFields() {
     // Adicionar colunas se não existirem
     try {
       await query(`
-        ALTER TABLE checkpoints
-        ADD COLUMN IF NOT EXISTS territory_owner_time_id varchar(36)
+        ALTER TABLE pontoVerificacao
+        ADD COLUMN IF NOT EXISTS territorioDonoTimeId varchar(36)
       `);
     } catch (err) {
       if (!err.message.includes('already exists')) {
@@ -18,8 +18,8 @@ async function addCheckpointTerritoryFields() {
 
     try {
       await query(`
-        ALTER TABLE checkpoints
-        ADD COLUMN IF NOT EXISTS last_conquered_at timestamptz
+        ALTER TABLE pontoVerificacao
+        ADD COLUMN IF NOT EXISTS ultimoConquistadoEm timestamptz
       `);
     } catch (err) {
       if (!err.message.includes('already exists')) {
@@ -30,7 +30,7 @@ async function addCheckpointTerritoryFields() {
     // Criar índice
     try {
       await query(`
-        CREATE INDEX IF NOT EXISTS idx_checkpoints_territory_owner ON checkpoints (territorio_owner_time_id, last_conquered_at)
+        CREATE INDEX IF NOT EXISTS idx_checkpoints_territory_owner ON pontoVerificacao (territorioDonoTimeId, ultimoConquistadoEm)
       `);
     } catch (err) {
       console.warn('⚠️ Erro ao criar índice:', err.message);
@@ -41,7 +41,7 @@ async function addCheckpointTerritoryFields() {
       await query(`
         IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='checkpoints' AND COLUMN_NAME='territory_owner_time_id')
         BEGIN
-          ALTER TABLE checkpoints ADD territory_owner_time_id NVARCHAR(36)
+          ALTER TABLE pontoVerificacao ADD territorioDonoTimeId NVARCHAR(36)
         END
       `);
     } catch (err) {
@@ -52,7 +52,7 @@ async function addCheckpointTerritoryFields() {
       await query(`
         IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='checkpoints' AND COLUMN_NAME='last_conquered_at')
         BEGIN
-          ALTER TABLE checkpoints ADD last_conquered_at DATETIME2
+          ALTER TABLE pontoVerificacao ADD ultimoConquistadoEm DATETIME2
         END
       `);
     } catch (err) {
@@ -64,7 +64,7 @@ async function addCheckpointTerritoryFields() {
       await query(`
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'idx_checkpoints_territory_owner')
         BEGIN
-          CREATE INDEX idx_checkpoints_territory_owner ON checkpoints (territory_owner_time_id, last_conquered_at)
+          CREATE INDEX idx_checkpoints_territory_owner ON pontoVerificacao (territorioDonoTimeId, ultimoConquistadoEm)
         END
       `);
     } catch (err) {

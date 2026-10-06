@@ -176,7 +176,7 @@ async function carregarCatalogo() {
     FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     JOIN pg_attribute a ON a.attrelid = c.oid
-    WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
+    WHERE n.nspname = current_schema() AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
   `);
   const novo = new Map();
   for (const linha of resultado.rows) {
@@ -339,4 +339,7 @@ async function closeDB() {
   pool = null;
 }
 
-module.exports = { connectDB, closeDB, query, queryOne, allQuery, withTransaction, recarregarCatalogo, sql, DB_DRIVER };
+module.exports = {
+  connectDB, closeDB, query, queryOne, allQuery, withTransaction, recarregarCatalogo, sql, DB_DRIVER,
+  adaptPostgresSql, bindNamedParameters
+};

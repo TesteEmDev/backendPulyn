@@ -9,19 +9,19 @@ async function ensureBraceletHistorySchema() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
   if (isPostgres) {
-    await query('ALTER TABLE criancas ADD COLUMN IF NOT EXISTS last_bracelet_code varchar(50)');
+    await query('ALTER TABLE crianca ADD COLUMN IF NOT EXISTS ultimaPulseira varchar(50)');
   } else {
     const column = await queryOne(`
       SELECT 1 AS found FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_NAME = 'criancas' AND COLUMN_NAME = 'last_bracelet_code'
     `);
-    if (!column) await query('ALTER TABLE criancas ADD last_bracelet_code NVARCHAR(50) NULL');
+    if (!column) await query('ALTER TABLE crianca ADD ultimaPulseira NVARCHAR(50) NULL');
   }
 
   // Quem já está com pulseira ganha o histórico agora, antes de qualquer liberação.
   await query(`
-    UPDATE criancas SET last_bracelet_code = bracelet_code
-    WHERE bracelet_code IS NOT NULL AND last_bracelet_code IS NULL
+    UPDATE crianca SET ultimaPulseira = codigoPulseira
+    WHERE codigoPulseira IS NOT NULL AND ultimaPulseira IS NULL
   `);
 }
 

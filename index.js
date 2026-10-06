@@ -39,6 +39,8 @@ const familiasRoutes = require('./routes/familias');
 const qrcodeRoutes = require('./routes/qrcode');
 const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
+const { ensureNomenclaturaSchema } = require('./migrations/nomenclatura');
+const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -201,7 +203,7 @@ global.broadcastAll = (message) => {
 async function persistEventMode(eventoId, mode, gameType = currentGameType, details = {}) {
   if (!eventoId || eventoId === 'global') return;
   const evento = await queryOne(
-    'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+    'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return;
@@ -288,9 +290,9 @@ wss.on('connection', async (ws, req) => {
   if (wsUser && !controlScope && wsUser.role !== 'master') {
     try {
       const authorizedEvent = await queryOne(
-        `SELECT id FROM eventos
-         WHERE LOWER(id) = LOWER(@eventoId)
-           AND LOWER(empresa_id) = LOWER(@empresaId)`,
+        `SELECT eventoId FROM evento
+         WHERE LOWER(eventoId) = LOWER(@eventoId)
+           AND LOWER(empresaId) = LOWER(@empresaId)`,
         { eventoId, empresaId: wsUser.empresa_id }
       );
       if (!authorizedEvent) {
@@ -334,9 +336,9 @@ wss.on('connection', async (ws, req) => {
   if (KIOSK_ROLES.has(wsUser?.role) && !controlScope) {
     try {
       const kioskEvent = await queryOne(
-        `SELECT id FROM eventos
-         WHERE id = @eventoId
-           AND empresa_id = @empresaId
+        `SELECT eventoId FROM evento
+         WHERE eventoId = @eventoId
+           AND empresaId = @empresaId
            AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
         { eventoId, empresaId: wsUser.empresa_id }
       );
@@ -455,7 +457,7 @@ app.get('/api/debug/game-status', verifyToken, requireRole('admin', 'reception',
 app.get('/api/debug/game-state/:eventoId', verifyToken, requireRole('admin', 'reception', 'game_master', 'display', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
       { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -491,7 +493,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -500,7 +502,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const game = await queryOne(
-      'SELECT id, name, type, evento_id, empresa_id FROM brincadeiras WHERE LOWER(id) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
+      'SELECT brincadeiraId, nome, tipo, eventoId, empresaId FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
       { gameId }
     );
     if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
@@ -513,9 +515,9 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     const linkedEvent = directEventMatch
       ? true
       : await queryOne(
-        `SELECT evento_id FROM evento_brincadeiras
-         WHERE LOWER(brincadeira_id) = LOWER(@gameId)
-           AND LOWER(evento_id) = LOWER(@eventoId)`,
+        `SELECT eventoId FROM eventoBrincadeira
+         WHERE LOWER(brincadeiraId) = LOWER(@gameId)
+           AND LOWER(eventoId) = LOWER(@eventoId)`,
         { gameId, eventoId }
       );
     if (!directEventMatch && !linkedEvent) {
@@ -586,7 +588,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [INICIAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+      `SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -603,9 +605,9 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     }
 
     const selectedGame = await queryOne(
-      `SELECT id, name, type, evento_id, empresa_id
-       FROM brincadeiras
-       WHERE LOWER(id) = LOWER(@gameId)
+      `SELECT brincadeiraId, nome, tipo, eventoId, empresaId
+       FROM brincadeira
+       WHERE LOWER(brincadeiraId) = LOWER(@gameId)
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { gameId }
     );
@@ -621,9 +623,9 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     const linkedEvent = directEventMatch
       ? true
       : await queryOne(
-        `SELECT evento_id FROM evento_brincadeiras
-         WHERE LOWER(brincadeira_id) = LOWER(@gameId)
-           AND LOWER(evento_id) = LOWER(@eventoId)`,
+        `SELECT eventoId FROM eventoBrincadeira
+         WHERE LOWER(brincadeiraId) = LOWER(@gameId)
+           AND LOWER(eventoId) = LOWER(@eventoId)`,
         { gameId, eventoId }
       );
     if (!directEventMatch && !linkedEvent) {
@@ -682,14 +684,14 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // pode ficar com a duração já estourada, e checkExpiredGames acabaria
     // encerrando o evento inteiro pouco depois deste jogo novo começar.
     await query(
-      `UPDATE game_sessions SET status = 'finished', finished_at = CURRENT_TIMESTAMP
-       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
+      `UPDATE sessaoJogo SET status = 'finished', finalizadoEm = CURRENT_TIMESTAMP
+       WHERE LOWER(eventoId) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
 
     // 🆕 CRIAR NOVO REGISTRO DE SESSÃO NO BANCO
     await query(
-      `INSERT INTO game_sessions (id, evento_id, brincadeira_id, game_type, mode, status, started_at, created_at, updated_at)
+      `INSERT INTO sessaoJogo (id, eventoId, brincadeiraId, tipoJogo, modo, status, iniciadoEm, criadoEm, atualizadoEm)
        VALUES (@sessionId, @eventoId, @gameId, @gameType, @mode, @status, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
       {
         sessionId,
@@ -709,14 +711,14 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     // Cada novo início começa sem domínio visual da partida anterior.
     await query(`
-      UPDATE checkpoints SET
-        territory_owner_time_id = NULL,
-        territory_owner_crianca_id = NULL,
-        territory_locked_until = NULL,
-        territory_cooldown_until = NULL,
-        last_conquered_at = NULL
-      WHERE LOWER(evento_id) = LOWER(@eventoId)
-        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+      UPDATE pontoVerificacao SET
+        territorioDonoTimeId = NULL,
+        territorioDonosCriancaId = NULL,
+        territorioTravadoAte = NULL,
+        territorioCooldownAte = NULL,
+        ultimoConquistadoEm = NULL
+      WHERE LOWER(eventoId) = LOWER(@eventoId)
+        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
     `, { eventoId });
     console.log(`   ✓ Territórios do evento limpos para uma nova partida`);
     
@@ -730,7 +732,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         } = require('./utils/zoneConquestStateManager');
         
         const evento = await queryOne(
-          `SELECT empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+          `SELECT empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)`,
           { eventoId }
         );
         
@@ -760,11 +762,11 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             let teamsWithChildren = [];
             try {
               teamsWithChildren = await allQuery(
-                `SELECT DISTINCT t.id, t.created_at
-                 FROM times t
-                 INNER JOIN criancas c ON c.time_id = t.id
-                 WHERE LOWER(t.evento_id) = LOWER(@eventoId) AND c.status = 'active'
-                 ORDER BY t.created_at ASC`,
+                `SELECT DISTINCT t.timeId, t.criadoEm
+                 FROM time t
+                 INNER JOIN crianca c ON c.timeId = t.timeId
+                 WHERE LOWER(t.eventoId) = LOWER(@eventoId) AND c.status = 'active'
+                 ORDER BY t.criadoEm ASC`,
                 { eventoId }
               );
             } catch (err) {
@@ -774,7 +776,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
             const partidaId = require('uuid').v4();
             await query(
-              `INSERT INTO zone_conquest_team_partidas (id, evento_id, empresa_id, brincadeira_id, status, round_number, current_team_id, started_at, created_at, updated_at)
+              `INSERT INTO zonaConquistaPartidaTime (id, eventoId, empresaId, brincadeiraId, status, numeroRonda, timeAtualId, iniciadoEm, criadoEm, atualizadoEm)
                VALUES (@id, @eventoId, @empresaId, @brincadeiraId, 'active', 1, @currentTeamId, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
               {
                 id: partidaId,
@@ -789,7 +791,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             try {
               for (const time of teamsWithChildren) {
                 await query(
-                  `INSERT INTO zone_conquest_team_tempos (id, partida_id, empresa_id, evento_id, time_id, status, zones_dominated, checkpoints_read, total_points, started_at)
+                  `INSERT INTO zonaConquistaTempoTime (id, partidaId, empresaId, eventoId, timeId, status, zonasDominadas, checkpointsLidos, pontosTotais, iniciadoEm)
                    VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, 'active', 0, 0, 0, CURRENT_TIMESTAMP)`,
                   {
                     id: require('uuid').v4(),
@@ -829,10 +831,10 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // O status do evento não é mexido aqui: iniciar um jogo só garante que o
     // evento (se ainda agendado) passe a ativo; parar o jogo nunca o desativa.
     const updateResult = await query(
-      `UPDATE eventos SET
-        active_brincadeira_id = @gameId,
-        active_game_type = @gameType
-       WHERE LOWER(id) = LOWER(@eventoId)`,
+      `UPDATE evento SET
+        brincadeiraAtivaId = @gameId,
+        tipoJogoAtivo = @gameType
+       WHERE LOWER(eventoId) = LOWER(@eventoId)`,
       { eventoId, gameId, gameType }
     );
     console.log(`   Atualização executada`);
@@ -928,7 +930,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     console.log(`✅ [INICIAR-JOGO] Processo finalizado com sucesso!\n`);
     
     const eventoDepois = await queryOne(
-      `SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+      `SELECT eventoId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)`,
       { eventoId }
     );
     res.json({
@@ -958,7 +960,7 @@ async function stopGameForEvento(eventoId) {
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [PARAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT id, empresa_id, status FROM eventos WHERE id = @eventoId`,
+      `SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @eventoId`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -993,21 +995,21 @@ async function stopGameForEvento(eventoId) {
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
-      UPDATE checkpoints SET
-        territory_owner_time_id = NULL,
-        territory_locked_until = NULL,
-        territory_cooldown_until = NULL,
-        last_conquered_at = NULL
-      WHERE evento_id = @eventoId
-        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+      UPDATE pontoVerificacao SET
+        territorioDonoTimeId = NULL,
+        territorioTravadoAte = NULL,
+        territorioCooldownAte = NULL,
+        ultimoConquistadoEm = NULL
+      WHERE eventoId = @eventoId
+        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
     `, { eventoId });
     console.log(`   ✓ Domínios dos checkpoints encerrados`);
     
     // 🆕 ATUALIZAR STATUS DA SESSÃO PARA 'finished'
     await query(
-      `UPDATE game_sessions 
-       SET status = 'finished', finished_at = GETDATE()
-       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
+      `UPDATE sessaoJogo 
+       SET status = 'finished', finalizadoEm = GETDATE()
+       WHERE LOWER(eventoId) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
     console.log(`   ✓ Sessões de jogo finalizadas`);
@@ -1016,8 +1018,8 @@ async function stopGameForEvento(eventoId) {
     // finalizá-las: stopZoneConquestTeam já marca status='finished', e o
     // clearPartidaStates logo abaixo precisa desses ids para limpar os states.
     const activeTeamPartidas = await allQuery(
-      `SELECT id FROM zone_conquest_team_partidas
-       WHERE LOWER(evento_id) = LOWER(@eventoId) AND status = 'active'`,
+      `SELECT id FROM zonaConquistaPartidaTime
+       WHERE LOWER(eventoId) = LOWER(@eventoId) AND status = 'active'`,
       { eventoId }
     );
 
@@ -1068,7 +1070,7 @@ async function stopGameForEvento(eventoId) {
     // Parar o jogo não muda o status do evento (ciclo de vida: agendado/ativo/
     // encerrado); só o encerramento do evento o fecha. Ver utils/eventLifecycle.js
     const eventoDepois = await queryOne(
-      `SELECT id, status FROM eventos WHERE id = @eventoId`,
+      `SELECT eventoId, status FROM evento WHERE eventoId = @eventoId`,
       { eventoId }
     );
     console.log(`✅ [PARAR-JOGO] Jogo parado. Status do evento (inalterado): ${eventoDepois?.status || 'NÃO ENCONTRADO'}`);
@@ -1139,7 +1141,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     }
 
     const evento = await queryOne(
-      `SELECT id, empresa_id FROM eventos WHERE id = @eventoId`,
+      `SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId`,
       { eventoId }
     );
     if (!evento) {
@@ -1169,17 +1171,17 @@ async function checkExpiredGames() {
     // Considera só a sessão 'active' mais recente de cada evento — uma sessão
     // fantasma mais antiga (nunca finalizada) não pode derrubar o jogo atual.
     const activeSessions = await allQuery(`
-      SELECT gs.evento_id, gs.started_at, b.duration
-      FROM game_sessions gs
-      INNER JOIN brincadeiras b ON b.id = gs.brincadeira_id
+      SELECT gs.eventoId, gs.iniciadoEm, b.duracao
+      FROM sessaoJogo gs
+      INNER JOIN brincadeira b ON b.brincadeiraId = gs.brincadeiraId
       WHERE gs.status = 'active'
-        AND b.duration IS NOT NULL
-        AND b.duration > 0
+        AND b.duracao IS NOT NULL
+        AND b.duracao > 0
         AND NOT EXISTS (
-          SELECT 1 FROM game_sessions gs2
-          WHERE gs2.evento_id = gs.evento_id
+          SELECT 1 FROM sessaoJogo gs2
+          WHERE gs2.eventoId = gs.eventoId
             AND gs2.status = 'active'
-            AND gs2.started_at > gs.started_at
+            AND gs2.iniciadoEm > gs.iniciadoEm
         )
     `);
 
@@ -1214,14 +1216,14 @@ async function checkStaleTeamCheckpoints() {
   try {
     const cutoff = new Date(Date.now() - TEAM_CHECKPOINT_RESET_MS);
     const staleCheckpoints = await allQuery(
-      `SELECT c.id, c.evento_id
-       FROM checkpoints c
-       WHERE c.territory_owner_time_id IS NOT NULL
-         AND c.last_conquered_at IS NOT NULL
-         AND c.last_conquered_at < @cutoff
+      `SELECT c.checkpointId, c.eventoId
+       FROM pontoVerificacao c
+       WHERE c.territorioDonoTimeId IS NOT NULL
+         AND c.ultimoConquistadoEm IS NOT NULL
+         AND c.ultimoConquistadoEm < @cutoff
          AND EXISTS (
-           SELECT 1 FROM zone_conquest_team_partidas p
-           WHERE LOWER(p.evento_id) = LOWER(c.evento_id) AND p.status = 'active'
+           SELECT 1 FROM zonaConquistaPartidaTime p
+           WHERE LOWER(p.eventoId) = LOWER(c.eventoId) AND p.status = 'active'
          )`,
       { cutoff }
     );
@@ -1229,10 +1231,10 @@ async function checkStaleTeamCheckpoints() {
     const eventosAfetados = new Set();
     for (const checkpoint of staleCheckpoints) {
       await query(
-        `UPDATE checkpoints SET
-           territory_owner_time_id = NULL,
-           territory_owner_crianca_id = NULL
-         WHERE id = @id`,
+        `UPDATE pontoVerificacao SET
+           territorioDonoTimeId = NULL,
+           territorioDonosCriancaId = NULL
+         WHERE checkpointId = @id`,
         { id: checkpoint.id }
       );
       eventosAfetados.add(checkpoint.evento_id);
@@ -1263,7 +1265,7 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
   try {
     const { checkpointId } = req.params;
     const checkpoint = await queryOne(
-      'SELECT id, empresa_id, checkpoint_purpose FROM checkpoints WHERE id = @checkpointId',
+      'SELECT checkpointId, empresaId, proposito FROM pontoVerificacao WHERE checkpointId = @checkpointId',
       { checkpointId }
     );
     if (!checkpoint) {
@@ -1274,11 +1276,11 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
     }
 
     await query(
-      `UPDATE checkpoints SET
-        territory_locked_until = NULL,
-        territory_cooldown_until = NULL,
-        territory_owner_time_id = NULL
-       WHERE id = @checkpointId`,
+      `UPDATE pontoVerificacao SET
+        territorioTravadoAte = NULL,
+        territorioCooldownAte = NULL,
+        territorioDonoTimeId = NULL
+       WHERE checkpointId = @checkpointId`,
       { checkpointId }
     );
     console.log(`✅ Territory lock resetado para checkpoint: ${checkpointId}`);
@@ -1293,13 +1295,13 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
 app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const territoryScope = isMaster(req)
-      ? " WHERE LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'"
-      : " WHERE empresa_id = @empresaId AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'";
+      ? " WHERE LOWER(COALESCE(proposito, 'game')) <> 'reception'"
+      : " WHERE empresaId = @empresaId AND LOWER(COALESCE(proposito, 'game')) <> 'reception'";
     await query(
-      `UPDATE checkpoints SET
-        territory_locked_until = NULL,
-        territory_cooldown_until = NULL,
-        territory_owner_time_id = NULL${territoryScope ? territoryScope : ''}`,
+      `UPDATE pontoVerificacao SET
+        territorioTravadoAte = NULL,
+        territorioCooldownAte = NULL,
+        territorioDonoTimeId = NULL${territoryScope ? territoryScope : ''}`,
       isMaster(req) ? {} : { empresaId: req.user.empresa_id }
     );
     console.log(`✅ Todos os territory locks foram resetados`);
@@ -1315,7 +1317,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
   try {
     const { eventoId } = req.params;
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) {
@@ -1329,25 +1331,25 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
     
     // 1. Resetar scores das crianças
     await query(
-      `UPDATE criancas SET scores = 0 WHERE evento_id = @eventoId`,
+      `UPDATE crianca SET pontos = 0 WHERE eventoId = @eventoId`,
       { eventoId }
     );
     console.log(`   ✓ Scores das crianças resetados`);
     
     // 2. Resetar pontos dos times
     await query(
-      `UPDATE times SET points = 0 WHERE evento_id = @eventoId`,
+      `UPDATE time SET pontos = 0 WHERE eventoId = @eventoId`,
       { eventoId }
     );
     console.log(`   ✓ Pontos dos times resetados`);
     
     // 3. Limpar histórico de leituras (opcional)
     await query(
-      `DELETE FROM leituras
-       WHERE checkpoint_id IN (
-         SELECT id FROM checkpoints
-         WHERE evento_id = @eventoId
-           AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+      `DELETE FROM leitura
+       WHERE checkpointId IN (
+         SELECT checkpointId FROM pontoVerificacao
+         WHERE eventoId = @eventoId
+           AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
        )`,
       { eventoId }
     );
@@ -1357,32 +1359,32 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
     // anteriores são histórico e não podem ser reabertas pelo reset.
     const latestMonsterGame = await queryOne(`
       SELECT TOP 1 id
-      FROM monster_hunt_partidas
-      WHERE LOWER(evento_id) = LOWER(@eventoId)
+      FROM monsterCacaPartida
+      WHERE LOWER(eventoId) = LOWER(@eventoId)
         AND status <> 'finished'
-      ORDER BY started_at DESC`, { eventoId });
+      ORDER BY iniciadoEm DESC`, { eventoId });
     if (latestMonsterGame?.id) {
       await query(
-        `DELETE FROM monster_hunt_scans WHERE partida_id = @partidaId`,
+        `DELETE FROM monsterCacaLeitura WHERE partidaId = @partidaId`,
         { partidaId: latestMonsterGame.id }
       );
       await query(
-        `UPDATE monster_hunt_team_states SET
-           hp = max_hp,
+        `UPDATE monsterCacaEstadoTime SET
+           vida = vidaMaxima,
            status = 'active',
-           defeated_at = NULL,
-           victory_at = NULL,
-           version = version + 1
-         WHERE partida_id = @partidaId`,
+           derrotadoEm = NULL,
+           vitoriaEm = NULL,
+           versao = versao + 1
+         WHERE partidaId = @partidaId`,
         { partidaId: latestMonsterGame.id }
       );
       await query(
-        `UPDATE monster_hunt_partidas SET
-           hp = max_hp,
+        `UPDATE monsterCacaPartida SET
+           vida = vidaMaxima,
            status = 'active',
-           winner_time_id = NULL,
-           finished_at = NULL,
-           version = version + 1
+           timeVencedorId = NULL,
+           finalizadoEm = NULL,
+           versao = versao + 1
          WHERE id = @partidaId`,
         { partidaId: latestMonsterGame.id }
       );
@@ -1393,19 +1395,19 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
 
     // 4. Limpar histórico de pontuações (opcional)
     await query(
-      `DELETE FROM pontuacoes WHERE evento_id = @eventoId`,
+      `DELETE FROM pontuacao WHERE eventoId = @eventoId`,
       { eventoId }
     );
     console.log(`   ✓ Histórico de pontuações deletado`);
     
     // 5. Resetar territories
     await query(
-      `UPDATE checkpoints SET 
-        territory_locked_until = NULL,
-        territory_cooldown_until = NULL,
-        territory_owner_time_id = NULL
-       WHERE evento_id = @eventoId
-         AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
+      `UPDATE pontoVerificacao SET 
+        territorioTravadoAte = NULL,
+        territorioCooldownAte = NULL,
+        territorioDonoTimeId = NULL
+       WHERE eventoId = @eventoId
+         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
       { eventoId }
     );
     console.log(`   ✓ Territories resetados`);
@@ -1451,8 +1453,8 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
   currentGameType = 'none';
   currentMode = 'idle';
   query(
-    `UPDATE eventos SET active_brincadeira_id = NULL, active_game_type = 'none'
-     WHERE LOWER(id) = LOWER(@eventoId)`,
+    `UPDATE evento SET brincadeiraAtivaId = NULL, tipoJogoAtivo = 'none'
+     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
     console.error('❌ Erro ao limpar jogo ativo do evento após conclusão do tesouro:', error.message);
@@ -1488,8 +1490,8 @@ global.finishMonsterGameState = (eventoId, finishedAt = new Date().toISOString()
     currentMode = 'idle';
   }
   query(
-    `UPDATE eventos SET active_brincadeira_id = NULL, active_game_type = 'none'
-     WHERE LOWER(id) = LOWER(@eventoId)`,
+    `UPDATE evento SET brincadeiraAtivaId = NULL, tipoJogoAtivo = 'none'
+     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
     console.error('❌ Erro ao limpar jogo ativo do evento após derrota do monstro:', error.message);
@@ -1511,7 +1513,7 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
     const checkpointId = req.query.checkpointId;
     if (checkpointId) {
       const checkpoint = await queryOne(
-        'SELECT evento_id FROM checkpoints WHERE id = @checkpointId',
+        'SELECT eventoId FROM pontoVerificacao WHERE checkpointId = @checkpointId',
         { checkpointId }
       );
       if (checkpoint?.evento_id) {
@@ -1545,7 +1547,7 @@ app.post('/api/debug/checkpoint-mode', verifyToken, requireRole('admin', 'game_m
 
   if (eventoId) {
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -1583,7 +1585,7 @@ app.post('/api/debug/fix-bracelet-status', verifyToken, requireRole('master'), a
     
     // Atualizar todas as pulseiras com status inválido para "disponível"
     const result = await query(
-      `UPDATE pulseiras 
+      `UPDATE pulseira 
        SET status = 'disponivel' 
        WHERE status NOT IN ('disponivel', 'em_uso', 'perdida', 'bloqueada')`
     );
@@ -1601,7 +1603,7 @@ app.get('/api/debug/bracelet-statuses', verifyToken, requireRole('admin', 'recep
   try {
     const result = await allQuery(`
       SELECT DISTINCT status, COUNT(*) as total 
-      FROM pulseiras 
+      FROM pulseira 
       GROUP BY status
     `);
     
@@ -1619,7 +1621,7 @@ app.post('/api/debug/reset-all-bracelets', verifyToken, requireRole('master'), a
     console.log(`🔄 Resetando todas as pulseiras para 'disponível'...`);
     
     // 1. Limpar vinculação de crianças com pulseiras
-    await query(`UPDATE pulseiras SET status = 'disponivel', crianca_id = NULL`);
+    await query(`UPDATE pulseira SET status = 'disponivel', criancaId = NULL`);
     
     console.log(`✅ Todas as pulseiras resetadas`);
     res.json({ ok: true, message: 'Todas as pulseiras resetadas para disponível' });
@@ -1636,10 +1638,10 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
     
     // 1. Listar checkpoints sem empresa_id
     const orphanedCheckpoints = await allQuery(`
-      SELECT id, name, evento_id, empresa_id
-      FROM checkpoints
-      WHERE empresa_id IS NULL
-      ORDER BY name
+      SELECT checkpointId, nome, eventoId, empresaId
+      FROM pontoVerificacao
+      WHERE empresaId IS NULL
+      ORDER BY nome
     `);
     
     console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints sem empresa_id:`);
@@ -1659,9 +1661,9 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
     // 2. Deletar leituras associadas
     console.log(`   • Deletando leituras dos checkpoints...`);
     await query(`
-      DELETE FROM leituras 
-      WHERE checkpoint_id IN (
-        SELECT id FROM checkpoints WHERE empresa_id IS NULL
+      DELETE FROM leitura 
+      WHERE checkpointId IN (
+        SELECT checkpointId FROM pontoVerificacao WHERE empresaId IS NULL
       )
     `);
     console.log(`   ✓ Leituras deletadas`);
@@ -1669,9 +1671,9 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
     // 3. Deletar pontuações associadas
     console.log(`   • Deletando pontuações dos checkpoints...`);
     await query(`
-      DELETE FROM pontuacoes 
-      WHERE checkpoint_id IN (
-        SELECT id FROM checkpoints WHERE empresa_id IS NULL
+      DELETE FROM pontuacao 
+      WHERE checkpointId IN (
+        SELECT checkpointId FROM pontoVerificacao WHERE empresaId IS NULL
       )
     `);
     console.log(`   ✓ Pontuações deletadas`);
@@ -1679,8 +1681,8 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
     // 4. Deletar os checkpoints
     console.log(`   • Deletando checkpoints...`);
     const result = await query(`
-      DELETE FROM checkpoints 
-      WHERE empresa_id IS NULL
+      DELETE FROM pontoVerificacao 
+      WHERE empresaId IS NULL
     `);
     console.log(`   ✓ Checkpoints deletados`);
     
@@ -1710,10 +1712,10 @@ app.get('/api/debug/list-checkpoints-without-empresa', verifyToken, requireRole(
     console.log(`📋 Listando checkpoints sem empresa_id...`);
     
     const orphanedCheckpoints = await allQuery(`
-      SELECT id, name, evento_id, empresa_id, status, created_at
-      FROM checkpoints
-      WHERE empresa_id IS NULL
-      ORDER BY name
+      SELECT checkpointId, nome, eventoId, empresaId, status, criadoEm
+      FROM pontoVerificacao
+      WHERE empresaId IS NULL
+      ORDER BY nome
     `);
     
     console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints`);
@@ -1736,23 +1738,23 @@ app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), as
     
     // 1. Desassociar todas as pulseiras das crianças
     console.log(`   • Resetando pulseiras...`);
-    await query(`UPDATE pulseiras SET status = 'disponivel', crianca_id = NULL`);
+    await query(`UPDATE pulseira SET status = 'disponivel', criancaId = NULL`);
     
     // 2. Deletar todas as crianças
     console.log(`   • Deletando crianças...`);
-    await query(`DELETE FROM criancas`);
+    await query(`DELETE FROM crianca`);
     
     // 3. Resetar times (zerar pontos)
     console.log(`   • Resetando times...`);
-    await query(`UPDATE times SET points = 0`);
+    await query(`UPDATE time SET pontos = 0`);
     
     // 4. Resetar checkpoints (limpar territories, lock, cooldown, scores)
     console.log(`   • Resetando checkpoints...`);
     await query(`
-      UPDATE checkpoints SET 
-        territory_owner_time_id = NULL,
-        territory_locked_until = NULL,
-        territory_cooldown_until = NULL,
+      UPDATE pontoVerificacao SET 
+        territorioDonoTimeId = NULL,
+        territorioTravadoAte = NULL,
+        territorioCooldownAte = NULL,
         status = 'offline'
     `);
     
@@ -1779,8 +1781,8 @@ app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), 
     console.log(`🔗 Vinculando todas as pulseiras com crianças...`);
     
     // Get all pulseiras and crianças ordered
-    const pulseiras = await allQuery(`SELECT id = ROW_NUMBER() OVER (ORDER BY code), code FROM pulseiras ORDER BY code`);
-    const criancas = await allQuery(`SELECT id, name, bracelet_code FROM criancas ORDER BY id`);
+    const pulseiras = await allQuery(`SELECT id = ROW_NUMBER() OVER (ORDER BY codigo), codigo FROM pulseira ORDER BY codigo`);
+    const criancas = await allQuery(`SELECT criancaId, nome, codigoPulseira FROM crianca ORDER BY criancaId`);
     
     if (pulseiras.length === 0 || criancas.length === 0) {
       return res.status(400).json({ error: 'Pulseiras ou crianças não encontradas' });
@@ -1788,12 +1790,12 @@ app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), 
     
     // Simple approach: update pulseiras with em_uso status
     await query(`
-      UPDATE pulseiras 
+      UPDATE pulseira 
       SET status = 'em_uso'
-      WHERE code IN (
-        SELECT TOP ${Math.min(pulseiras.length, criancas.length)} code 
-        FROM pulseiras 
-        ORDER BY code
+      WHERE codigo IN (
+        SELECT TOP ${Math.min(pulseiras.length, criancas.length)} codigo 
+        FROM pulseira 
+        ORDER BY codigo
       )
     `);
     
@@ -1803,7 +1805,7 @@ app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), 
       if (idx < pulseiras.length) {
         const pulseira = pulseiras[idx];
         await query(
-          `UPDATE criancas SET bracelet_code = @code WHERE id = @id`,
+          `UPDATE crianca SET codigoPulseira = @code WHERE criancaId = @id`,
           { code: pulseira.code, id: crianca.id }
         );
         idx++;
@@ -1936,6 +1938,9 @@ async function startServer() {
   try {
     // O schema familiar precisa existir antes de aceitar requisições.
     // Caso contrário, /api/familias/pending pode retornar 500 durante o deploy.
+    // A nomenclatura (português/camelCase) precisa ser aplicada antes de qualquer outra migração.
+    await ensureNomenclaturaSchema();
+    await ensureCacaTesouroSchema();
     await ensureFamilySchema();
     await ensureGameStateSchema();
     await ensureEventControlSchema();
@@ -2008,34 +2013,34 @@ async function startServer() {
     
     // 1. TABELA pontuacoes
     try {
-      await query('ALTER TABLE pontuacoes DROP CONSTRAINT FK__pontuacoe__brinc__0E6E26BF');
+      await query('ALTER TABLE pontuacao DROP CONSTRAINT FK__pontuacoe__brinc__0E6E26BF');
     } catch (e) {}
     
-    await query('ALTER TABLE pontuacoes ALTER COLUMN brincadeira_id UNIQUEIDENTIFIER NULL');
+    await query('ALTER TABLE pontuacao ALTER COLUMN brincadeiraId UNIQUEIDENTIFIER NULL');
     
     try {
       await query(`
-        ALTER TABLE pontuacoes
+        ALTER TABLE pontuacao
         ADD CONSTRAINT FK__pontuacoes_brincadeiras_nullable
-        FOREIGN KEY (brincadeira_id) 
-        REFERENCES brincadeiras(id) 
+        FOREIGN KEY (brincadeiraId) 
+        REFERENCES brincadeira(brincadeiraId) 
         ON DELETE SET NULL
       `);
     } catch (e) {}
     
     // 2. TABELA leituras
     try {
-      await query('ALTER TABLE leituras DROP CONSTRAINT FK__leituras__brinca__08B54D69');
+      await query('ALTER TABLE leitura DROP CONSTRAINT FK__leituras__brinca__08B54D69');
     } catch (e) {}
     
-    await query('ALTER TABLE leituras ALTER COLUMN brincadeira_id UNIQUEIDENTIFIER NULL');
+    await query('ALTER TABLE leitura ALTER COLUMN brincadeiraId UNIQUEIDENTIFIER NULL');
     
     try {
       await query(`
-        ALTER TABLE leituras
+        ALTER TABLE leitura
         ADD CONSTRAINT FK__leituras_brincadeiras_nullable
-        FOREIGN KEY (brincadeira_id) 
-        REFERENCES brincadeiras(id) 
+        FOREIGN KEY (brincadeiraId) 
+        REFERENCES brincadeira(brincadeiraId) 
         ON DELETE SET NULL
       `);
     } catch (e) {}
@@ -2058,8 +2063,8 @@ async function startServer() {
     if (!checkColumn) {
       console.log('  • Adicionando coluna last_seen em checkpoints...');
       await query(`
-        ALTER TABLE checkpoints
-        ADD last_seen DATETIME NULL DEFAULT GETDATE()
+        ALTER TABLE pontoVerificacao
+        ADD ultimoVisto DATETIME NULL DEFAULT GETDATE()
       `);
       console.log('✅ Coluna last_seen adicionada!\n');
     } else {
@@ -2074,20 +2079,20 @@ async function startServer() {
     await query(`
       IF OBJECT_ID('dbo.caca_tesouro_partidas', 'U') IS NULL
       BEGIN
-        CREATE TABLE caca_tesouro_partidas (
-          id NVARCHAR(36) NOT NULL PRIMARY KEY,
-          evento_id NVARCHAR(36) NOT NULL,
-          brincadeira_id NVARCHAR(36) NOT NULL,
+        CREATE TABLE cacaTesourPartida (
+          partidaId NVARCHAR(36) NOT NULL PRIMARY KEY,
+          eventoId NVARCHAR(36) NOT NULL,
+          brincadeiraId NVARCHAR(36) NOT NULL,
           status NVARCHAR(20) NOT NULL,
-          round_number INT NOT NULL,
-          starting_team_id NVARCHAR(36) NULL,
-          turn_team_id NVARCHAR(36) NULL,
-          turn_available_at DATETIME2 NULL,
-          target_checkpoint_id NVARCHAR(36) NULL,
-          completed_checkpoint_ids NVARCHAR(MAX) NULL,
-          started_at DATETIME2 NOT NULL,
-          round_started_at DATETIME2 NOT NULL,
-          finished_at DATETIME2 NULL
+          numeroRonda INT NOT NULL,
+          timeInicialId NVARCHAR(36) NULL,
+          timeVezId NVARCHAR(36) NULL,
+          vezDisponvelEm DATETIME2 NULL,
+          checkpointAlvoId NVARCHAR(36) NULL,
+          checkpointsCompletadosIds NVARCHAR(MAX) NULL,
+          iniciadoEm DATETIME2 NOT NULL,
+          rondaIniciadaEm DATETIME2 NOT NULL,
+          finalizadoEm DATETIME2 NULL
         )
       END
     `);
@@ -2095,18 +2100,18 @@ async function startServer() {
     await query(`
       IF OBJECT_ID('dbo.caca_tesouro_scans', 'U') IS NULL
       BEGIN
-        CREATE TABLE caca_tesouro_scans (
-          id NVARCHAR(36) NOT NULL PRIMARY KEY,
-          partida_id NVARCHAR(36) NOT NULL,
-          evento_id NVARCHAR(36) NOT NULL,
-          brincadeira_id NVARCHAR(36) NOT NULL,
-          round_number INT NOT NULL,
-          checkpoint_id NVARCHAR(36) NOT NULL,
-          crianca_id NVARCHAR(36) NOT NULL,
-          time_id NVARCHAR(36) NOT NULL,
+        CREATE TABLE cacaTesourScan (
+          scanId NVARCHAR(36) NOT NULL PRIMARY KEY,
+          partidaId NVARCHAR(36) NOT NULL,
+          eventoId NVARCHAR(36) NOT NULL,
+          brincadeiraId NVARCHAR(36) NOT NULL,
+          numeroRonda INT NOT NULL,
+          checkpointId NVARCHAR(36) NOT NULL,
+          criancaId NVARCHAR(36) NOT NULL,
+          timeId NVARCHAR(36) NOT NULL,
           uid NVARCHAR(100) NOT NULL,
-          scanned_at DATETIME2 NOT NULL,
-          CONSTRAINT UQ_caca_tesouro_scan_crianca UNIQUE (partida_id, round_number, crianca_id)
+          leroEm DATETIME2 NOT NULL,
+          CONSTRAINT UQ_caca_tesouro_scan_crianca UNIQUE (partidaId, numeroRonda, criancaId)
         )
       END
     `);
@@ -2125,8 +2130,8 @@ async function startServer() {
 
     if (!startingTeamColumn) {
       await query(`
-        ALTER TABLE caca_tesouro_partidas
-        ADD starting_team_id NVARCHAR(36) NULL
+        ALTER TABLE cacaTesourPartida
+        ADD timeInicialId NVARCHAR(36) NULL
       `);
       console.log('✅ Coluna starting_team_id adicionada na migração 020!\n');
     } else {
@@ -2151,14 +2156,14 @@ async function startServer() {
 
     if (!turnTeamColumn) {
       await query(`
-        ALTER TABLE caca_tesouro_partidas
-        ADD turn_team_id NVARCHAR(36) NULL
+        ALTER TABLE cacaTesourPartida
+        ADD timeVezId NVARCHAR(36) NULL
       `);
     }
     if (!turnAvailableColumn) {
       await query(`
-        ALTER TABLE caca_tesouro_partidas
-        ADD turn_available_at DATETIME2 NULL
+        ALTER TABLE cacaTesourPartida
+        ADD vezDisponvelEm DATETIME2 NULL
       `);
     }
 
@@ -2172,15 +2177,15 @@ async function startServer() {
     await query(`
       IF OBJECT_ID('dbo.caca_tesouro_tempos', 'U') IS NULL
       BEGIN
-        CREATE TABLE caca_tesouro_tempos (
-          id NVARCHAR(36) NOT NULL PRIMARY KEY,
-          partida_id NVARCHAR(36) NOT NULL,
-          evento_id NVARCHAR(36) NOT NULL,
-          time_id NVARCHAR(36) NOT NULL,
-          started_at DATETIME2 NULL,
-          completed_at DATETIME2 NULL,
-          elapsed_ms BIGINT NULL,
-          CONSTRAINT UQ_caca_tesouro_tempo_equipe UNIQUE (partida_id, time_id)
+        CREATE TABLE cacaTesourTempo (
+          tempoId NVARCHAR(36) NOT NULL PRIMARY KEY,
+          partidaId NVARCHAR(36) NOT NULL,
+          eventoId NVARCHAR(36) NOT NULL,
+          timeId NVARCHAR(36) NOT NULL,
+          iniciadoEm DATETIME2 NULL,
+          concluidoEm DATETIME2 NULL,
+          duracaoMs BIGINT NULL,
+          CONSTRAINT UQ_caca_tesouro_tempo_equipe UNIQUE (partidaId, timeId)
         )
       END
     `);

@@ -5,10 +5,10 @@ async function addSessionIdToLeituras() {
   try {
     // PostgreSQL
     await query(`
-      ALTER TABLE leituras 
-      ADD COLUMN IF NOT EXISTS session_id VARCHAR(36);
+      ALTER TABLE leitura 
+      ADD COLUMN IF NOT EXISTS sessaoId VARCHAR(36);
       
-      CREATE INDEX IF NOT EXISTS idx_leituras_session_id ON leituras(session_id);
+      CREATE INDEX IF NOT EXISTS idx_leituras_session_id ON leitura(sessaoId);
     `);
     
     console.log('✅ Coluna session_id adicionada à tabela leituras (PostgreSQL)');
@@ -17,10 +17,10 @@ async function addSessionIdToLeituras() {
     try {
       await query(`
         IF NOT EXISTS (SELECT * FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME='leituras' AND COLUMN_NAME='session_id')
-        ALTER TABLE leituras ADD session_id VARCHAR(36);
+        ALTER TABLE leitura ADD sessaoId VARCHAR(36);
         
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_leituras_session_id')
-        CREATE INDEX idx_leituras_session_id ON leituras(session_id);
+        CREATE INDEX idx_leituras_session_id ON leitura(sessaoId);
       `);
       
       console.log('✅ Coluna session_id adicionada à tabela leituras (SQL Server)');

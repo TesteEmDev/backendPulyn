@@ -5,22 +5,22 @@ async function ensureGameSessionsSchema() {
   try {
     // PostgreSQL
     await query(`
-      CREATE TABLE IF NOT EXISTS "game_sessions" (
+      CREATE TABLE IF NOT EXISTS "sessaoJogo" (
         "id" varchar(36) PRIMARY KEY,
-        "evento_id" varchar(36) NOT NULL,
-        "brincadeira_id" varchar(36) NOT NULL,
-        "game_type" varchar(50) NOT NULL,
-        "mode" varchar(20), -- 'team', 'individual', etc
+        "eventoId" varchar(36) NOT NULL,
+        "brincadeiraId" varchar(36) NOT NULL,
+        "tipoJogo" varchar(50) NOT NULL,
+        "modo" varchar(20), -- 'team', 'individual', etc
         "status" varchar(20) NOT NULL DEFAULT 'active', -- 'active', 'finished'
-        "started_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "finished_at" timestamptz,
-        "created_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        "updated_at" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        "iniciadoEm" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "finalizadoEm" timestamptz,
+        "criadoEm" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        "atualizadoEm" timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
       
-      CREATE INDEX IF NOT EXISTS "idx_game_sessions_evento" ON "game_sessions"("evento_id");
-      CREATE INDEX IF NOT EXISTS "idx_game_sessions_brincadeira" ON "game_sessions"("brincadeira_id");
-      CREATE INDEX IF NOT EXISTS "idx_game_sessions_status" ON "game_sessions"("status");
+      CREATE INDEX IF NOT EXISTS "idx_game_sessions_evento" ON "sessaoJogo"("eventoId");
+      CREATE INDEX IF NOT EXISTS "idx_game_sessions_brincadeira" ON "sessaoJogo"("brincadeiraId");
+      CREATE INDEX IF NOT EXISTS "idx_game_sessions_status" ON "sessaoJogo"("status");
     `);
     
     console.log('✅ Schema de game_sessions verificado (PostgreSQL)');
@@ -29,25 +29,25 @@ async function ensureGameSessionsSchema() {
     try {
       await query(`
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='game_sessions' AND xtype='U')
-        CREATE TABLE [game_sessions] (
+        CREATE TABLE [sessaoJogo] (
           [id] VARCHAR(36) PRIMARY KEY,
-          [evento_id] VARCHAR(36) NOT NULL,
-          [brincadeira_id] VARCHAR(36) NOT NULL,
-          [game_type] VARCHAR(50) NOT NULL,
-          [mode] VARCHAR(20),
+          [eventoId] VARCHAR(36) NOT NULL,
+          [brincadeiraId] VARCHAR(36) NOT NULL,
+          [tipoJogo] VARCHAR(50) NOT NULL,
+          [modo] VARCHAR(20),
           [status] VARCHAR(20) NOT NULL DEFAULT 'active',
-          [started_at] DATETIME2 NOT NULL DEFAULT GETDATE(),
-          [finished_at] DATETIME2,
-          [created_at] DATETIME2 NOT NULL DEFAULT GETDATE(),
-          [updated_at] DATETIME2 NOT NULL DEFAULT GETDATE()
+          [iniciadoEm] DATETIME2 NOT NULL DEFAULT GETDATE(),
+          [finalizadoEm] DATETIME2,
+          [criadoEm] DATETIME2 NOT NULL DEFAULT GETDATE(),
+          [atualizadoEm] DATETIME2 NOT NULL DEFAULT GETDATE()
         );
         
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_game_sessions_evento')
-          CREATE INDEX idx_game_sessions_evento ON [game_sessions]([evento_id]);
+          CREATE INDEX idx_game_sessions_evento ON [sessaoJogo]([eventoId]);
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_game_sessions_brincadeira')
-          CREATE INDEX idx_game_sessions_brincadeira ON [game_sessions]([brincadeira_id]);
+          CREATE INDEX idx_game_sessions_brincadeira ON [sessaoJogo]([brincadeiraId]);
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_game_sessions_status')
-          CREATE INDEX idx_game_sessions_status ON [game_sessions]([status]);
+          CREATE INDEX idx_game_sessions_status ON [sessaoJogo]([status]);
       `);
       
       console.log('✅ Schema de game_sessions verificado (SQL Server)');
