@@ -113,6 +113,56 @@ router.post('/logout', async (req, res) => {
   }
 });
 
+// ✅ Validação de email: verificar se já existe
+// GET /auth/check-email?email=user@example.com
+router.get('/check-email', async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      console.log('❌ Email não fornecido');
+      return res.status(400).json({ error: 'Email é obrigatório' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Validação básica de email
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      console.log('❌ Email inválido:', normalizedEmail);
+      return res.status(400).json({
+        available: false,
+        error: 'Email inválido'
+      });
+    }
+
+    console.log('🔍 Verificando disponibilidade de email:', normalizedEmail);
+
+    // Verificar se email já existe
+    const existingLogin = await queryOne(
+      'SELECT id FROM logins WHERE LOWER(email) = @email',
+      { email: normalizedEmail }
+    );
+
+    if (existingLogin) {
+      console.log('❌ Email já registrado:', normalizedEmail);
+      return res.json({
+        available: false,
+        message: 'Este email já foi registrado'
+      });
+    }
+
+    console.log('✅ Email disponível:', normalizedEmail);
+    return res.json({
+      available: true,
+      message: 'Email disponível para registro'
+    });
+
+  } catch (err) {
+    console.error('❌ Erro ao verificar email:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Registro direto: criar conta familiar sem convite
 // POST /auth/register
 router.post('/register', async (req, res) => {
