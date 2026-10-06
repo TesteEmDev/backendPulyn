@@ -47,6 +47,7 @@ const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
+const { startBraceletReleaseScheduler } = require('./utils/braceletRelease');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
 const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
@@ -1244,6 +1245,7 @@ const staleTeamCheckpointsInterval = setInterval(checkStaleTeamCheckpoints, 1000
 // cadastradas (só eventos com auto_start/auto_end ligados). Ver utils/eventLifecycle.js
 // Iniciada em startServer(), depois que o schema (colunas auto_start/auto_end) existe.
 let eventLifecycleInterval = null;
+let braceletReleaseInterval = null;
 
 // DEBUG: Reset territory lock de um checkpoint
 app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
@@ -1943,6 +1945,8 @@ async function startServer() {
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
     eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
+    // 10 minutos depois do fim do evento, as pulseiras dele voltam a ficar sem dono.
+    braceletReleaseInterval = startBraceletReleaseScheduler();
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
@@ -2198,6 +2202,7 @@ async function shutdown(signal) {
   clearInterval(expiredGamesInterval);
   clearInterval(staleTeamCheckpointsInterval);
   clearInterval(eventLifecycleInterval);
+  clearInterval(braceletReleaseInterval);
   wss.clients.forEach((client) => client.close(1001, 'Servidor reiniciando'));
 
   server.close(() => {
