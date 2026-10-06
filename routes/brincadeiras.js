@@ -330,7 +330,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
 
       const activeState = await tx.queryOne(
         `SELECT TOP 1 eventoId
-         FROM event_game_state
+         FROM eventoGameState
          WHERE LOWER(game_id) = LOWER(@id)
            AND LOWER(COALESCE(mode, 'idle')) = 'game'`,
         { id: gameId }
@@ -343,7 +343,7 @@ router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, r
 
       const activeSessionTable = brincadeira.type === 'treasure_hunt'
         ? 'cacaTesourPartidas'
-        : brincadeira.type === 'monster_hunt' ? 'monster_hunt_partidas' : null;
+        : brincadeira.type === 'monster_hunt' ? 'monsterHuntPartidas' : null;
       if (activeSessionTable) {
         const activeSession = await tx.queryOne(
           `SELECT TOP 1 id

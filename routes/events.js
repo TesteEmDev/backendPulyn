@@ -480,43 +480,43 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
     
     // 🆕 Resetar dados de Zone Conquest INDIVIDUAL (na ordem correta das foreign keys)
     await query(
-      `DELETE FROM zone_conquest_individual_scans
+      `DELETE FROM zoneConquestIndividualScans
        WHERE eventoId = @eventoId`,
       { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zone_conquest_individual_checkpoint_protection
+      `DELETE FROM zoneConquestIndividualCheckpointProtection
        WHERE partidaId IN (
-         SELECT id FROM zone_conquest_individual_partidas WHERE eventoId = @eventoId
+         SELECT id FROM zoneConquestIndividualPartidas WHERE eventoId = @eventoId
        )`,
       { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zone_conquest_individual_participant_states
+      `DELETE FROM zoneConquestIndividualParticipantStates
        WHERE eventoId = @eventoId`,
       { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zone_conquest_individual_partidas
+      `DELETE FROM zoneConquestIndividualPartidas
        WHERE eventoId = @eventoId`,
       { eventoId: eventoId }
     );
     
     // 🆕 Resetar dados de Zone Conquest TEAM (na ordem correta das foreign keys)
     await query(
-      `DELETE FROM zone_conquest_team_scans
+      `DELETE FROM zoneConquestTeamScans
        WHERE eventoId = @eventoId`,
       { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zone_conquest_team_tempos
+      `DELETE FROM zoneConquestTeamTempos
        WHERE partidaId IN (
-         SELECT id FROM zone_conquest_team_partidas WHERE eventoId = @eventoId
+         SELECT id FROM zoneConquestTeamPartidas WHERE eventoId = @eventoId
        )`,
       { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zone_conquest_team_partidas
+      `DELETE FROM zoneConquestTeamPartidas
        WHERE eventoId = @eventoId`,
       { eventoId: eventoId }
     );
