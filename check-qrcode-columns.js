@@ -27,7 +27,7 @@ async function checkColumns() {
       console.log('   Executando migração...\n');
       
       try {
-        await query(`ALTER TABLE criancas ADD COLUMN qrcode VARCHAR(50) NULL;`);
+        await query(`ALTER TABLE crianca ADD COLUMN codigoQr VARCHAR(50) NULL;`);
         console.log('✅ Coluna "qrcode" adicionada a "criancas"\n');
       } catch (err) {
         console.error('❌ Erro ao adicionar coluna:', err.message, '\n');
@@ -51,7 +51,7 @@ async function checkColumns() {
       console.log('   Executando migração...\n');
       
       try {
-        await query(`ALTER TABLE family_child_links ADD COLUMN qrcode VARCHAR(50) NULL;`);
+        await query(`ALTER TABLE vinculoFamiliar ADD COLUMN qrcode VARCHAR(50) NULL;`);
         console.log('✅ Coluna "qrcode" adicionada a "family_child_links"\n');
       } catch (err) {
         console.error('❌ Erro ao adicionar coluna:', err.message, '\n');

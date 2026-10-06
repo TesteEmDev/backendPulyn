@@ -2,7 +2,7 @@ const { pool } = require('./database');
 
 async function check() {
   try {
-    const result = await pool.request().query('SELECT id, name, map_x, map_y FROM checkpoints');
+    const result = await pool.request().query('SELECT checkpointId, nome, mapaX, mapaY FROM pontoVerificacao');
     console.log('CHECKPOINTS NO BANCO:');
     console.log('====================');
     

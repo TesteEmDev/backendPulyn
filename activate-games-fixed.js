@@ -15,11 +15,11 @@ async function activateGames() {
     console.log('\n1. 🔧 Ativando brincadeiras com status null:');
     
     const brincadeirasParaAtivar = await pool.query(`
-      SELECT id, name, type, checkpoints
-      FROM brincadeiras
-      WHERE (evento_id = $1 OR empresa_id = $2)
+      SELECT brincadeiraId, nome, tipo, checkpoints
+      FROM brincadeira
+      WHERE (eventoId = $1 OR empresaId = $2)
         AND (status IS NULL OR status = 'null')
-        AND type IN ('treasure_hunt', 'monster_hunt')
+        AND tipo IN ('treasure_hunt', 'monster_hunt')
     `, [EVENTO_ID, EMPRESA_ID]);
     
     console.log(`   Brincadeiras encontradas: ${brincadeirasParaAtivar.rowCount}`);
@@ -29,8 +29,8 @@ async function activateGames() {
       
       // Ativar brincadeira
       await pool.query(`
-        UPDATE brincadeiras SET status = 'active'
-        WHERE id = $1
+        UPDATE brincadeira SET status = 'active'
+        WHERE brincadeiraId = $1
       `, [br.id]);
       
       console.log(`     ✅ Ativada`);
@@ -57,8 +57,8 @@ async function activateGames() {
             checkpoints.push(novoCheckpoint);
             
             await pool.query(`
-              UPDATE brincadeiras SET checkpoints = $1
-              WHERE id = $2
+              UPDATE brincadeira SET checkpoints = $1
+              WHERE brincadeiraId = $2
             `, [JSON.stringify(checkpoints), br.id]);
             
             console.log(`     📍 Checkpoint ${CHECKPOINT_ID} adicionado`);
@@ -78,8 +78,8 @@ async function activateGames() {
         }];
         
         await pool.query(`
-          UPDATE brincadeiras SET checkpoints = $1
-          WHERE id = $2
+          UPDATE brincadeira SET checkpoints = $1
+          WHERE brincadeiraId = $2
         `, [JSON.stringify(checkpoints), br.id]);
         
         console.log(`     📍 Checkpoint ${CHECKPOINT_ID} configurado`);
@@ -90,23 +90,23 @@ async function activateGames() {
     console.log('\n2. 🔗 Associando brincadeiras ao evento:');
     
     const brincadeirasAtivas = await pool.query(`
-      SELECT id, name, type 
-      FROM brincadeiras
-      WHERE (evento_id = $1 OR empresa_id = $2)
+      SELECT brincadeiraId, nome, tipo 
+      FROM brincadeira
+      WHERE (eventoId = $1 OR empresaId = $2)
         AND status = 'active'
-        AND type IN ('treasure_hunt', 'monster_hunt')
+        AND tipo IN ('treasure_hunt', 'monster_hunt')
     `, [EVENTO_ID, EMPRESA_ID]);
     
     for (const br of brincadeirasAtivas.rows) {
       // Verificar se já está associada ao evento
       const associacao = await pool.query(`
-        SELECT 1 FROM evento_brincadeiras 
-        WHERE evento_id = $1 AND brincadeira_id = $2
+        SELECT 1 FROM eventoBrincadeira 
+        WHERE eventoId = $1 AND brincadeiraId = $2
       `, [EVENTO_ID, br.id]);
       
       if (associacao.rowCount === 0) {
         await pool.query(`
-          INSERT INTO evento_brincadeiras (evento_id, brincadeira_id, created_at)
+          INSERT INTO eventoBrincadeira (eventoId, brincadeiraId, criadoEm)
           VALUES ($1, $2, NOW())
         `, [EVENTO_ID, br.id]);
         
@@ -126,8 +126,8 @@ async function activateGames() {
       console.log(`   🗺️  Verificando partida de Caça ao Tesouro...`);
       
       const partidaExists = await pool.query(`
-        SELECT id FROM caca_tesouro_partidas 
-        WHERE evento_id = $1 AND brincadeira_id = $2 AND status = 'active'
+        SELECT partidaId FROM cacaTesourPartida 
+        WHERE eventoId = $1 AND brincadeiraId = $2 AND status = 'active'
       `, [EVENTO_ID, treasureBrincadeira.id]);
       
       if (partidaExists.rowCount === 0) {
@@ -135,9 +135,9 @@ async function activateGames() {
         
         // Obter primeiro time do evento
         const times = await pool.query(`
-          SELECT id, name FROM times 
-          WHERE evento_id = $1 
-          ORDER BY created_at 
+          SELECT timeId, nome FROM time 
+          WHERE eventoId = $1 
+          ORDER BY criadoEm 
           LIMIT 1
         `, [EVENTO_ID]);
         
@@ -145,10 +145,10 @@ async function activateGames() {
         const primeiroTimeNome = times.rowCount > 0 ? times.rows[0].name : 'Nenhum time';
         
         await pool.query(`
-          INSERT INTO caca_tesouro_partidas (
-            id, evento_id, brincadeira_id, status,
-            round_number, turn_team_id, turn_available_at,
-            target_checkpoint_id, created_at
+          INSERT INTO cacaTesourPartida (
+            partidaId, eventoId, brincadeiraId, status,
+            numeroRonda, timeVezId, vezDisponvelEm,
+            checkpointAlvoId, created_at
           ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         `, [
           partidaId,
@@ -180,17 +180,17 @@ async function activateGames() {
       console.log(`   👾 Verificando partida de Caça ao Monstro...`);
       
       const partidaExists = await pool.query(`
-        SELECT id FROM monster_hunt_partidas 
-        WHERE evento_id = $1 AND brincadeira_id = $2 AND status = 'active'
+        SELECT id FROM monsterCacaPartida 
+        WHERE eventoId = $1 AND brincadeiraId = $2 AND status = 'active'
       `, [EVENTO_ID, monsterBrincadeira.id]);
       
       if (partidaExists.rowCount === 0) {
         const partidaId = require('crypto').randomUUID();
         
         await pool.query(`
-          INSERT INTO monster_hunt_partidas (
-            id, evento_id, brincadeira_id, status,
-            special_checkpoint_id, monster_hp, created_at
+          INSERT INTO monsterCacaPartida (
+            id, eventoId, brincadeiraId, status,
+            checkpointEspecialId, monster_hp, criadoEm
           ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         `, [
           partidaId,
@@ -217,11 +217,11 @@ async function activateGames() {
     
     // Verificar brincadeiras ativas
     const brincadeirasAtivasFinal = await pool.query(`
-      SELECT b.id, b.name, b.type, b.status
-      FROM brincadeiras b
+      SELECT b.brincadeiraId, b.nome, b.tipo, b.status
+      FROM brincadeira b
       WHERE b.status = 'active'
-        AND b.type IN ('treasure_hunt', 'monster_hunt')
-        AND (b.evento_id = $1 OR b.empresa_id = $2)
+        AND b.tipo IN ('treasure_hunt', 'monster_hunt')
+        AND (b.eventoId = $1 OR b.empresaId = $2)
     `, [EVENTO_ID, EMPRESA_ID]);
     
     console.log(`   ✅ Brincadeiras ativas (treasure/monster): ${brincadeirasAtivasFinal.rowCount}`);
@@ -230,23 +230,23 @@ async function activateGames() {
     });
     
     const checkpointsAtivos = await pool.query(`
-      SELECT id, name, status, checkpoint_purpose
-      FROM checkpoints
-      WHERE evento_id = $1 AND status = 'online'
+      SELECT checkpointId, nome, status, proposito
+      FROM pontoVerificacao
+      WHERE eventoId = $1 AND status = 'online'
     `, [EVENTO_ID]);
     
     console.log(`   📍 Checkpoints online: ${checkpointsAtivos.rowCount}`);
     
     const partidasTreasureAtivas = await pool.query(`
-      SELECT COUNT(*) as total FROM caca_tesouro_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT COUNT(*) as total FROM cacaTesourPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [EVENTO_ID]);
     
     console.log(`   🗺️  Partidas Caça ao Tesouro ativas: ${partidasTreasureAtivas.rows[0].total}`);
     
     const partidasMonsterAtivas = await pool.query(`
-      SELECT COUNT(*) as total FROM monster_hunt_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT COUNT(*) as total FROM monsterCacaPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [EVENTO_ID]);
     
     console.log(`   👾 Partidas Caça ao Monstro ativas: ${partidasMonsterAtivas.rows[0].total}`);

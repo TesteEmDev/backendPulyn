@@ -14,7 +14,7 @@ async function fixProblems() {
     // 1. Verificar estado atual
     console.log('\n1. 📊 Estado atual do evento:');
     const evento = await pool.query(`
-      SELECT id, name, status FROM eventos WHERE id = $1
+      SELECT eventoId, nome, status FROM evento WHERE eventoId = $1
     `, [EVENTO_ID]);
     
     if (evento.rowCount === 0) {
@@ -28,10 +28,10 @@ async function fixProblems() {
     // 2. Verificar brincadeiras existentes
     console.log('\n2. 🔍 Brincadeiras existentes:');
     const brincadeiras = await pool.query(`
-      SELECT id, name, type, status, checkpoints 
-      FROM brincadeiras 
-      WHERE evento_id = $1 OR empresa_id = $2
-      ORDER BY type, created_at
+      SELECT brincadeiraId, nome, tipo, status, checkpoints 
+      FROM brincadeira 
+      WHERE eventoId = $1 OR empresaId = $2
+      ORDER BY tipo, criadoEm
     `, [EVENTO_ID, EMPRESA_ID]);
     
     console.log(`   📊 Total de brincadeiras: ${brincadeiras.rowCount}`);
@@ -76,10 +76,10 @@ async function fixProblems() {
       };
       
       await pool.query(`
-        INSERT INTO brincadeiras (
-          id, name, type, description, status, checkpoints, 
+        INSERT INTO brincadeira (
+          brincadeiraId, nome, tipo, descricao, status, checkpoints, 
           max_players_per_team, min_players_per_team, duration_minutes,
-          empresa_id, evento_id, created_at
+          empresaId, eventoId, criadoEm
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       `, [
         treasureConfig.id,
@@ -100,7 +100,7 @@ async function fixProblems() {
       
       // Associar ao evento
       await pool.query(`
-        INSERT INTO evento_brincadeiras (evento_id, brincadeira_id, created_at)
+        INSERT INTO eventoBrincadeira (eventoId, brincadeiraId, criadoEm)
         VALUES ($1, $2, $3)
       `, [EVENTO_ID, treasureId, new Date()]);
       
@@ -131,10 +131,10 @@ async function fixProblems() {
       };
       
       await pool.query(`
-        INSERT INTO brincadeiras (
-          id, name, type, description, status, checkpoints,
+        INSERT INTO brincadeira (
+          brincadeiraId, nome, tipo, descricao, status, checkpoints,
           special_checkpoint_id, monster_hp,
-          empresa_id, evento_id, created_at
+          empresaId, eventoId, criadoEm
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
       `, [
         monsterConfig.id,
@@ -154,7 +154,7 @@ async function fixProblems() {
       
       // Associar ao evento
       await pool.query(`
-        INSERT INTO evento_brincadeiras (evento_id, brincadeira_id, created_at)
+        INSERT INTO eventoBrincadeira (eventoId, brincadeiraId, criadoEm)
         VALUES ($1, $2, $3)
       `, [EVENTO_ID, monsterId, new Date()]);
       
@@ -191,8 +191,8 @@ async function fixProblems() {
           }
           
           await pool.query(`
-            UPDATE brincadeiras SET checkpoints = $1, updated_at = $2
-            WHERE id = $3
+            UPDATE brincadeira SET checkpoints = $1, updated_at = $2
+            WHERE brincadeiraId = $3
           `, [JSON.stringify(checkpointsAtualizados), new Date(), br.id]);
           
           console.log(`   ✅ ${br.name} atualizada com checkpoint ${CHECKPOINT_ID}`);
@@ -209,12 +209,12 @@ async function fixProblems() {
     
     // Obter todas brincadeiras ativas do evento
     const brincadeirasAtivas = await pool.query(`
-      SELECT b.id, b.name, b.type 
-      FROM brincadeiras b
-      LEFT JOIN evento_brincadeiras eb ON eb.brincadeira_id = b.id
-      WHERE (b.evento_id = $1 OR eb.evento_id = $1)
+      SELECT b.brincadeiraId, b.nome, b.tipo 
+      FROM brincadeira b
+      LEFT JOIN eventoBrincadeira eb ON eb.brincadeiraId = b.brincadeiraId
+      WHERE (b.eventoId = $1 OR eb.eventoId = $1)
         AND b.status = 'active'
-      ORDER BY b.type
+      ORDER BY b.tipo
     `, [EVENTO_ID]);
     
     console.log(`   📊 Brincadeiras ativas: ${brincadeirasAtivas.rowCount}`);
@@ -225,8 +225,8 @@ async function fixProblems() {
       if (br.type === 'treasure_hunt') {
         // Verificar se já tem partida ativa
         const partidaTreasure = await pool.query(`
-          SELECT id, status FROM caca_tesouro_partidas 
-          WHERE evento_id = $1 AND brincadeira_id = $2 AND status = 'active'
+          SELECT partidaId, status FROM cacaTesourPartida 
+          WHERE eventoId = $1 AND brincadeiraId = $2 AND status = 'active'
         `, [EVENTO_ID, br.id]);
         
         if (partidaTreasure.rowCount === 0) {
@@ -236,16 +236,16 @@ async function fixProblems() {
           
           // Obter times do evento
           const times = await pool.query(`
-            SELECT id FROM times WHERE evento_id = $1 ORDER BY created_at LIMIT 1
+            SELECT timeId FROM time WHERE eventoId = $1 ORDER BY criadoEm LIMIT 1
           `, [EVENTO_ID]);
           
           const primeiroTimeId = times.rowCount > 0 ? times.rows[0].id : null;
           
           await pool.query(`
-            INSERT INTO caca_tesouro_partidas (
-              id, evento_id, brincadeira_id, status,
-              round_number, turn_team_id, turn_available_at,
-              target_checkpoint_id, created_at
+            INSERT INTO cacaTesourPartida (
+              partidaId, eventoId, brincadeiraId, status,
+              numeroRonda, timeVezId, vezDisponvelEm,
+              checkpointAlvoId, created_at
             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
           `, [
             partidaId,
@@ -268,8 +268,8 @@ async function fixProblems() {
       if (br.type === 'monster_hunt') {
         // Verificar se já tem partida ativa
         const partidaMonster = await pool.query(`
-          SELECT id, status FROM monster_hunt_partidas 
-          WHERE evento_id = $1 AND brincadeira_id = $2 AND status = 'active'
+          SELECT id, status FROM monsterCacaPartida 
+          WHERE eventoId = $1 AND brincadeiraId = $2 AND status = 'active'
         `, [EVENTO_ID, br.id]);
         
         if (partidaMonster.rowCount === 0) {
@@ -278,9 +278,9 @@ async function fixProblems() {
           const partidaId = require('crypto').randomUUID();
           
           await pool.query(`
-            INSERT INTO monster_hunt_partidas (
-              id, evento_id, brincadeira_id, status,
-              special_checkpoint_id, monster_hp, created_at
+            INSERT INTO monsterCacaPartida (
+              id, eventoId, brincadeiraId, status,
+              checkpointEspecialId, monster_hp, criadoEm
             ) VALUES ($1, $2, $3, $4, $5, $6, $7)
           `, [
             partidaId,

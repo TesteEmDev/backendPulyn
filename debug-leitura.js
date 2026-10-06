@@ -11,8 +11,8 @@ async function debugLeitura(checkpointId = "15", uid = "60FBAA16") {
     // 1. Verificar checkpoint
     console.log('\n1. 🎯 Verificando checkpoint:');
     const checkpoint = await pool.query(`
-      SELECT id, name, status, checkpoint_purpose, evento_id, empresa_id
-      FROM checkpoints WHERE id = $1
+      SELECT checkpointId, nome, status, proposito, eventoId, empresaId
+      FROM pontoVerificacao WHERE checkpointId = $1
     `, [checkpointId]);
     
     if (checkpoint.rowCount === 0) {
@@ -33,13 +33,13 @@ async function debugLeitura(checkpointId = "15", uid = "60FBAA16") {
     // 2. Verificar pulseira/criança
     console.log('\n2. 👶 Verificando pulseira/criança:');
     const crianca = await pool.query(`
-      SELECT c.id, c.name, c.time_id, c.evento_id, c.empresa_id,
-             t.name as team_name, t.color as team_color,
+      SELECT c.criancaId, c.nome, c.timeId, c.eventoId, c.empresaId,
+             t.nome as team_name, t.cor as team_color,
              e.status as evento_status
-      FROM criancas c
-      LEFT JOIN times t ON t.id = c.time_id
-      LEFT JOIN eventos e ON e.id = c.evento_id
-      WHERE c.bracelet_code = $1 OR c.bracelet_code = $2
+      FROM crianca c
+      LEFT JOIN time t ON t.timeId = c.timeId
+      LEFT JOIN evento e ON e.eventoId = c.eventoId
+      WHERE c.codigoPulseira = $1 OR c.codigoPulseira = $2
     `, [uid, uid.toUpperCase()]);
     
     if (crianca.rowCount === 0) {
@@ -60,8 +60,8 @@ async function debugLeitura(checkpointId = "15", uid = "60FBAA16") {
     // 3. Verificar evento do checkpoint
     console.log('\n3. 📅 Verificando evento do checkpoint:');
     const evento = await pool.query(`
-      SELECT id, name, status, empresa_id
-      FROM eventos WHERE id = $1
+      SELECT eventoId, nome, status, empresaId
+      FROM evento WHERE eventoId = $1
     `, [cp.evento_id]);
     
     if (evento.rowCount > 0) {
@@ -71,14 +71,14 @@ async function debugLeitura(checkpointId = "15", uid = "60FBAA16") {
       // 4. Verificar brincadeiras no evento
       console.log('\n4. 🎮 Verificando brincadeiras no evento:');
       const brincadeiras = await pool.query(`
-        SELECT b.id, b.name, b.type, b.status, b.checkpoints
-        FROM brincadeiras b
-        WHERE b.evento_id = $1 AND b.status = 'active'
+        SELECT b.brincadeiraId, b.nome, b.tipo, b.status, b.checkpoints
+        FROM brincadeira b
+        WHERE b.eventoId = $1 AND b.status = 'active'
            OR EXISTS (
-             SELECT 1 FROM evento_brincadeiras eb
-             WHERE eb.brincadeira_id = b.id AND eb.evento_id = $1
+             SELECT 1 FROM eventoBrincadeira eb
+             WHERE eb.brincadeiraId = b.brincadeiraId AND eb.eventoId = $1
            )
-        ORDER BY b.type
+        ORDER BY b.tipo
       `, [cp.evento_id]);
       
       console.log(`   📊 Brincadeiras ativas: ${brincadeiras.rowCount}`);
@@ -115,9 +115,9 @@ async function debugLeitura(checkpointId = "15", uid = "60FBAA16") {
     
     // Tesouro
     const treasureActive = await pool.query(`
-      SELECT id, round_number, target_checkpoint_id, turn_team_id
-      FROM caca_tesouro_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT partidaId, numeroRonda, checkpointAlvoId, timeVezId
+      FROM cacaTesourPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [cp.evento_id]);
     
     console.log(`   🗺️  Caça ao Tesouro ativo: ${treasureActive.rowCount}`);
@@ -130,9 +130,9 @@ async function debugLeitura(checkpointId = "15", uid = "60FBAA16") {
     
     // Monstro
     const monsterActive = await pool.query(`
-      SELECT id, special_checkpoint_id
-      FROM monster_hunt_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT id, checkpointEspecialId
+      FROM monsterCacaPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [cp.evento_id]);
     
     console.log(`   👾 Caça ao Monstro ativo: ${monsterActive.rowCount}`);

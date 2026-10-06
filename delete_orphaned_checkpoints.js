@@ -39,10 +39,10 @@ async function main() {
     // 1. Listar checkpoints sem empresa_id
     console.log('📋 Listando checkpoints sem empresa_id...');
     const result = await pool.request().query(`
-      SELECT id, name, evento_id, empresa_id
-      FROM checkpoints
-      WHERE empresa_id IS NULL
-      ORDER BY name
+      SELECT checkpointId, nome, eventoId, empresaId
+      FROM pontoVerificacao
+      WHERE empresaId IS NULL
+      ORDER BY nome
     `);
     
     const checkpoints = result.recordset;
@@ -64,9 +64,9 @@ async function main() {
     // 2. Deletar leituras
     console.log('   • Deletando leituras associadas...');
     const leituras = await pool.request().query(`
-      DELETE FROM leituras 
-      WHERE checkpoint_id IN (
-        SELECT id FROM checkpoints WHERE empresa_id IS NULL
+      DELETE FROM leitura 
+      WHERE checkpointId IN (
+        SELECT checkpointId FROM pontoVerificacao WHERE empresaId IS NULL
       )
     `);
     console.log(`   ✓ ${leituras.rowsAffected[0]} leitura(s) deletada(s)`);
@@ -74,9 +74,9 @@ async function main() {
     // 3. Deletar pontuações
     console.log('   • Deletando pontuações associadas...');
     const pontuacoes = await pool.request().query(`
-      DELETE FROM pontuacoes 
-      WHERE checkpoint_id IN (
-        SELECT id FROM checkpoints WHERE empresa_id IS NULL
+      DELETE FROM pontuacao 
+      WHERE checkpointId IN (
+        SELECT checkpointId FROM pontoVerificacao WHERE empresaId IS NULL
       )
     `);
     console.log(`   ✓ ${pontuacoes.rowsAffected[0]} pontuação(ões) deletada(s)`);
@@ -84,8 +84,8 @@ async function main() {
     // 4. Deletar checkpoints
     console.log('   • Deletando checkpoints...');
     const checkpointDelete = await pool.request().query(`
-      DELETE FROM checkpoints 
-      WHERE empresa_id IS NULL
+      DELETE FROM pontoVerificacao 
+      WHERE empresaId IS NULL
     `);
     console.log(`   ✓ ${checkpointDelete.rowsAffected[0]} checkpoint(s) deletado(s)`);
     
@@ -93,7 +93,7 @@ async function main() {
     console.log('\n✅ Deleção concluída com sucesso!\n');
     
     const verify = await pool.request().query(`
-      SELECT COUNT(*) as count FROM checkpoints WHERE empresa_id IS NULL
+      SELECT COUNT(*) as count FROM pontoVerificacao WHERE empresaId IS NULL
     `);
     
     console.log(`📊 Relatório Final:`);

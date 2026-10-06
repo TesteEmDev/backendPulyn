@@ -9,8 +9,8 @@ async function activateEvent(eventoId = '9ba04dda-8cd4-4d44-a37b-3042a0b8519a') 
     
     // Verificar evento atual
     const evento = await pool.query(`
-      SELECT id, name, status 
-      FROM eventos WHERE id = $1
+      SELECT eventoId, nome, status 
+      FROM evento WHERE eventoId = $1
     `, [eventoId]);
     
     if (evento.rowCount === 0) {
@@ -23,8 +23,8 @@ async function activateEvent(eventoId = '9ba04dda-8cd4-4d44-a37b-3042a0b8519a') 
     
     // Ativar evento
     const result = await pool.query(`
-      UPDATE eventos SET status = 'active' 
-      WHERE id = $1 RETURNING id, name, status
+      UPDATE evento SET status = 'active' 
+      WHERE eventoId = $1 RETURNING eventoId, nome, status
     `, [eventoId]);
     
     console.log(`✅ Evento ativado: ${result.rows[0].name} (novo status: ${result.rows[0].status})`);
@@ -32,11 +32,11 @@ async function activateEvent(eventoId = '9ba04dda-8cd4-4d44-a37b-3042a0b8519a') 
     // Verificar brincadeiras no evento
     console.log('\n🎮 Verificando brincadeiras no evento:');
     const brincadeiras = await pool.query(`
-      SELECT b.id, b.name, b.type, b.checkpoints
-      FROM brincadeiras b
-      WHERE b.evento_id = $1 OR EXISTS (
-        SELECT 1 FROM evento_brincadeiras eb
-        WHERE eb.brincadeira_id = b.id AND eb.evento_id = $1
+      SELECT b.brincadeiraId, b.nome, b.tipo, b.checkpoints
+      FROM brincadeira b
+      WHERE b.eventoId = $1 OR EXISTS (
+        SELECT 1 FROM eventoBrincadeira eb
+        WHERE eb.brincadeiraId = b.brincadeiraId AND eb.eventoId = $1
       )
     `, [eventoId]);
     

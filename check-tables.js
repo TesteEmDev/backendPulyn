@@ -28,8 +28,8 @@ async function main() {
     // Verificar checkpoints online
     console.log('\n🎯 Verificando checkpoints:');
     const checkpoints = await pool.query(`
-      SELECT id, name, status, checkpoint_purpose 
-      FROM checkpoints 
+      SELECT checkpointId, nome, status, proposito 
+      FROM pontoVerificacao 
       ORDER BY status
     `);
     
@@ -41,8 +41,8 @@ async function main() {
     // Verificar eventos ativos
     console.log('\n📅 Verificando eventos:');
     const eventos = await pool.query(`
-      SELECT id, name, status, empresa_id 
-      FROM eventos 
+      SELECT eventoId, nome, status, empresaId 
+      FROM evento 
       ORDER BY status
     `);
     
@@ -54,10 +54,10 @@ async function main() {
     // Verificar brincadeiras
     console.log('\n🎮 Verificando brincadeiras:');
     const brincadeiras = await pool.query(`
-      SELECT id, name, type, status, evento_id 
-      FROM brincadeiras 
+      SELECT brincadeiraId, nome, tipo, status, eventoId 
+      FROM brincadeira 
       WHERE status = 'active'
-      ORDER BY type
+      ORDER BY tipo
     `);
     
     console.log(`   Brincadeiras ativas: ${brincadeiras.rowCount}`);
@@ -70,13 +70,13 @@ async function main() {
     
     // Tesouro
     const treasureActive = await pool.query(`
-      SELECT COUNT(*) as count FROM caca_tesouro_partidas WHERE status = 'active'
+      SELECT COUNT(*) as count FROM cacaTesourPartida WHERE status = 'active'
     `);
     console.log(`   Caça ao Tesouro ativo: ${treasureActive.rows[0].count}`);
     
     // Monstro
     const monsterActive = await pool.query(`
-      SELECT COUNT(*) as count FROM monster_hunt_partidas WHERE status = 'active'
+      SELECT COUNT(*) as count FROM monsterCacaPartida WHERE status = 'active'
     `);
     console.log(`   Caça ao Monstro ativo: ${monsterActive.rows[0].count}`);
     

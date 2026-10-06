@@ -11,18 +11,18 @@ async function verify() {
     console.log('======================================');
     
     // 1. Verificar evento
-    const evento = await pool.query('SELECT id, name, status FROM eventos WHERE id = $1', [EVENTO_ID]);
+    const evento = await pool.query('SELECT eventoId, nome, status FROM evento WHERE eventoId = $1', [EVENTO_ID]);
     console.log(`✅ Evento: ${evento.rows[0].name} (${evento.rows[0].status})`);
     
     // 2. Verificar brincadeiras e checkpoint 15
     console.log('\n🎯 BRINCADEIRAS E CHECKPOINT 15:');
     
     const brincadeiras = await pool.query(`
-      SELECT name, type, checkpoints 
-      FROM brincadeiras 
-      WHERE (evento_id = $1 OR empresa_id = (SELECT empresa_id FROM eventos WHERE id = $1))
+      SELECT nome, tipo, checkpoints 
+      FROM brincadeira 
+      WHERE (eventoId = $1 OR empresaId = (SELECT empresaId FROM evento WHERE eventoId = $1))
         AND status = 'active'
-        AND type IN ('treasure_hunt', 'monster_hunt')
+        AND tipo IN ('treasure_hunt', 'monster_hunt')
     `, [EVENTO_ID]);
     
     console.log(`Brincadeiras ativas: ${brincadeiras.rowCount}`);
@@ -55,9 +55,9 @@ async function verify() {
             });
             
             await pool.query(`
-              UPDATE brincadeiras SET checkpoints = $1
-              WHERE (evento_id = $2 OR empresa_id = (SELECT empresa_id FROM eventos WHERE id = $2))
-                AND name = $3 AND type = $4
+              UPDATE brincadeira SET checkpoints = $1
+              WHERE (eventoId = $2 OR empresaId = (SELECT empresaId FROM evento WHERE eventoId = $2))
+                AND nome = $3 AND tipo = $4
             `, [JSON.stringify(checkpoints), EVENTO_ID, br.name, br.type]);
             
             console.log(`  ✅ Checkpoint ${CHECKPOINT_ID} adicionado!`);
@@ -77,9 +77,9 @@ async function verify() {
         }];
         
         await pool.query(`
-          UPDATE brincadeiras SET checkpoints = $1
-          WHERE (evento_id = $2 OR empresa_id = (SELECT empresa_id FROM eventos WHERE id = $2))
-            AND name = $3 AND type = $4
+          UPDATE brincadeira SET checkpoints = $1
+          WHERE (eventoId = $2 OR empresaId = (SELECT empresaId FROM evento WHERE eventoId = $2))
+            AND nome = $3 AND tipo = $4
         `, [JSON.stringify(checkpoints), EVENTO_ID, br.name, br.type]);
         
         console.log(`  ✅ Checkpoint ${CHECKPOINT_ID} configurado!`);
@@ -90,9 +90,9 @@ async function verify() {
     console.log('\n🏆 PARTIDAS ATIVAS:');
     
     const treasure = await pool.query(`
-      SELECT id, target_checkpoint_id, round_number 
-      FROM caca_tesouro_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT partidaId, checkpointAlvoId, numeroRonda 
+      FROM cacaTesourPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [EVENTO_ID]);
     
     console.log(`Caça ao Tesouro: ${treasure.rowCount}`);
@@ -103,9 +103,9 @@ async function verify() {
     }
     
     const monster = await pool.query(`
-      SELECT id, special_checkpoint_id, hp 
-      FROM monster_hunt_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT id, checkpointEspecialId, vida 
+      FROM monsterCacaPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [EVENTO_ID]);
     
     console.log(`\nCaça ao Monstro: ${monster.rowCount}`);
@@ -119,10 +119,10 @@ async function verify() {
     console.log('\n👶 CRIANÇA E PULSEIRA:');
     
     const crianca = await pool.query(`
-      SELECT c.name, c.bracelet_code, t.name as team_name, t.color as team_color
-      FROM criancas c
-      LEFT JOIN times t ON t.id = c.time_id
-      WHERE c.evento_id = $1 AND c.bracelet_code ILIKE '%60FBAA16%'
+      SELECT c.nome, c.codigoPulseira, t.nome as team_name, t.cor as team_color
+      FROM crianca c
+      LEFT JOIN time t ON t.timeId = c.timeId
+      WHERE c.eventoId = $1 AND c.codigoPulseira ILIKE '%60FBAA16%'
     `, [EVENTO_ID]);
     
     if (crianca.rowCount > 0) {
@@ -138,9 +138,9 @@ async function verify() {
     console.log('\n📍 CHECKPOINT 15:');
     
     const checkpoint = await pool.query(`
-      SELECT name, status, checkpoint_purpose,
-             territory_owner_time_id, territory_locked_until, territory_cooldown_until
-      FROM checkpoints WHERE id = $1
+      SELECT nome, status, proposito,
+             territorioDonoTimeId, territorioTravadoAte, territorioCooldownAte
+      FROM pontoVerificacao WHERE checkpointId = $1
     `, [CHECKPOINT_ID]);
     
     if (checkpoint.rowCount > 0) {

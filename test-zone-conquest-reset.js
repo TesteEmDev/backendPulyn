@@ -23,8 +23,8 @@ async function testCheckpointStatesInitialization() {
 
     // Criar checkpoint state
     await query(
-      `INSERT INTO zone_conquest_checkpoint_states 
-       (id, partida_id, empresa_id, evento_id, checkpoint_id, current_owner_id, owner_type, protected_until, last_conquered_at, conquest_count)
+      `INSERT INTO zonaConquistaEstadoCheckpoint 
+       (id, partidaId, empresaId, eventoId, checkpointId, donoAtualId, tipoDono, protegidoAte, ultimoConquistadoEm, totalConquistas)
        VALUES (@id, @partidaId, @empresaId, @eventoId, @checkpointId, NULL, 'team', NULL, NULL, 0)`,
       {
         id: uuidv4(),
@@ -37,7 +37,7 @@ async function testCheckpointStatesInitialization() {
 
     // Verificar que foi criado com valores zerados
     const state = await queryOne(
-      `SELECT * FROM zone_conquest_checkpoint_states WHERE partida_id = @partidaId`,
+      `SELECT * FROM zonaConquistaEstadoCheckpoint WHERE partidaId = @partidaId`,
       { partidaId }
     );
 
@@ -83,8 +83,8 @@ async function testOldDataCleanup() {
 
     // Criar states da partida anterior (simulando jogo anterior)
     await query(
-      `INSERT INTO zone_conquest_checkpoint_states 
-       (id, partida_id, empresa_id, evento_id, checkpoint_id, current_owner_id, owner_type, protected_until, last_conquered_at, conquest_count)
+      `INSERT INTO zonaConquistaEstadoCheckpoint 
+       (id, partidaId, empresaId, eventoId, checkpointId, donoAtualId, tipoDono, protegidoAte, ultimoConquistadoEm, totalConquistas)
        VALUES (@id, @partidaId, @empresaId, @eventoId, @checkpointId, @ownerId, 'team', @protectedUntil, @conquestedAt, @count)`,
       {
         id: uuidv4(),
@@ -101,7 +101,7 @@ async function testOldDataCleanup() {
 
     // Verificar que dado antigo existe
     const oldState = await queryOne(
-      `SELECT * FROM zone_conquest_checkpoint_states WHERE partida_id = @partidaId`,
+      `SELECT * FROM zonaConquistaEstadoCheckpoint WHERE partidaId = @partidaId`,
       { partidaId: oldPartidaId }
     );
 
@@ -111,8 +111,8 @@ async function testOldDataCleanup() {
 
     // Criar nova partida (simulando novo jogo)
     await query(
-      `INSERT INTO zone_conquest_checkpoint_states 
-       (id, partida_id, empresa_id, evento_id, checkpoint_id, current_owner_id, owner_type, protected_until, last_conquered_at, conquest_count)
+      `INSERT INTO zonaConquistaEstadoCheckpoint 
+       (id, partidaId, empresaId, eventoId, checkpointId, donoAtualId, tipoDono, protegidoAte, ultimoConquistadoEm, totalConquistas)
        VALUES (@id, @partidaId, @empresaId, @eventoId, @checkpointId, NULL, 'team', NULL, NULL, 0)`,
       {
         id: uuidv4(),
@@ -125,13 +125,13 @@ async function testOldDataCleanup() {
 
     // Verificar que novo state foi criado zerado
     const newState = await queryOne(
-      `SELECT * FROM zone_conquest_checkpoint_states WHERE partida_id = @partidaId`,
+      `SELECT * FROM zonaConquistaEstadoCheckpoint WHERE partidaId = @partidaId`,
       { partidaId: newPartidaId }
     );
 
     // Verificar que estado antigo AINDA existe (historicamente)
     const oldStateStillExists = await queryOne(
-      `SELECT * FROM zone_conquest_checkpoint_states WHERE partida_id = @partidaId`,
+      `SELECT * FROM zonaConquistaEstadoCheckpoint WHERE partidaId = @partidaId`,
       { partidaId: oldPartidaId }
     );
 
@@ -175,8 +175,8 @@ async function testModeDifferentiation() {
 
     // Criar TEAM partida
     await query(
-      `INSERT INTO zone_conquest_checkpoint_states 
-       (id, partida_id, empresa_id, evento_id, checkpoint_id, current_owner_id, owner_type)
+      `INSERT INTO zonaConquistaEstadoCheckpoint 
+       (id, partidaId, empresaId, eventoId, checkpointId, donoAtualId, tipoDono)
        VALUES (@id, @partidaId, @empresaId, @eventoId, @checkpointId, NULL, @ownerType)`,
       {
         id: uuidv4(),
@@ -190,8 +190,8 @@ async function testModeDifferentiation() {
 
     // Criar INDIVIDUAL partida
     await query(
-      `INSERT INTO zone_conquest_checkpoint_states 
-       (id, partida_id, empresa_id, evento_id, checkpoint_id, current_owner_id, owner_type)
+      `INSERT INTO zonaConquistaEstadoCheckpoint 
+       (id, partidaId, empresaId, eventoId, checkpointId, donoAtualId, tipoDono)
        VALUES (@id, @partidaId, @empresaId, @eventoId, @checkpointId, NULL, @ownerType)`,
       {
         id: uuidv4(),
@@ -204,12 +204,12 @@ async function testModeDifferentiation() {
     );
 
     const teamState = await queryOne(
-      `SELECT * FROM zone_conquest_checkpoint_states WHERE partida_id = @partidaId`,
+      `SELECT * FROM zonaConquistaEstadoCheckpoint WHERE partidaId = @partidaId`,
       { partidaId: teamPartidaId }
     );
 
     const individualState = await queryOne(
-      `SELECT * FROM zone_conquest_checkpoint_states WHERE partida_id = @partidaId`,
+      `SELECT * FROM zonaConquistaEstadoCheckpoint WHERE partidaId = @partidaId`,
       { partidaId: individualPartidaId }
     );
 
@@ -247,8 +247,8 @@ async function testZoneStatesReset() {
 
     // Criar zone state
     await query(
-      `INSERT INTO zone_conquest_zone_states 
-       (id, partida_id, empresa_id, evento_id, zone_id, current_owner_id, owner_type, is_disputed, checkpoints_count, checkpoints_owned)
+      `INSERT INTO zonaConquistaEstadoZona 
+       (id, partidaId, empresaId, eventoId, zonaId, donoAtualId, tipoDono, disputada, totalCheckpoints, checkpointsConquistados)
        VALUES (@id, @partidaId, @empresaId, @eventoId, @zoneId, NULL, 'team', 0, 0, 0)`,
       {
         id: uuidv4(),
@@ -260,7 +260,7 @@ async function testZoneStatesReset() {
     );
 
     const zoneState = await queryOne(
-      `SELECT * FROM zone_conquest_zone_states WHERE partida_id = @partidaId`,
+      `SELECT * FROM zonaConquistaEstadoZona WHERE partidaId = @partidaId`,
       { partidaId }
     );
 

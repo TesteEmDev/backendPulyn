@@ -15,23 +15,23 @@ async function finalConfig() {
     
     // Evento
     const evento = await pool.query(`
-      SELECT id, name, status FROM eventos WHERE id = $1
+      SELECT eventoId, nome, status FROM evento WHERE eventoId = $1
     `, [EVENTO_ID]);
     
     console.log(`   Evento: ${evento.rows[0].name} (${evento.rows[0].status})`);
     
     // Times do evento
     const times = await pool.query(`
-      SELECT id, name, color FROM times WHERE evento_id = $1 ORDER BY created_at
+      SELECT timeId, nome, cor FROM time WHERE eventoId = $1 ORDER BY criadoEm
     `, [EVENTO_ID]);
     
     console.log(`   Times no evento: ${times.rowCount}`);
     
     // Brincadeiras
     const brincadeiras = await pool.query(`
-      SELECT id, name, type, status FROM brincadeiras 
-      WHERE (evento_id = $1 OR empresa_id = $2) 
-        AND type IN ('treasure_hunt', 'monster_hunt')
+      SELECT brincadeiraId, nome, tipo, status FROM brincadeira 
+      WHERE (eventoId = $1 OR empresaId = $2) 
+        AND tipo IN ('treasure_hunt', 'monster_hunt')
         AND status = 'active'
     `, [EVENTO_ID, EMPRESA_ID]);
     
@@ -39,15 +39,15 @@ async function finalConfig() {
     
     // Partidas existentes
     const partidasTreasure = await pool.query(`
-      SELECT id, status FROM caca_tesouro_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT partidaId, status FROM cacaTesourPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [EVENTO_ID]);
     
     console.log(`   Partidas Caça ao Tesouro ativas: ${partidasTreasure.rowCount}`);
     
     const partidasMonster = await pool.query(`
-      SELECT id, status FROM monster_hunt_partidas 
-      WHERE evento_id = $1 AND status = 'active'
+      SELECT id, status FROM monsterCacaPartida 
+      WHERE eventoId = $1 AND status = 'active'
     `, [EVENTO_ID]);
     
     console.log(`   Partidas Caça ao Monstro ativas: ${partidasMonster.rowCount}`);
@@ -67,10 +67,10 @@ async function finalConfig() {
       const agora = new Date();
       
       await pool.query(`
-        INSERT INTO caca_tesouro_partidas (
-          id, evento_id, brincadeira_id, status, round_number, 
-          target_checkpoint_id, completed_checkpoint_ids, started_at, 
-          round_started_at, starting_team_id, turn_team_id, turn_available_at
+        INSERT INTO cacaTesourPartida (
+          partidaId, eventoId, brincadeiraId, status, numeroRonda, 
+          checkpointAlvoId, checkpointsCompletadosIds, iniciadoEm, 
+          rondaIniciadaEm, timeInicialId, timeVezId, vezDisponvelEm
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
       `, [
         partidaId,
@@ -103,11 +103,11 @@ async function finalConfig() {
       const agora = new Date();
       
       await pool.query(`
-        INSERT INTO monster_hunt_partidas (
-          id, empresa_id, evento_id, brincadeira_id, status, 
-          hp, max_hp, normal_damage, special_checkpoint_damage, 
-          special_attack_damage, special_checkpoint_id, 
-          started_at, created_at
+        INSERT INTO monsterCacaPartida (
+          id, empresaId, eventoId, brincadeiraId, status, 
+          vida, vidaMaxima, danoNormal, danoCheckpointEspecial, 
+          danoAtaqueEspecial, checkpointEspecialId, 
+          iniciadoEm, criadoEm
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       `, [
         partidaId,
@@ -137,9 +137,9 @@ async function finalConfig() {
     console.log('\n3. 📍 VERIFICANDO CHECKPOINT:');
     
     const checkpoint = await pool.query(`
-      SELECT id, name, status, checkpoint_purpose, 
-             territory_owner_time_id, territory_locked_until, territory_cooldown_until
-      FROM checkpoints WHERE id = $1
+      SELECT checkpointId, nome, status, proposito, 
+             territorioDonoTimeId, territorioTravadoAte, territorioCooldownAte
+      FROM pontoVerificacao WHERE checkpointId = $1
     `, [CHECKPOINT_ID]);
     
     if (checkpoint.rowCount > 0) {
@@ -156,10 +156,10 @@ async function finalConfig() {
     console.log('\n4. 👶 VERIFICANDO PULSEIRA E CRIANÇA:');
     
     const crianca = await pool.query(`
-      SELECT c.name, c.bracelet_code, t.name as team_name, t.color as team_color
-      FROM criancas c
-      LEFT JOIN times t ON t.id = c.time_id
-      WHERE c.evento_id = $1 AND (c.bracelet_code = '60FBAA16' OR c.bracelet_code = '60fbaa16')
+      SELECT c.nome, c.codigoPulseira, t.nome as team_name, t.cor as team_color
+      FROM crianca c
+      LEFT JOIN time t ON t.timeId = c.timeId
+      WHERE c.eventoId = $1 AND (c.codigoPulseira = '60FBAA16' OR c.codigoPulseira = '60fbaa16')
       LIMIT 1
     `, [EVENTO_ID]);
     
