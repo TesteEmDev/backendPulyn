@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { processParallelScan } = require('../utils/parallelGame');
 const {
   getActiveSession,
   processTreasureScan,
@@ -409,6 +410,37 @@ router.post('/', async (req, res) => {
     }
     
     // ✅ Pulseira já cadastrada - processar como leitura de jogo
+
+    // Brincadeira paralela (corrida do checkpoint): enquanto está ativa, a leitura do checkpoint
+    // escolhido vale só para ela e não segue para o jogo principal.
+    const parallelResult = await processParallelScan({
+      eventoId: checkpoint.evento_id,
+      checkpointId,
+      crianca,
+      uid: normalizedUid,
+      leituraId,
+      now,
+    });
+    if (parallelResult) {
+      const parallelMessages = {
+        won: `${crianca.nickname || crianca.name} ficou em ${parallelResult.position}º lugar! +${parallelResult.points} pontos`,
+        already: `${crianca.nickname || crianca.name} já garantiu o prêmio desta brincadeira`,
+        closed: 'Os 3 primeiros lugares da brincadeira paralela já foram preenchidos',
+      };
+      return res.json({
+        ok: true,
+        registered: true,
+        authorized: parallelResult.status === 'won',
+        braceletCode: normalizedUid,
+        readingId: leituraId,
+        parallel: true,
+        parallelStatus: parallelResult.status,
+        position: parallelResult.position,
+        pointsGained: parallelResult.points,
+        criancaName: crianca.name,
+        message: parallelMessages[parallelResult.status] || 'Leitura da brincadeira paralela processada',
+      });
+    }
     
     // ✨ NOVO: Validar se o evento está ACTIVE antes de processar pontos
     const evento = await queryOne('SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@id)', { id: crianca.evento_id });

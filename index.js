@@ -47,6 +47,9 @@ const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
+const { ensureParallelGamesSchema } = require('./migrations/parallelGames');
+const { stopParallelGame } = require('./utils/parallelGame');
+const parallelGamesRoutes = require('./routes/parallelGames');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { startBraceletReleaseScheduler } = require('./utils/braceletRelease');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
@@ -981,6 +984,13 @@ async function stopGameForEvento(eventoId) {
     await stopMonsterGame(eventoId);
     await stopZoneConquestGame(eventoId);
 
+    // A brincadeira paralela só existe durante a principal: acaba junto com ela.
+    try {
+      await stopParallelGame(eventoId, 'main_game_stopped');
+    } catch (parallelError) {
+      console.warn(`   ⚠️ Erro ao encerrar a brincadeira paralela: ${parallelError.message}`);
+    }
+
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
       UPDATE checkpoints SET
@@ -1887,6 +1897,7 @@ app.use('/api/planos', planosRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/parallel-games', parallelGamesRoutes);
 app.use('/api/familias', familiasRoutes);
 
 // Servir arquivos estáticos
@@ -1933,6 +1944,7 @@ async function startServer() {
     await ensureSettingsPerCompanySchema();
     await ensureClienteUnidadeSchema();
     await ensureBraceletHistorySchema();
+    await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureEventFloorPlanSchema();
