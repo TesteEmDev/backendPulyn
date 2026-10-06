@@ -196,7 +196,7 @@ global.broadcastAll = (message) => {
 async function persistEventMode(eventoId, mode, gameType = currentGameType, details = {}) {
   if (!eventoId || eventoId === 'global') return;
   const evento = await queryOne(
-    'SELECT id, empresa_id FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)',
+    'SELECT id, empresa_id FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return;
@@ -284,7 +284,7 @@ wss.on('connection', async (ws, req) => {
     try {
       const authorizedEvent = await queryOne(
         `SELECT id FROM "evento"
-         WHERE LOWER(id) = LOWER(@eventoId)
+         WHERE LOWER("eventoId") = LOWER(@eventoId)
            AND LOWER(empresa_id) = LOWER(@empresaId)`,
         { eventoId, empresaId: wsUser.empresa_id }
       );
@@ -330,7 +330,7 @@ wss.on('connection', async (ws, req) => {
     try {
       const kioskEvent = await queryOne(
         `SELECT id FROM "evento"
-         WHERE id = @eventoId
+         WHERE "eventoId" = @eventoId
            AND empresa_id = @empresaId
            AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
         { eventoId, empresaId: wsUser.empresa_id }
@@ -450,7 +450,7 @@ app.get('/api/debug/game-status', verifyToken, requireRole('admin', 'reception',
 app.get('/api/debug/game-state/:eventoId', verifyToken, requireRole('admin', 'reception', 'game_master', 'display', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT id, empresa_id, status FROM eventos WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -486,7 +486,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const evento = await queryOne(
-      'SELECT id, empresa_id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT id, empresa_id, status FROM eventos WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -495,7 +495,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const game = await queryOne(
-      'SELECT id, name, type, evento_id, empresa_id FROM "brincadeira" WHERE LOWER(id) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
+      'SELECT id, name, type, evento_id, empresa_id FROM "brincadeira" WHERE LOWER("eventoId") = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
       { gameId }
     );
     if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
@@ -581,7 +581,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [INICIAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT id, empresa_id, status FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)`,
+      `SELECT id, empresa_id, status FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -600,7 +600,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     const selectedGame = await queryOne(
       `SELECT id, name, type, evento_id, empresa_id
        FROM "brincadeira"
-       WHERE LOWER(id) = LOWER(@gameId)
+       WHERE LOWER("eventoId") = LOWER(@gameId)
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { gameId }
     );
@@ -725,7 +725,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         } = require('./utils/zoneConquestStateManager');
         
         const evento = await queryOne(
-          `SELECT empresa_id FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+          `SELECT empresa_id FROM eventos WHERE LOWER("eventoId") = LOWER(@eventoId)`,
           { eventoId }
         );
         
@@ -827,7 +827,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       `UPDATE "evento" SET
         brincadeiraAtivaId = @gameId,
         tipoJogoAtivo = @gameType
-       WHERE LOWER(id) = LOWER(@eventoId)`,
+       WHERE LOWER("eventoId") = LOWER(@eventoId)`,
       { eventoId, gameId, gameType }
     );
     console.log(`   Atualização executada`);
@@ -923,7 +923,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     console.log(`✅ [INICIAR-JOGO] Processo finalizado com sucesso!\n`);
     
     const eventoDepois = await queryOne(
-      `SELECT id, status FROM eventos WHERE LOWER(id) = LOWER(@eventoId)`,
+      `SELECT id, status FROM eventos WHERE LOWER("eventoId") = LOWER(@eventoId)`,
       { eventoId }
     );
     res.json({
@@ -953,7 +953,7 @@ async function stopGameForEvento(eventoId) {
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [PARAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT id, empresa_id, status FROM "evento" WHERE id = @eventoId`,
+      `SELECT id, empresa_id, status FROM "evento" WHERE "eventoId" = @eventoId`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -1056,7 +1056,7 @@ async function stopGameForEvento(eventoId) {
     // Parar o jogo não muda o status do evento (ciclo de vida: agendado/ativo/
     // encerrado); só o encerramento do evento o fecha. Ver utils/eventLifecycle.js
     const eventoDepois = await queryOne(
-      `SELECT id, status FROM eventos WHERE id = @eventoId`,
+      `SELECT id, status FROM eventos WHERE "eventoId" = @eventoId`,
       { eventoId }
     );
     console.log(`✅ [PARAR-JOGO] Jogo parado. Status do evento (inalterado): ${eventoDepois?.status || 'NÃO ENCONTRADO'}`);
@@ -1127,7 +1127,7 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     }
 
     const evento = await queryOne(
-      `SELECT id, empresa_id FROM eventos WHERE id = @eventoId`,
+      `SELECT id, empresa_id FROM eventos WHERE "eventoId" = @eventoId`,
       { eventoId }
     );
     if (!evento) {
@@ -1159,7 +1159,7 @@ async function checkExpiredGames() {
     const activeSessions = await allQuery(`
       SELECT gs.evento_id, gs.started_at, b.duration
       FROM game_sessions gs
-      INNER JOIN "brincadeira" b ON b.id = gs.brincadeira_id
+      INNER JOIN "brincadeira" b ON b."brincadeiraId" = gs.brincadeira_id
       WHERE gs.status = 'active'
         AND b.duration IS NOT NULL
         AND b.duration > 0
@@ -1302,7 +1302,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
   try {
     const { eventoId } = req.params;
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT id, empresa_id FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) {
@@ -1439,7 +1439,7 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
   currentMode = 'idle';
   query(
     `UPDATE eventos SET brincadeiraAtivaId = NULL, tipoJogoAtivo = 'none'
-     WHERE LOWER(id) = LOWER(@eventoId)`,
+     WHERE LOWER("eventoId") = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
     console.error('❌ Erro ao limpar jogo ativo do evento após conclusão do tesouro:', error.message);
@@ -1476,7 +1476,7 @@ global.finishMonsterGameState = (eventoId, finishedAt = new Date().toISOString()
   }
   query(
     `UPDATE eventos SET brincadeiraAtivaId = NULL, tipoJogoAtivo = 'none'
-     WHERE LOWER(id) = LOWER(@eventoId)`,
+     WHERE LOWER("eventoId") = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
     console.error('❌ Erro ao limpar jogo ativo do evento após derrota do monstro:', error.message);
@@ -1532,7 +1532,7 @@ app.post('/api/debug/checkpoint-mode', verifyToken, requireRole('admin', 'game_m
 
   if (eventoId) {
     const evento = await queryOne(
-      'SELECT id, empresa_id FROM "evento" WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT id, empresa_id FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -1790,7 +1790,7 @@ app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), 
       if (idx < pulseiras.length) {
         const pulseira = pulseiras[idx];
         await query(
-          `UPDATE criancas SET codigoPulseira = @codigo WHERE id = @id`,
+          `UPDATE criancas SET codigoPulseira = @codigo WHERE "eventoId" = @id`,
           { codigo: pulseira.codigo, id: crianca.id }
         );
         idx++;
