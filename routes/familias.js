@@ -319,6 +319,70 @@ async function getLinkForStaff(linkId, req) {
   return { link };
 }
 
+// Todas as vinculações (aprovadas, pendentes, rejeitadas e desvinculadas) com a criança e o
+// responsável, para a tela de Vinculações da recepção. Filtros opcionais: evento e status.
+const LINK_STATUSES = new Set(['approved', 'pending', 'rejected', 'inactive']);
+
+router.get('/links', verifyToken, async (req, res) => {
+  try {
+    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+    const status = req.query.status ? String(req.query.status) : null;
+    if (status && !LINK_STATUSES.has(status)) return res.status(400).json({ error: 'Status inválido' });
+
+    const links = await allQuery(`
+      SELECT l.id as link_id, l.status as link_status, l.relationship,
+             l.created_at as requested_at, l.approved_at, l.rejected_at,
+             u.id as login_id, u.email, u.family_name,
+             c.id as crianca_id, c.name as crianca_name, c.nickname, c.age, c.avatar,
+             c.bracelet_code, c.status as crianca_status,
+             e.id as evento_id, e.name as evento_name, e.date as evento_date,
+             t.name as time_name, t.color as time_color
+      FROM family_child_links l
+      JOIN logins u ON u.id = l.login_id
+      JOIN criancas c ON c.id = l.crianca_id
+      JOIN eventos e ON e.id = c.evento_id
+      LEFT JOIN times t ON t.id = c.time_id
+      WHERE (CAST(@status AS VARCHAR(20)) IS NULL OR l.status = CAST(@status AS VARCHAR(20)))
+        AND (CAST(@eventoId AS VARCHAR(36)) IS NULL OR e.id = CAST(@eventoId AS VARCHAR(36)))
+        AND (@isMaster = 1 OR l.empresa_id = @empresaId)
+      ORDER BY e.date DESC, c.name ASC, l.created_at ASC
+    `, {
+      status,
+      eventoId: req.query.evento_id ? String(req.query.evento_id) : null,
+      empresaId: req.user.empresa_id,
+      isMaster: isMaster(req) ? 1 : 0,
+    });
+    res.json(links);
+  } catch (err) {
+    console.error('❌ Erro ao listar vinculações:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Desvincula um responsável de uma criança. Marca o vínculo como 'inactive' (mesmo estado
+// que o próprio responsável usa ao remover a criança no app), então o histórico fica e
+// ele pode se vincular de novo pelo QR code.
+router.post('/links/:linkId/unlink', verifyToken, async (req, res) => {
+  try {
+    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+    const result = await getLinkForStaff(req.params.linkId, req);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    const { link } = result;
+
+    if (link.status === 'inactive') return res.json({ ok: true, status: 'inactive', message: 'Este vínculo já estava desfeito' });
+    if (link.status === 'rejected') return res.status(409).json({ error: 'Esta solicitação foi rejeitada; não há vínculo para desfazer' });
+
+    await query(
+      `UPDATE family_child_links SET status = 'inactive' WHERE id = @linkId AND status IN ('approved', 'pending')`,
+      { linkId: link.id }
+    );
+    res.json({ ok: true, status: 'inactive', message: 'Vínculo desfeito' });
+  } catch (err) {
+    console.error('❌ Erro ao desvincular responsável:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/links/:linkId/approve', verifyToken, async (req, res) => {
   try {
     if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
