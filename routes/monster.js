@@ -7,7 +7,7 @@ const {
   getMonsterEventStatus,
 } = require('../utils/monster');
 
-router.get('/checkpoints/:checkpointId/status', async (req, res) => {
+router.get('/pontoVerificacao/:checkpointId/status', async (req, res) => {
   try {
     res.json(await getCheckpointMonsterStatus(req.params.checkpointId));
   } catch (err) {

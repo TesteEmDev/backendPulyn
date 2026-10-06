@@ -454,7 +454,7 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
 
-    // O jogo só começa se o evento tiver o mínimo de checkpoints online para ele (antes de apagar/resetar qualquer dado)
+    // O jogo só começa se o evento tiver o mínimo de pontoVerificacao online para ele (antes de apagar/resetar qualquer dado)
     const requirement = await checkGameStartRequirements(eventoId, brincadeira);
     if (!requirement.ok) {
       return res.status(409).json({ error: requirement.message, requirement });
@@ -535,9 +535,9 @@ router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_mas
       { eventoId: eventoId }
     );
     
-    // 🆕 Resetar domínio dos checkpoints (zona-equipe)
+    // 🆕 Resetar domínio dos pontoVerificacao (zona-equipe)
     await query(
-      `UPDATE checkpoints 
+      `UPDATE pontoVerificacao 
        SET territorioDonoTimeId = NULL,
            territorioTravadoAte = NULL,
            territorioCooldownAte = NULL,
@@ -679,8 +679,8 @@ router.post('/:eventoId/stop-game', verifyToken, requireRole('admin', 'game_mast
   }
 });
 
-// Listar checkpoints de um evento
-router.get('/:eventoId/checkpoints', verifyToken, async (req, res) => {
+// Listar pontoVerificacao de um evento
+router.get('/:eventoId/pontoVerificacao', verifyToken, async (req, res) => {
   try {
     const empresaId = req.user.empresaId;
     const eventoId = req.params.eventoId;
@@ -699,14 +699,14 @@ router.get('/:eventoId/checkpoints', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
-    const checkpoints = await allQuery(`
-      SELECT * FROM checkpoints 
+    const pontoVerificacao = await allQuery(`
+      SELECT * FROM pontoVerificacao 
       WHERE eventoId = @eventoId
       AND empresaId = @empresaId
       AND LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'
       ORDER BY name ASC
     `, { eventoId, empresaId });
-    res.json(checkpoints);
+    res.json(pontoVerificacao);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1044,7 +1044,7 @@ router.post('/:eventoId/setup-active-game', verifyToken, requireRole('admin', 'g
       `, {
         id: newBrincadeiraId,
         name: 'Captura de Territórios',
-        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseiras em checkpoints',
+        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseiras em pontoVerificacao',
         type: 'team',
         gameType: 'standard',
         status: 'active',

@@ -30,7 +30,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // Checkpoints online
     const onlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
-      FROM checkpoints c
+      FROM pontoVerificacao c
       LEFT JOIN empresas emp ON c.empresaId = emp.id
       WHERE c.status = 'online'
         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
@@ -49,7 +49,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // Checkpoints offline
     const offlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
-      FROM checkpoints c
+      FROM pontoVerificacao c
       LEFT JOIN empresas emp ON c.empresaId = emp.id
       WHERE (c.status = 'offline' OR c.status IS NULL)
         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
@@ -179,7 +179,7 @@ router.get('/alerts', verifyToken, async (req, res) => {
         c.zone,
         c.ultimoVisto,
         emp.nome as empresa_nome
-      FROM checkpoints c
+      FROM pontoVerificacao c
       LEFT JOIN empresas emp ON c.empresaId = emp.id
       WHERE c.status = 'offline'
         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'

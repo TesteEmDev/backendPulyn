@@ -32,7 +32,7 @@ router.get('/events', async (req, res) => {
       `SELECT e.id, e.name, e.date, e.time, e.duration, e.status,
               CASE WHEN EXISTS (
                 SELECT 1
-                FROM checkpoints c
+                FROM pontoVerificacao c
                 WHERE c.eventoId = e.id
                   AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) = 'reception'
               ) THEN 1 ELSE 0 END AS has_reception_checkpoint

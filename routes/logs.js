@@ -10,7 +10,7 @@ const { listPlatformClients } = require('../utils/platformClients');
 // sempre aparecia vazia. Em vez de exigir instrumentar o app inteiro antes
 // de ter qualquer log, este endpoint sintetiza um feed real a partir de
 // eventos que já acontecem e já são reais: clientes cadastrados, tickets de
-// suporte e checkpoints que caíram offline. O POST abaixo continua
+// suporte e pontoVerificacao que caíram offline. O POST abaixo continua
 // disponível para quem quiser registrar logs próprios no futuro.
 router.get('/', verifyToken, async (req, res) => {
   try {
@@ -29,12 +29,12 @@ router.get('/', verifyToken, async (req, res) => {
           `, { empresaId }),
       allQuery(`
         SELECT id, cliente as empresa_nome, subject, status, criadoEm
-        FROM supportTickets
+        FROM chamadosSuport
         WHERE 1=1 ${master ? '' : 'AND empresaId = @empresaId'}
       `, { empresaId }),
       allQuery(`
         SELECT c.id, c.name, c.zone, c.ultimoVisto, emp.nome as empresa_nome
-        FROM checkpoints c
+        FROM pontoVerificacao c
         LEFT JOIN empresas emp ON c.empresaId = emp.id
         WHERE c.status = 'offline'
           AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'

@@ -22,13 +22,13 @@ const pulseiraRoutes = require('./routes/pulseiras');
 const analyticsRoutes = require('./routes/analytics');
 const reportsRoutes = require('./routes/reports');
 const masterRoutes = require('./routes/master');
-const checkpointsRoutes = require('./routes/checkpoints');
+const checkpointsRoutes = require('./routes/pontoVerificacao');
 const leiturasRoutes = require('./routes/leituras');
-const settingsRoutes = require('./routes/settings');
+const settingsRoutes = require('./routes/configuracoes');
 const empresaRoutes = require('./routes/empresa');
 const rankingRoutes = require('./routes/ranking');
 const logsRoutes = require('./routes/logs');
-const loginsRoutes = require('./routes/logins');
+const loginsRoutes = require('./routes/acessos');
 const treasureRoutes = require('./routes/treasure');
 const monsterRoutes = require('./routes/monster');
 const planosRoutes = require('./routes/planos');
@@ -116,14 +116,14 @@ const interval = setInterval(() => {
   });
 }, 30000);
 
-// ✨ NOVO: Verificar checkpoints offline (não enviaram leitura há 5 minutos)
+// ✨ NOVO: Verificar pontoVerificacao offline (não enviaram leitura há 5 minutos)
 // 🔴 DESABILITADO TEMPORARIAMENTE: Causa timeout ao tentar conectar ao banco remoto
 // const offlineCheckInterval = setInterval(async () => {
 //   try {
 //     // Verificar se coluna last_seen existe
 //     const checkColumn = await require('./database').queryOne(`
 //       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS 
-//       WHERE TABLE_NAME = 'checkpoints' AND COLUMN_NAME = 'last_seen'
+//       WHERE TABLE_NAME = 'pontoVerificacao' AND COLUMN_NAME = 'last_seen'
 //     `);
 //     
 //     if (!checkColumn) {
@@ -135,7 +135,7 @@ const interval = setInterval(() => {
 //     
 //     // Marcar como offline se não foram vistos há 5 minutos
 //     await require('./database').query(
-//       `UPDATE checkpoints 
+//       `UPDATE pontoVerificacao 
 //        SET status = 'offline' 
 //        WHERE status = 'online'
 //        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
@@ -143,7 +143,7 @@ const interval = setInterval(() => {
 //       { fiveMinutesAgo }
 //     );
 //   } catch (err) {
-//     console.error('❌ Erro ao verificar checkpoints offline:', err);
+//     console.error('❌ Erro ao verificar pontoVerificacao offline:', err);
 //   }
 // }, 60000); // A cada 1 minuto
 
@@ -625,7 +625,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
-    // O jogo só começa se o evento tiver o mínimo de checkpoints online para ele (confere antes de mexer em qualquer dado)
+    // O jogo só começa se o evento tiver o mínimo de pontoVerificacao online para ele (confere antes de mexer em qualquer dado)
     const requirement = await checkGameStartRequirements(eventoId, selectedGame);
     if (!requirement.ok) {
       console.warn(`⛔ [INICIAR-JOGO] ${requirement.message}`);
@@ -704,7 +704,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     // Cada novo início começa sem domínio visual da partida anterior.
     await query(`
-      UPDATE checkpoints SET
+      UPDATE pontoVerificacao SET
         territorioDonoTimeId = NULL,
         territorioDonosCriancaId = NULL,
         territorioTravadoAte = NULL,
@@ -903,7 +903,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       payload: { 
         eventoId,
         timestamp: new Date().toISOString(),
-        message: 'Leituras de checkpoints foram resetadas. Novo jogo iniciado!'
+        message: 'Leituras de pontoVerificacao foram resetadas. Novo jogo iniciado!'
       }
     });
     
@@ -981,7 +981,7 @@ async function stopGameForEvento(eventoId) {
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
-      UPDATE checkpoints SET
+      UPDATE pontoVerificacao SET
         territorioDonoTimeId = NULL,
         territorioTravadoAte = NULL,
         territorioCooldownAte = NULL,
@@ -989,7 +989,7 @@ async function stopGameForEvento(eventoId) {
       WHERE evento_id = @eventoId
         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
     `, { eventoId });
-    console.log(`   ✓ Domínios dos checkpoints encerrados`);
+    console.log(`   ✓ Domínios dos pontoVerificacao encerrados`);
     
     // 🆕 ATUALIZAR STATUS DA SESSÃO PARA 'finished'
     await query(
@@ -1018,7 +1018,7 @@ async function stopGameForEvento(eventoId) {
     }
 
     // stopZoneConquestIndividual finaliza a partida individual ativa, os
-    // participant_states e limpa territorioDonosCriancaId dos checkpoints.
+    // participant_states e limpa territorioDonosCriancaId dos pontoVerificacao.
     // Faltava essa chamada aqui: a partida individual nunca era marcada como
     // 'finished' ao parar o jogo, só ficava "esquecida" como active para
     // sempre (a próxima partida individual criada nunca fechava a anterior).
@@ -1203,7 +1203,7 @@ async function checkStaleTeamCheckpoints() {
     const cutoff = new Date(Date.now() - TEAM_CHECKPOINT_RESET_MS);
     const staleCheckpoints = await allQuery(
       `SELECT c.id, c.evento_id
-       FROM checkpoints c
+       FROM pontoVerificacao c
        WHERE c.territorioDonoTimeId IS NOT NULL
          AND c.last_conquered_at IS NOT NULL
          AND c.last_conquered_at < @cutoff
@@ -1217,7 +1217,7 @@ async function checkStaleTeamCheckpoints() {
     const eventosAfetados = new Set();
     for (const checkpoint of staleCheckpoints) {
       await query(
-        `UPDATE checkpoints SET
+        `UPDATE pontoVerificacao SET
            territorioDonoTimeId = NULL,
            territorioDonosCriancaId = NULL
          WHERE id = @id`,
@@ -1234,7 +1234,7 @@ async function checkStaleTeamCheckpoints() {
       });
     }
   } catch (err) {
-    console.error('❌ [ZONE-TEAM] Erro ao liberar checkpoints inativos:', err.message);
+    console.error('❌ [ZONE-TEAM] Erro ao liberar pontoVerificacao inativos:', err.message);
   }
 }
 
@@ -1250,7 +1250,7 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
   try {
     const { checkpointId } = req.params;
     const checkpoint = await queryOne(
-      'SELECT id, empresa_id, proposito FROM checkpoints WHERE id = @checkpointId',
+      'SELECT id, empresa_id, proposito FROM pontoVerificacao WHERE id = @checkpointId',
       { checkpointId }
     );
     if (!checkpoint) {
@@ -1261,7 +1261,7 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
     }
 
     await query(
-      `UPDATE checkpoints SET
+      `UPDATE pontoVerificacao SET
         territorioTravadoAte = NULL,
         territorioCooldownAte = NULL,
         territorioDonoTimeId = NULL
@@ -1283,7 +1283,7 @@ app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', '
       ? " WHERE LOWER(COALESCE(proposito, 'game')) <> 'reception'"
       : " WHERE empresa_id = @empresaId AND LOWER(COALESCE(proposito, 'game')) <> 'reception'";
     await query(
-      `UPDATE checkpoints SET
+      `UPDATE pontoVerificacao SET
         territorioTravadoAte = NULL,
         territorioCooldownAte = NULL,
         territorioDonoTimeId = NULL${territoryScope ? territoryScope : ''}`,
@@ -1332,7 +1332,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
     await query(
       `DELETE FROM leituras
        WHERE checkpoint_id IN (
-         SELECT id FROM checkpoints
+         SELECT id FROM pontoVerificacao
          WHERE evento_id = @eventoId
            AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
        )`,
@@ -1387,7 +1387,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
     
     // 5. Resetar territories
     await query(
-      `UPDATE checkpoints SET 
+      `UPDATE pontoVerificacao SET 
         territorioTravadoAte = NULL,
         territorioCooldownAte = NULL,
         territorioDonoTimeId = NULL
@@ -1498,7 +1498,7 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
     const checkpointId = req.query.checkpointId;
     if (checkpointId) {
       const checkpoint = await queryOne(
-        'SELECT evento_id FROM checkpoints WHERE id = @checkpointId',
+        'SELECT evento_id FROM pontoVerificacao WHERE id = @checkpointId',
         { checkpointId }
       );
       if (checkpoint?.evento_id) {
@@ -1616,20 +1616,20 @@ app.post('/api/debug/reset-all-bracelets', verifyToken, requireRole('master'), a
   }
 });
 
-// ✨ NOVO: Deletar checkpoints sem empresa_id
-app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
+// ✨ NOVO: Deletar pontoVerificacao sem empresa_id
+app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`🗑️  Deletando checkpoints sem empresa_id...`);
+    console.log(`🗑️  Deletando pontoVerificacao sem empresa_id...`);
     
-    // 1. Listar checkpoints sem empresa_id
+    // 1. Listar pontoVerificacao sem empresa_id
     const orphanedCheckpoints = await allQuery(`
       SELECT id, name, evento_id, empresa_id
-      FROM checkpoints
+      FROM pontoVerificacao
       WHERE empresa_id IS NULL
       ORDER BY name
     `);
     
-    console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints sem empresa_id:`);
+    console.log(`   Encontrados ${orphanedCheckpoints.length} pontoVerificacao sem empresa_id:`);
     orphanedCheckpoints.forEach(cp => {
       console.log(`   - ${cp.name} (id: ${cp.id}, evento_id: ${cp.evento_id})`);
     });
@@ -1639,45 +1639,45 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
         ok: true, 
         message: 'Nenhum checkpoint sem empresa_id encontrado',
         deleted: 0,
-        checkpoints: []
+        pontoVerificacao: []
       });
     }
     
     // 2. Deletar leituras associadas
-    console.log(`   • Deletando leituras dos checkpoints...`);
+    console.log(`   • Deletando leituras dos pontoVerificacao...`);
     await query(`
       DELETE FROM leituras 
       WHERE checkpoint_id IN (
-        SELECT id FROM checkpoints WHERE empresa_id IS NULL
+        SELECT id FROM pontoVerificacao WHERE empresa_id IS NULL
       )
     `);
     console.log(`   ✓ Leituras deletadas`);
     
     // 3. Deletar pontuações associadas
-    console.log(`   • Deletando pontuações dos checkpoints...`);
+    console.log(`   • Deletando pontuações dos pontoVerificacao...`);
     await query(`
       DELETE FROM pontuacoes 
       WHERE checkpoint_id IN (
-        SELECT id FROM checkpoints WHERE empresa_id IS NULL
+        SELECT id FROM pontoVerificacao WHERE empresa_id IS NULL
       )
     `);
     console.log(`   ✓ Pontuações deletadas`);
     
-    // 4. Deletar os checkpoints
-    console.log(`   • Deletando checkpoints...`);
+    // 4. Deletar os pontoVerificacao
+    console.log(`   • Deletando pontoVerificacao...`);
     const result = await query(`
-      DELETE FROM checkpoints 
+      DELETE FROM pontoVerificacao 
       WHERE empresa_id IS NULL
     `);
     console.log(`   ✓ Checkpoints deletados`);
     
-    console.log(`✅ ${orphanedCheckpoints.length} checkpoints foram deletados com sucesso!\n`);
+    console.log(`✅ ${orphanedCheckpoints.length} pontoVerificacao foram deletados com sucesso!\n`);
     
     res.json({ 
       ok: true, 
-      message: `${orphanedCheckpoints.length} checkpoints sem empresa_id foram deletados com sucesso!`,
+      message: `${orphanedCheckpoints.length} pontoVerificacao sem empresa_id foram deletados com sucesso!`,
       deleted: orphanedCheckpoints.length,
-      checkpoints: orphanedCheckpoints.map(cp => ({
+      pontoVerificacao: orphanedCheckpoints.map(cp => ({
         id: cp.id,
         name: cp.name,
         evento_id: cp.evento_id,
@@ -1686,40 +1686,40 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
     });
     
   } catch (err) {
-    console.error('❌ Erro ao deletar checkpoints:', err.message);
+    console.error('❌ Erro ao deletar pontoVerificacao:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✨ NOVO: Listar checkpoints sem empresa_id
-app.get('/api/debug/list-checkpoints-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
+// ✨ NOVO: Listar pontoVerificacao sem empresa_id
+app.get('/api/debug/list-pontoVerificacao-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`📋 Listando checkpoints sem empresa_id...`);
+    console.log(`📋 Listando pontoVerificacao sem empresa_id...`);
     
     const orphanedCheckpoints = await allQuery(`
       SELECT id, name, evento_id, empresa_id, status, created_at
-      FROM checkpoints
+      FROM pontoVerificacao
       WHERE empresa_id IS NULL
       ORDER BY name
     `);
     
-    console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints`);
+    console.log(`   Encontrados ${orphanedCheckpoints.length} pontoVerificacao`);
     
     res.json({ 
       total: orphanedCheckpoints.length,
-      checkpoints: orphanedCheckpoints
+      pontoVerificacao: orphanedCheckpoints
     });
     
   } catch (err) {
-    console.error('❌ Erro ao listar checkpoints:', err.message);
+    console.error('❌ Erro ao listar pontoVerificacao:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✨ NOVO: Limpar todas as crianças, pulseiras e resetar checkpoints
+// ✨ NOVO: Limpar todas as crianças, pulseiras e resetar pontoVerificacao
 app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`🗑️  Iniciando limpeza de crianças, pulseiras e checkpoints...`);
+    console.log(`🗑️  Iniciando limpeza de crianças, pulseiras e pontoVerificacao...`);
     
     // 1. Desassociar todas as pulseiras das crianças
     console.log(`   • Resetando pulseiras...`);
@@ -1733,10 +1733,10 @@ app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), as
     console.log(`   • Resetando times...`);
     await query(`UPDATE times SET points = 0`);
     
-    // 4. Resetar checkpoints (limpar territories, lock, cooldown, scores)
-    console.log(`   • Resetando checkpoints...`);
+    // 4. Resetar pontoVerificacao (limpar territories, lock, cooldown, scores)
+    console.log(`   • Resetando pontoVerificacao...`);
     await query(`
-      UPDATE checkpoints SET 
+      UPDATE pontoVerificacao SET 
         territorioDonoTimeId = NULL,
         territorioTravadoAte = NULL,
         territorioCooldownAte = NULL,
@@ -1746,7 +1746,7 @@ app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), as
     console.log(`✅ Limpeza concluída com sucesso!`);
     res.json({ 
       ok: true, 
-      message: 'Crianças, pulseiras e checkpoints limpas com sucesso',
+      message: 'Crianças, pulseiras e pontoVerificacao limpas com sucesso',
       summary: {
         'Crianças': 'Todas deletadas ✓',
         'Pulseiras': 'Todas resetadas para disponível ✓',
@@ -1838,7 +1838,7 @@ app.use('/api/criancas', criancasRoutes);
 app.use('/api/pulseiras', pulseiraRoutes);
 
 // Checkpoints
-app.use('/api/checkpoints', checkpointsRoutes);
+app.use('/api/pontoVerificacao', checkpointsRoutes);
 
 // Leituras
 app.use('/api/leituras', leiturasRoutes);
@@ -1851,7 +1851,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/master', masterRoutes);
 
 // Settings
-app.use('/api/settings', settingsRoutes);
+app.use('/api/configuracoes', settingsRoutes);
 
 // Dados do próprio buffet (CNPJ)
 app.use('/api/empresa', empresaRoutes);
@@ -1863,7 +1863,7 @@ app.use('/api/ranking', rankingRoutes);
 app.use('/api/logs', logsRoutes);
 
 // Logins (Gerenciamento de Usuários)
-app.use('/api/logins', loginsRoutes);
+app.use('/api/acessos', loginsRoutes);
 
 // Caça ao Tesouro
 app.use('/api/treasure', treasureRoutes);
@@ -1944,7 +1944,7 @@ async function startServer() {
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
     eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
-    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
+    console.log('✅ Schema de famílias, estado do jogo, mapa dos pontoVerificacao, planta dos eventos, finalidade dos pontoVerificacao, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);
@@ -1969,11 +1969,11 @@ async function startServer() {
   ║      ✓ /api/times                    ║
   ║      ✓ /api/criancas                 ║
   ║      ✓ /api/pulseiras                ║
-  ║      ✓ /api/checkpoints              ║
+  ║      ✓ /api/pontoVerificacao              ║
   ║      ✓ /api/leituras                 ║
   ║      ✓ /api/analytics                ║
   ║      ✓ /api/master                   ║
-  ║      ✓ /api/settings                 ║
+  ║      ✓ /api/configuracoes                 ║
   ║      ✓ /api/ranking                  ║
   ║      ✓ /api/logs                     ║
   ║      ✓ /api/zone-conquest            ║
@@ -2035,13 +2035,13 @@ async function startServer() {
     // Verificar se coluna já existe
     const checkColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'checkpoints' AND COLUMN_NAME = 'last_seen'
+      WHERE TABLE_NAME = 'pontoVerificacao' AND COLUMN_NAME = 'last_seen'
     `);
     
     if (!checkColumn) {
-      console.log('  • Adicionando coluna last_seen em checkpoints...');
+      console.log('  • Adicionando coluna last_seen em pontoVerificacao...');
       await query(`
-        ALTER TABLE checkpoints
+        ALTER TABLE pontoVerificacao
         ADD last_seen DATETIME NULL DEFAULT GETDATE()
       `);
       console.log('✅ Coluna last_seen adicionada!\n');

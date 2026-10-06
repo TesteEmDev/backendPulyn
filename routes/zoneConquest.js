@@ -1,5 +1,5 @@
 // routes/zoneConquest.js - API endpoints para Zone Conquest game state
-// Gerencia persistência e recuperação de estado de checkpoints e zonas
+// Gerencia persistência e recuperação de estado de pontoVerificacao e zonas
 
 const express = require('express');
 const router = express.Router();
@@ -300,7 +300,7 @@ router.post(
         });
       }
 
-      // Inicializar checkpoints
+      // Inicializar pontoVerificacao
       const cpCount = await initializeCheckpointStates(
         partidaId,
         empresaId,

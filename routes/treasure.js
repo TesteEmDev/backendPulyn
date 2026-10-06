@@ -8,7 +8,7 @@ const {
 } = require('../utils/treasure');
 
 // Endpoint público usado pelo ESP32 para saber se este checkpoint é o alvo.
-router.get('/checkpoints/:checkpointId/status', async (req, res) => {
+router.get('/pontoVerificacao/:checkpointId/status', async (req, res) => {
   try {
     const status = await getCheckpointTreasureStatus(req.params.checkpointId);
     res.json(status);

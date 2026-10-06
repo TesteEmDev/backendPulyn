@@ -141,7 +141,7 @@ function broadcastEvent(data) {
 async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameType, teamColor, leituraId, uid, now }) {
   try {
     const coords = await queryOne(
-      'SELECT mapaX, mapaY FROM checkpoints WHERE id = @id',
+      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
       { id: checkpointId }
     );
     if (coords?.mapaX == null || coords?.mapaY == null) {
@@ -207,7 +207,7 @@ router.post('/reception', async (req, res) => {
     const checkpoint = await queryOne(
       `SELECT c.id, c.empresaId, c.eventoId, c.propositoCheckpoint,
               p.codigo AS pulseira_code, p.status AS pulseira_status
-       FROM checkpoints c
+       FROM pontoVerificacao c
        LEFT JOIN pulseiras p
          ON LOWER(p.empresaId) = LOWER(c.empresaId)
         AND ${uidSqlExpression('p.codigo')} = @uid
@@ -287,7 +287,7 @@ router.post('/', async (req, res) => {
     }
     
     // O checkpoint define a empresa e o evento da leitura.
-    const checkpoint = await queryOne('SELECT id, empresaId, eventoId, status, propositoCheckpoint FROM checkpoints WHERE id = @id', { id: checkpointId });
+    const checkpoint = await queryOne('SELECT id, empresaId, eventoId, status, propositoCheckpoint FROM pontoVerificacao WHERE id = @id', { id: checkpointId });
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
@@ -325,14 +325,14 @@ router.post('/', async (req, res) => {
     if (!treasureSession || checkpointIsOnline) {
       try {
         await query(
-          `UPDATE checkpoints SET status = 'online', ultimoVisto = @now WHERE id = @checkpointId`,
+          `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now WHERE id = @checkpointId`,
           { checkpointId, now }
         );
       } catch (err) {
       // Se coluna ultimoVisto não existe ainda, só atualiza o status
       if (err.message.includes('ultimoVisto')) {
         await query(
-          `UPDATE checkpoints SET status = 'online' WHERE id = @checkpointId`,
+          `UPDATE pontoVerificacao SET status = 'online' WHERE id = @checkpointId`,
           { checkpointId }
         );
       } else {
@@ -507,7 +507,7 @@ router.post('/', async (req, res) => {
 
           // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile
           const checkpointData = await queryOne(
-            'SELECT mapaX, mapaY FROM checkpoints WHERE id = @id',
+            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
             { id: checkpointId }
           );
           
@@ -660,7 +660,7 @@ router.post('/', async (req, res) => {
         // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile (replicado de Zone)
         if (treasureResult.accepted) {
           const checkpointCoords = await queryOne(
-            'SELECT mapaX, mapaY FROM checkpoints WHERE id = @id',
+            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
             { id: checkpointId }
           );
           
@@ -812,7 +812,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    const checkpointData = await queryOne('SELECT * FROM checkpoints WHERE id = @id', { id: checkpointId });
+    const checkpointData = await queryOne('SELECT * FROM pontoVerificacao WHERE id = @id', { id: checkpointId });
     
     if (!checkpointData) {
       return res.json({ ok: true, registered: true, braceletCode: normalizedUid, message: 'Pulseira cadastrada' });
@@ -1031,7 +1031,7 @@ router.post('/', async (req, res) => {
     // juntos. Se qualquer escrita falhar, toda a operação é desfeita.
     const transactionResult = await withTransaction(async (tx) => {
       const territoryUpdate = await tx.query(`
-        UPDATE checkpoints SET
+        UPDATE pontoVerificacao SET
           territorioDonoTimeId = @timeId,
           territorioTravadoAte = @lockedUntil,
           territorioCooldownAte = @cooldownUntil,
@@ -1116,7 +1116,7 @@ router.post('/', async (req, res) => {
 
     if (transactionResult.conflict) {
       const current = await queryOne(
-        'SELECT territorioTravadoAte, territorioCooldownAte, territorioDonoTimeId FROM checkpoints WHERE id = @id',
+        'SELECT territorioTravadoAte, territorioCooldownAte, territorioDonoTimeId FROM pontoVerificacao WHERE id = @id',
         { id: checkpointId }
       );
       const currentLocked = current?.territorioTravadoAte && new Date(current.territorioTravadoAte) > now;
@@ -1158,7 +1158,7 @@ router.post('/', async (req, res) => {
     
     // 📍 Buscar coordenadas do checkpoint para rastreio no mobile
     const checkpointCoords = await queryOne(
-      'SELECT mapaX, mapaY FROM checkpoints WHERE id = @id',
+      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
       { id: checkpointId }
     );
     
@@ -1313,7 +1313,7 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
           t.color AS team_color
         FROM leituras l
         LEFT JOIN criancas c ON c.id = l.criancaId
-        LEFT JOIN checkpoints cp ON cp.id = l.checkpointId
+        LEFT JOIN pontoVerificacao cp ON cp.id = l.checkpointId
         LEFT JOIN times t ON t.id = c.timeId
         WHERE LOWER(c.eventoId) = LOWER(@eventoId)
           AND l.session_id = @sessionId
@@ -1335,7 +1335,7 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
           t.color AS team_color
         FROM pontuacoes p
         LEFT JOIN criancas c ON c.id = p.criancaId
-        LEFT JOIN checkpoints cp ON cp.id = p.checkpointId
+        LEFT JOIN pontoVerificacao cp ON cp.id = p.checkpointId
         LEFT JOIN times t ON t.id = c.timeId
         WHERE LOWER(p.eventoId) = LOWER(@eventoId)
           AND (p.empresaId = @empresaId OR @master = 1)
@@ -1362,7 +1362,7 @@ router.get('/eventos/:eventoId/historico', verifyToken, async (req, res) => {
             t.color AS team_color
           FROM leituras l
           LEFT JOIN criancas c ON c.id = l.criancaId
-          LEFT JOIN checkpoints cp ON cp.id = l.checkpointId
+          LEFT JOIN pontoVerificacao cp ON cp.id = l.checkpointId
           LEFT JOIN times t ON t.id = c.timeId
           WHERE LOWER(c.eventoId) = LOWER(@eventoId)
             AND l.autorizado = 1

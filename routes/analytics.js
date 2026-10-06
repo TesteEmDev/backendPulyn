@@ -2,7 +2,7 @@
 //
 // Tudo aqui vem do banco: clientes = empresas + cadastro legado (utils/platformClients.js),
 // receita = valor do plano (utils/planDefinitions.js) dos clientes ativos, e os números
-// de eventos, crianças e checkpoints consideram só o que pertence a clientes (empresa).
+// de eventos, crianças e pontoVerificacao consideram só o que pertence a clientes (empresa).
 const express = require('express');
 const router = express.Router();
 const { allQuery, queryOne } = require('../database');
@@ -78,7 +78,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
         SELECT
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(k.status, '')) = 'online' THEN 1 ELSE 0 END) AS online
-        FROM checkpoints k
+        FROM pontoVerificacao k
         JOIN eventos e ON e.id = k.eventoId
         WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
           AND ${CUSTOMER_EVENTS}
@@ -193,11 +193,11 @@ router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apena
 });
 
 // ✅ Checkpoints cadastrados ao longo do tempo: novos no mês e total acumulado
-router.get('/checkpoints-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver checkpoints globais'), async (req, res) => {
+router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver pontoVerificacao globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
       SELECT k.criadoEm
-      FROM checkpoints k
+      FROM pontoVerificacao k
       JOIN eventos e ON e.id = k.eventoId
       WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
         AND ${CUSTOMER_EVENTS}
@@ -215,10 +215,10 @@ router.get('/checkpoints-over-time', verifyToken, requireMaster('Acesso negado: 
     res.json(monthRange(first, monthKeyOf(new Date())).map((key) => {
       const added = perMonth.get(key) || 0;
       total += added;
-      return { month: monthLabel(key), checkpoints: added, total };
+      return { month: monthLabel(key), pontoVerificacao: added, total };
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar checkpoints ao longo do tempo:', err);
+    console.error('❌ Erro ao buscar pontoVerificacao ao longo do tempo:', err);
     res.status(500).json({ error: err.message });
   }
 });

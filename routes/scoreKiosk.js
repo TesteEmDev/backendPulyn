@@ -161,7 +161,7 @@ router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
       `SELECT TOP 5 p.id, p.points, p.criadoEm,
               cp.name AS checkpoint_name
        FROM pontuacoes p
-       LEFT JOIN checkpoints cp ON cp.id = p.checkpointId
+       LEFT JOIN pontoVerificacao cp ON cp.id = p.checkpointId
        WHERE p.criancaId = @childId
          AND p.eventoId = @eventId
          AND p.empresaId = @empresaId

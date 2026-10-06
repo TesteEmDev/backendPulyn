@@ -2,8 +2,8 @@
 //
 // A planta/zonas representam o espaço físico do buffet e não mudam de um
 // evento para outro, por isso ficam ligadas à empresa, não ao evento. Só os
-// checkpoints (routes/checkpoints.js) continuam por evento, já que cada
-// festa pode ligar/posicionar checkpoints diferentes.
+// pontoVerificacao (routes/pontoVerificacao.js) continuam por evento, já que cada
+// festa pode ligar/posicionar pontoVerificacao diferentes.
 const express = require('express');
 const router = express.Router();
 const { query, queryOne } = require('../database');

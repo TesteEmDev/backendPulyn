@@ -107,7 +107,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     await withTransaction(async (tx) => {
       // ✅ VERIFICAR E INSERIR DENTRO DA TRANSAÇÃO COM LOCK (evita race condition)
       const vinculacaoExistente = await tx.queryOne(
-        `SELECT id, status FROM familyChildLinks
+        `SELECT id, status FROM vinculoFamiliar
          WHERE loginId = @loginId 
            AND criancaId = @criancaId
          FOR UPDATE`,
@@ -119,7 +119,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         if (vinculacaoExistente.status === 'inactive') {
           console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.id}`);
           await tx.query(
-            `UPDATE familyChildLinks
+            `UPDATE vinculoFamiliar
              SET status = 'pending'
              WHERE id = @linkId`,
             { linkId: vinculacaoExistente.id }
@@ -134,7 +134,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.criancaId}, empresaId=${codigoVinculacao.empresaId}`);
         
         await tx.query(
-          `INSERT INTO familyChildLinks (id, loginId, criancaId, empresaId, status, relacionamento)
+          `INSERT INTO vinculoFamiliar (id, loginId, criancaId, empresaId, status, relacionamento)
            VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
           { 
             linkId: linkId,
@@ -240,7 +240,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
 
     await withTransaction(async (tx) => {
       const vinculacaoExistente = await tx.queryOne(
-        `SELECT id, status FROM familyChildLinks
+        `SELECT id, status FROM vinculoFamiliar
          WHERE loginId = @loginId
            AND criancaId = @criancaId
          FOR UPDATE`,
@@ -250,7 +250,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       if (vinculacaoExistente) {
         if (vinculacaoExistente.status === 'inactive') {
           await tx.query(
-            `UPDATE familyChildLinks SET status = 'pending' WHERE id = @linkId`,
+            `UPDATE vinculoFamiliar SET status = 'pending' WHERE id = @linkId`,
             { linkId: vinculacaoExistente.id }
           );
         } else {
@@ -258,7 +258,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
         }
       } else {
         await tx.query(
-          `INSERT INTO familyChildLinks (id, loginId, criancaId, empresaId, status, relacionamento)
+          `INSERT INTO vinculoFamiliar (id, loginId, criancaId, empresaId, status, relacionamento)
            VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
           {
             linkId: uuidv4(),
@@ -324,7 +324,7 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
     console.log(`   🔍 Buscando vínculo...`);
     // Verificar se a criança pertence a essa família
     const link = await queryOne(
-      `SELECT l.* FROM familyChildLinks l
+      `SELECT l.* FROM vinculoFamiliar l
        WHERE l.criancaId = @childId AND l.loginId = @loginId`,
       { childId, loginId: req.user.id }
     );
@@ -342,7 +342,7 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
 
     // Desvincullar = marcar como 'inactive'
     await query(
-      `UPDATE familyChildLinks
+      `UPDATE vinculoFamiliar
        SET status = 'inactive'
        WHERE id = @linkId`,
       { linkId: link.id }

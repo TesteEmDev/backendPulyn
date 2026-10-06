@@ -7,10 +7,10 @@ const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const MONSTER_COOLDOWN_MIN_SECONDS = 1;
 const MONSTER_COOLDOWN_MAX_SECONDS = 120;
 
-function normalizeCheckpointConfigs(type, checkpoints) {
-  if (type !== 'monster_hunt' || !Array.isArray(checkpoints)) return checkpoints;
+function normalizeCheckpointConfigs(type, pontoVerificacao) {
+  if (type !== 'monster_hunt' || !Array.isArray(pontoVerificacao)) return pontoVerificacao;
 
-  return checkpoints.map((checkpoint) => {
+  return pontoVerificacao.map((checkpoint) => {
     if (!checkpoint || typeof checkpoint !== 'object') return checkpoint;
 
     const cooldown = Number(checkpoint.cooldown ?? 15);
@@ -70,7 +70,7 @@ router.get('/', verifyToken, async (req, res) => {
     console.log(`📋 [BRINCADEIRAS] Buscando jogos${eventoId ? ` do evento ${eventoId}` : ''}`);
     const brincadeiras = await allQuery(
       `SELECT b.id, b.name, b.description, b.rules, b.type, b.duration, b.pontosPadrao,
-              b.empresaId, b.status, ${eventoSelect}, b.checkpoints
+              b.empresaId, b.status, ${eventoSelect}, b.pontoVerificacao
        FROM brincadeiras b
        WHERE ${whereClause}
        ORDER BY b.name`,
@@ -79,7 +79,7 @@ router.get('/', verifyToken, async (req, res) => {
 
     const parsed = brincadeiras.map(b => ({
       ...b,
-      checkpoints: b.checkpoints ? JSON.parse(b.checkpoints) : []
+      pontoVerificacao: b.pontoVerificacao ? JSON.parse(b.pontoVerificacao) : []
     }));
 
     res.json(parsed);
@@ -92,7 +92,7 @@ router.get('/', verifyToken, async (req, res) => {
 // Criar brincadeira
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, description, rules, type, duration, pontosPadrao, eventoId, checkpoints } = req.body;
+    const { name, description, rules, type, duration, pontosPadrao, eventoId, pontoVerificacao } = req.body;
     const empresaId = req.user.empresaId;
     const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
 
@@ -112,7 +112,7 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
-    const normalizedCheckpoints = normalizeCheckpointConfigs(type, checkpoints);
+    const normalizedCheckpoints = normalizeCheckpointConfigs(type, pontoVerificacao);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
       ? normalizedCheckpoints.map(cp => String(cp.id || cp)).filter(Boolean)
       : [];
@@ -120,7 +120,7 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
     }
     const validCheckpoints = await allQuery(
-      `SELECT id FROM checkpoints
+      `SELECT id FROM pontoVerificacao
        WHERE eventoId = @eventoId
          AND empresaId = @empresaId
          AND LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'`,
@@ -128,13 +128,13 @@ router.post('/', verifyToken, async (req, res) => {
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
     if (selectedCheckpointIds.some(id => !validCheckpointIds.has(id))) {
-      return res.status(400).json({ error: 'Todos os checkpoints devem pertencer ao evento selecionado' });
+      return res.status(400).json({ error: 'Todos os pontoVerificacao devem pertencer ao evento selecionado' });
     }
     const id = uuidv4();
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
     
     await query(
-      'INSERT INTO brincadeiras (id, name, description, rules, type, duration, pontosPadrao, empresaId, status, eventoId, checkpoints) VALUES (@id, @name, @description, @rules, @type, @duration, @pontosPadrao, @empresaId, @status, @eventoId, @checkpoints)',
+      'INSERT INTO brincadeiras (id, name, description, rules, type, duration, pontosPadrao, empresaId, status, eventoId, pontoVerificacao) VALUES (@id, @name, @description, @rules, @type, @duration, @pontosPadrao, @empresaId, @status, @eventoId, @pontoVerificacao)',
       { 
         id, 
         name, 
@@ -146,12 +146,12 @@ router.post('/', verifyToken, async (req, res) => {
         empresaId: evento.empresaId, 
         status: 'active',
         eventoId: eventoId || null,
-        checkpoints: checkpointsJson
+        pontoVerificacao: checkpointsJson
       }
     );
     
     console.log(`✅ Jogo criado: ${name}`);
-    res.json({ id, name, description, rules, type, duration, pontosPadrao, empresaId: evento.empresaId, status: 'active', eventoId, checkpoints: normalizedCheckpoints });
+    res.json({ id, name, description, rules, type, duration, pontosPadrao, empresaId: evento.empresaId, status: 'active', eventoId, pontoVerificacao: normalizedCheckpoints });
   } catch (err) {
     console.error('❌ Erro ao criar brincadeira:', err);
     res.status(err.statusCode || 500).json({ error: err.message });
@@ -161,7 +161,7 @@ router.post('/', verifyToken, async (req, res) => {
 // Atualizar brincadeira
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, description, rules, type, duration, pontosPadrao, status, eventoId, checkpoints } = req.body;
+    const { name, description, rules, type, duration, pontosPadrao, status, eventoId, pontoVerificacao } = req.body;
     const empresaId = req.user.empresaId;
     const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
     if (!validTypes.includes(type)) {
@@ -202,14 +202,14 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'O jogo e o evento devem pertencer à mesma empresa' });
     }
     
-    const normalizedCheckpoints = normalizeCheckpointConfigs(type, checkpoints);
+    const normalizedCheckpoints = normalizeCheckpointConfigs(type, pontoVerificacao);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
       ? normalizedCheckpoints.map(cp => String(cp.id || cp)).filter(Boolean)
       : [];
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
 
     const validCheckpoints = await allQuery(
-      `SELECT id FROM checkpoints
+      `SELECT id FROM pontoVerificacao
        WHERE eventoId = @eventoId
          AND empresaId = @empresaId
          AND LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'`,
@@ -217,13 +217,13 @@ router.put('/:id', verifyToken, async (req, res) => {
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.id)));
     if (selectedCheckpointIds.length === 0 || selectedCheckpointIds.some(id => !validCheckpointIds.has(id))) {
-      return res.status(400).json({ error: 'Selecione apenas checkpoints de jogo pertencentes ao evento' });
+      return res.status(400).json({ error: 'Selecione apenas pontoVerificacao de jogo pertencentes ao evento' });
     }
 
     await query(
       `UPDATE brincadeiras SET name = @name, description = @description, rules = @rules, 
        type = @type, duration = @duration, pontosPadrao = @pontosPadrao, status = @status,
-       eventoId = @eventoId, checkpoints = @checkpoints
+       eventoId = @eventoId, pontoVerificacao = @pontoVerificacao
        WHERE id = @id`,
       {
         name,
@@ -234,7 +234,7 @@ router.put('/:id', verifyToken, async (req, res) => {
         pontosPadrao,
         status,
         eventoId: targetEventoId,
-        checkpoints: checkpointsJson,
+        pontoVerificacao: checkpointsJson,
         id: req.params.id
       }
     );

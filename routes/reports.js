@@ -49,7 +49,7 @@ router.get('/overview', async (req, res) => {
       allQuery(`
         SELECT TOP 5 cp.id, cp.name, cp.zone, e.name AS event_name, COUNT(p.id) AS readings
         FROM pontuacoes p
-        JOIN checkpoints cp ON cp.id = p.checkpointId
+        JOIN pontoVerificacao cp ON cp.id = p.checkpointId
         JOIN eventos e ON e.id = p.eventoId
         WHERE e.empresaId = @empresaId
         GROUP BY cp.id, cp.name, cp.zone, e.name

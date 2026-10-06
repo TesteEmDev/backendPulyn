@@ -26,7 +26,7 @@ function formatEvent(event) {
 }
 
 async function loadMonitoringData() {
-  const [companies, checkpoints, events] = await Promise.all([
+  const [companies, pontoVerificacao, events] = await Promise.all([
     allQuery(`
       SELECT id, nome, cidade, estado, status
       FROM empresas
@@ -35,7 +35,7 @@ async function loadMonitoringData() {
     `, { masterName: 'Master Admin' }),
     allQuery(`
       SELECT id, eventoId, empresaId, name, status, ultimoVisto, ip, zone, points
-      FROM checkpoints
+      FROM pontoVerificacao
       WHERE LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'
     `),
     allQuery(`
@@ -47,7 +47,7 @@ async function loadMonitoringData() {
 
   const eventById = new Map(events.map(event => [String(event.id), event]));
   const checkpointsByCompany = new Map();
-  checkpoints.forEach(checkpoint => {
+  pontoVerificacao.forEach(checkpoint => {
     const event = eventById.get(String(checkpoint.eventoId));
     const companyId = checkpoint.empresaId || event?.empresaId;
     if (!companyId) return;
@@ -103,7 +103,7 @@ async function loadMonitoringData() {
       latency: null,
       uptime: null,
       alerts,
-      checkpoints: checkpointItems,
+      pontoVerificacao: checkpointItems,
     };
   });
 

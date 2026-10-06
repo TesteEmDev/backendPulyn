@@ -114,14 +114,14 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
         queryOne('SELECT cnpj, dataAtualizacao FROM empresas WHERE id = @id', { id: empresaId }),
         allQuery(
           `SELECT id, email, role, status, ultimoAcesso, dataCriacao
-           FROM logins WHERE empresaId = @id ORDER BY role, email`,
+           FROM acessos WHERE empresaId = @id ORDER BY role, email`,
           { id: empresaId }
         ),
         allQuery(
           `SELECT e.id, e.name, TO_CHAR(e.date, 'YYYY-MM-DD') AS date_str, e.time, e.duration, e.status,
                   e.nomeResponsavel, e.iniciadoEm, e.finalizadoEm,
                   (SELECT COUNT(*) FROM criancas c WHERE c.eventoId = e.id) AS children_count,
-                  (SELECT COUNT(*) FROM checkpoints k
+                  (SELECT COUNT(*) FROM pontoVerificacao k
                     WHERE k.eventoId = e.id
                       AND LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception') AS checkpoints_count
            FROM eventos e
@@ -130,7 +130,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
           { id: empresaId }
         ),
         allQuery(
-          'SELECT status, COUNT(*) AS total FROM supportTickets WHERE empresaId = @id GROUP BY status',
+          'SELECT status, COUNT(*) AS total FROM chamadosSuport WHERE empresaId = @id GROUP BY status',
           { id: empresaId }
         ),
       ]);
@@ -236,7 +236,7 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO logins (id, empresaId, email, senha, status) 
+        `INSERT INTO acessos (id, empresaId, email, senha, status) 
          VALUES (@id, @empresaId, @email, @senha, @status)`,
         {
           id: loginId,
@@ -323,10 +323,10 @@ router.put('/:id', verifyToken, async (req, res) => {
       );
 
       // Atualizar EMAIL do LOGIN admin se foi fornecido (sem o filtro de role, o
-      // e-mail era gravado em todos os logins da empresa: recepção, telão, famílias...)
+      // e-mail era gravado em todos os acessos da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
-          `UPDATE logins SET email = @email, dataAtualizacao = GETDATE()
+          `UPDATE acessos SET email = @email, dataAtualizacao = GETDATE()
            WHERE empresaId = @empresaId AND role = 'admin'`,
           {
             email: email,
@@ -382,7 +382,7 @@ router.put('/:id/status', verifyToken, async (req, res) => {
 
     // Atualizar status no LOGIN também
     await query(
-      'UPDATE logins SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
+      'UPDATE acessos SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
       { status, id: req.params.id }
     );
 
@@ -408,7 +408,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
       // 1. Deletar LOGIN
       await query(
-        'DELETE FROM logins WHERE empresaId = @id',
+        'DELETE FROM acessos WHERE empresaId = @id',
         { id: req.params.id }
       );
       console.log(`✅ Login deletado`);

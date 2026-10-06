@@ -7,7 +7,7 @@ const { query, queryOne } = require('../database');
 const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk', 'score_kiosk']);
 
-// Login: validar email + senha contra tabela logins
+// Login: validar email + senha contra tabela acessos
 router.post('/login', async (req, res) => {
   try {
     const { email, senha } = req.body;
@@ -21,7 +21,7 @@ router.post('/login', async (req, res) => {
     const login = await queryOne(
       `SELECT l.id, l.email, l.senha, l.status, l.role, l.nomeFamilia,
               e.id as empresaId, e.nome as empresa_nome, e.[plano]
-       FROM logins l
+       FROM acessos l
        JOIN empresas e ON l.empresaId = e.id
        WHERE LOWER(l.email) = LOWER(@email)`,
       { email: String(email).trim() }
@@ -66,7 +66,7 @@ router.post('/login', async (req, res) => {
 
     // Atualizar último acesso
     await query(
-      'UPDATE logins SET ultimoAcesso = GETDATE() WHERE id = @id',
+      'UPDATE acessos SET ultimoAcesso = GETDATE() WHERE id = @id',
       { id: login.id }
     );
 
@@ -139,7 +139,7 @@ router.get('/check-email', async (req, res) => {
 
     // Verificar se email já existe
     const existingLogin = await queryOne(
-      'SELECT id FROM logins WHERE LOWER(email) = @email',
+      'SELECT id FROM acessos WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
 
@@ -181,7 +181,7 @@ router.post('/register', async (req, res) => {
     
     // Verificar se email já existe
     const existingLogin = await queryOne(
-      'SELECT id, role, status FROM logins WHERE LOWER(email) = @email',
+      'SELECT id, role, status FROM acessos WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
 
@@ -221,7 +221,7 @@ router.post('/register', async (req, res) => {
     console.log('📝 Criando login para família...');
     
     await query(
-      `INSERT INTO logins (id, empresaId, email, senha, nomeFamilia, role, status, dataCriacao)
+      `INSERT INTO acessos (id, empresaId, email, senha, nomeFamilia, role, status, dataCriacao)
        VALUES (@id, @empresaId, @email, @senha, @familyName, 'family', 'active', GETDATE())`,
       {
         id: loginId,
