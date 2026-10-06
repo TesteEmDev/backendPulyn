@@ -50,17 +50,25 @@ function killNodeProcesses() {
     const platform = os.platform();
 
     if (platform === 'win32') {
-      spawn('taskkill', ['/IM', 'node.exe', '/F'], {
+      const proc = spawn('cmd.exe', ['/c', 'taskkill /IM node.exe /F /T 2>nul'], {
         stdio: 'ignore',
-        shell: true
-      }).on('exit', () => {
-        setTimeout(resolve, 2000); // Aguarda 2s para liberar a porta
+        shell: false
+      });
+      proc.on('exit', () => {
+        setTimeout(resolve, 3000); // Aguarda 3s para liberar a porta
+      });
+      proc.on('error', () => {
+        setTimeout(resolve, 3000); // Continua mesmo se der erro
       });
     } else {
-      spawn('pkill', ['-f', 'node'], {
+      const proc = spawn('pkill', ['-9', 'node'], {
         stdio: 'ignore'
-      }).on('exit', () => {
-        setTimeout(resolve, 2000);
+      });
+      proc.on('exit', () => {
+        setTimeout(resolve, 3000);
+      });
+      proc.on('error', () => {
+        setTimeout(resolve, 3000);
       });
     }
   });
