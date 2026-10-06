@@ -170,7 +170,7 @@ async function reopenEvent(eventoId, { date, time, duration } = {}) {
   if (!isClosedStatus(evento.status)) return { changed: false, reason: 'not_finished' };
 
   const result = await query(
-    `UPDATE eventos
+    `UPDATE "evento"
      SET status = 'scheduled',
          date = @date,
          time = @time,
@@ -199,7 +199,7 @@ async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
     SELECT id, empresa_id, status, duration, started_at, auto_start, auto_end,
            CAST([date] AS VARCHAR(10)) AS date_str,
            CAST([time] AS VARCHAR(5)) AS time_str
-    FROM eventos
+    FROM "evento"
     WHERE (auto_start = 1 AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled')
        OR (auto_end = 1 AND LOWER(COALESCE(status, '')) = 'active')
   `);

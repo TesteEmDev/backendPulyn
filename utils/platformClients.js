@@ -41,7 +41,7 @@ async function listPlatformClients({ includeFamily = false } = {}) {
     `),
     allQuery(`
       SELECT empresa_id, COUNT(*) AS total
-      FROM eventos
+      FROM "evento"
       WHERE LOWER(COALESCE(status, '')) IN ('finished', 'completed')
       GROUP BY empresa_id
     `),

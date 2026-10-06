@@ -34,7 +34,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
     // 1. Validar brincadeira
     const brincadeira = await queryOne(
-      `SELECT id, name, type, empresa_id FROM brincadeiras WHERE id = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
+      `SELECT id, name, type, empresa_id FROM "brincadeira" WHERE id = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
     );
 
@@ -44,7 +44,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
     // 2. Buscar evento
     const evento = await queryOne(
-      `SELECT id, empresa_id FROM eventos WHERE id = @id`,
+      `SELECT id, empresa_id FROM "evento" WHERE id = @id`,
       { id: eventoId }
     );
 
@@ -489,7 +489,7 @@ async function getZoneConquestIndividualStatus(eventoId) {
     // 3. Obter checkpoints dominados
     const allCheckpoints = await allQuery(
       `SELECT c.id, c.name, c.territory_owner_crianca_id AS owner_crianca_id, cr.name AS owner_name, ps.color AS owner_color
-       FROM checkpoints c
+       FROM "pontoVerificacao" c
        LEFT JOIN criancas cr ON cr.id = c.territory_owner_crianca_id
        LEFT JOIN zone_conquest_individual_participant_states ps ON ps.crianca_id = c.territory_owner_crianca_id
        WHERE c.evento_id = @eventoId`,

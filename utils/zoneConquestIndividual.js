@@ -30,7 +30,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
               WHEN t.color IS NOT NULL THEN t.color
               ELSE '#' || SUBSTRING(CONVERT(VARCHAR(MAX), HASHBYTES('MD5', c.id), 2), 1, 6)
             END AS color
-     FROM criancas c
+     FROM "crianca" c
      LEFT JOIN times t ON t.id = c.time_id
      WHERE LOWER(c.evento_id) = LOWER(@eventoId)
        AND c.status = 'ativo'`,
@@ -42,7 +42,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
   // Buscar todos os checkpoints do evento
   const checkpoints = await allQuery(
     `SELECT id, name, x, y, radius, evento_id
-     FROM checkpoints
+     FROM "pontoVerificacao"
      WHERE LOWER(evento_id) = LOWER(@eventoId)
        AND checkpoint_purpose IS NULL
        OR checkpoint_purpose = 'game'`,

@@ -31,7 +31,7 @@ async function setActiveEvent(empresaId, eventoId) {
   if (eventoId) {
     event = await queryOne(
       `SELECT id, name, status
-       FROM eventos
+       FROM "evento"
        WHERE id = @eventoId AND empresa_id = @empresaId`,
       { eventoId, empresaId }
     );

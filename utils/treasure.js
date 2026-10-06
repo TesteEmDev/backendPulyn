@@ -22,7 +22,7 @@ function parseJson(value, fallback = []) {
 async function getGameForEvent(eventoId, brincadeiraId) {
   return queryOne(
     `SELECT b.id, b.name, b.type, b.checkpoints, b.evento_id, e.empresa_id
-     FROM brincadeiras b
+     FROM "brincadeira" b
      INNER JOIN eventos e ON LOWER(e.id) = LOWER(@eventoId)
      WHERE LOWER(b.id) = LOWER(@brincadeiraId)
        AND LOWER(COALESCE(b.status, 'active')) <> 'archived'
@@ -31,7 +31,7 @@ async function getGameForEvent(eventoId, brincadeiraId) {
          LOWER(b.evento_id) = LOWER(@eventoId)
          OR EXISTS (
            SELECT 1
-           FROM evento_brincadeiras eb
+           FROM "eventoBrincadeira" eb
            WHERE LOWER(eb.brincadeira_id) = LOWER(b.id)
              AND LOWER(eb.evento_id) = LOWER(@eventoId)
          )
@@ -61,7 +61,7 @@ async function getLatestSession(eventoId) {
 async function getEventCheckpoints(eventoId) {
   return allQuery(
     `SELECT id, territory_owner_time_id
-     FROM checkpoints
+     FROM "pontoVerificacao"
      WHERE LOWER(evento_id) = LOWER(@eventoId)
        AND LOWER(status) = 'online'
        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'`,
@@ -73,12 +73,12 @@ async function getTeamRaceTimes(eventoId, session) {
   const rows = await allQuery(
     `SELECT t.id AS team_id, t.name AS team_name, t.color AS team_color,
             r.started_at, r.completed_at, r.elapsed_ms
-     FROM times t
+     FROM "time" t
      LEFT JOIN caca_tesouro_tempos r
        ON LOWER(r.time_id) = LOWER(t.id) AND LOWER(r.partida_id) = LOWER(@partidaId)
      WHERE LOWER(t.evento_id) = LOWER(@eventoId)
        AND EXISTS (
-         SELECT 1 FROM criancas c
+         SELECT 1 FROM "crianca" c
          WHERE LOWER(c.evento_id) = LOWER(@eventoId)
            AND LOWER(c.time_id) = LOWER(t.id)
        )
@@ -157,10 +157,10 @@ function getNextUnfinishedTeam(raceTimes, currentTeamId) {
 async function getParticipatingTeams(eventoId) {
   return allQuery(
     `SELECT t.id, t.name, t.color
-     FROM times t
+     FROM "time" t
      WHERE LOWER(t.evento_id) = LOWER(@eventoId)
        AND EXISTS (
-         SELECT 1 FROM criancas c
+         SELECT 1 FROM "crianca" c
          WHERE LOWER(c.evento_id) = LOWER(@eventoId)
            AND LOWER(c.time_id) = LOWER(t.id)
        )
@@ -203,7 +203,7 @@ async function getTreasureCheckpointIds(eventoId, brincadeiraId) {
   if (!brincadeiraId) return checkpoints.map(checkpoint => String(checkpoint.id));
 
   const game = await queryOne(
-    'SELECT checkpoints FROM brincadeiras WHERE LOWER(id) = LOWER(@brincadeiraId)',
+    'SELECT checkpoints FROM "brincadeira" WHERE LOWER(id) = LOWER(@brincadeiraId)',
     { brincadeiraId }
   );
   const configuredItems = parseJson(game?.checkpoints, []);
@@ -360,7 +360,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
 
 async function getCheckpointTreasureStatus(checkpointId) {
   const checkpoint = await queryOne(
-    `SELECT id, evento_id, status, checkpoint_purpose FROM checkpoints WHERE LOWER(id) = LOWER(@checkpointId)`,
+    `SELECT id, evento_id, status, checkpoint_purpose FROM "pontoVerificacao" WHERE LOWER(id) = LOWER(@checkpointId)`,
     { checkpointId }
   );
   if (!checkpoint) return { gameType: 'none', treasureTarget: false };
@@ -429,10 +429,10 @@ async function getTreasureEventStatus(eventoId) {
   );
 
   const startingTeam = session.starting_team_id
-    ? await queryOne('SELECT name FROM times WHERE id = @timeId', { timeId: session.starting_team_id })
+    ? await queryOne('SELECT name FROM "time" WHERE id = @timeId', { timeId: session.starting_team_id })
     : null;
   const turnTeam = session.turn_team_id
-    ? await queryOne('SELECT name FROM times WHERE id = @timeId', { timeId: session.turn_team_id })
+    ? await queryOne('SELECT name FROM "time" WHERE id = @timeId', { timeId: session.turn_team_id })
     : null;
   const turnAvailableAt = session.turn_available_at ? new Date(session.turn_available_at) : null;
   const turnRemainingSeconds = turnAvailableAt && turnAvailableAt > new Date()
@@ -470,17 +470,17 @@ async function getTreasureEventStatus(eventoId) {
 async function getTeamsProgress(eventoId, session) {
   const teams = await allQuery(
     `SELECT t.id, t.name, t.color,
-       (SELECT COUNT(*) FROM criancas c
+       (SELECT COUNT(*) FROM "crianca" c
         WHERE LOWER(c.evento_id) = LOWER(@eventoId)
           AND LOWER(c.time_id) = LOWER(t.id)) AS total,
        (SELECT COUNT(*) FROM caca_tesouro_scans s
         WHERE LOWER(s.partida_id) = LOWER(@partidaId)
           AND s.round_number = @roundNumber
           AND LOWER(s.time_id) = LOWER(t.id)) AS scanned
-     FROM times t
+     FROM "time" t
      WHERE LOWER(t.evento_id) = LOWER(@eventoId)
        AND EXISTS (
-         SELECT 1 FROM criancas c
+         SELECT 1 FROM "crianca" c
          WHERE LOWER(c.evento_id) = LOWER(@eventoId)
            AND LOWER(c.time_id) = LOWER(t.id)
        )
@@ -513,7 +513,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   }
 
   const checkpointStatus = await queryOne(
-    `SELECT status, checkpoint_purpose FROM checkpoints
+    `SELECT status, checkpoint_purpose FROM "pontoVerificacao"
      WHERE LOWER(id) = LOWER(@checkpointId)
        AND LOWER(evento_id) = LOWER(@eventoId)`,
     { checkpointId, eventoId }
@@ -535,7 +535,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
 
   const turnTeamId = session.turn_team_id || session.starting_team_id;
   const turnTeam = turnTeamId
-    ? await queryOne('SELECT name FROM times WHERE id = @timeId', { timeId: turnTeamId })
+    ? await queryOne('SELECT name FROM "time" WHERE id = @timeId', { timeId: turnTeamId })
     : null;
 
   if (turnTeamId && !sameId(turnTeamId, crianca.time_id)) {
@@ -574,7 +574,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   }
 
   const members = await allQuery(
-    `SELECT id FROM criancas
+    `SELECT id FROM "crianca"
      WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(time_id) = LOWER(@timeId)`,
     { eventoId, timeId: crianca.time_id }
   );
@@ -677,7 +677,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   const completedCheckpointIds = parseJson(session.completed_checkpoint_ids, []);
   const updatedCompleted = [...new Set([...completedCheckpointIds, String(checkpointId)])];
   const team = await queryOne(
-    'SELECT id, name, color FROM times WHERE id = @timeId',
+    'SELECT id, name, color FROM "time" WHERE id = @timeId',
     { timeId: crianca.time_id }
   );
 

@@ -8,11 +8,11 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
   
   const resultado = await withTransaction(async (tx) => {
     // Buscar evento e jogo
-    const evento = await tx.queryOne('SELECT * FROM eventos WHERE id = @id', { id: eventoId });
+    const evento = await tx.queryOne('SELECT * FROM "evento" WHERE id = @id', { id: eventoId });
     if (!evento) throw new Error('Evento não encontrado');
 
     const game = await tx.queryOne(
-      'SELECT * FROM brincadeiras WHERE id = @id',
+      'SELECT * FROM "brincadeira" WHERE id = @id',
       { id: brincadeiraId }
     );
     if (!game) throw new Error('Jogo não encontrado');
@@ -46,7 +46,7 @@ async function startZoneConquestGame(eventoId, brincadeiraId) {
     // 3. Buscar todas as equipes participantes
     const participatingTeams = await tx.allQuery(`
       SELECT DISTINCT t.id, t.name
-      FROM times t
+      FROM "time" t
       WHERE t.evento_id = @eventoId
       ORDER BY t.name`, { eventoId });
 
@@ -206,7 +206,7 @@ async function recordZoneConquestScan(eventoId, checkpointId, criancaId, timeId,
 
   // 2. Buscar jogo ativo
   const brincadeira = await queryOne(`
-    SELECT id FROM brincadeiras
+    SELECT id FROM "brincadeira"
     WHERE evento_id = @eventoId AND status = 'active'`, { eventoId });
 
   // 3. Registrar scan

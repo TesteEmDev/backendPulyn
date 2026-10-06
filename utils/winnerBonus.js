@@ -22,13 +22,13 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
   if (already) return { awarded: false, reason: 'already-awarded' };
 
   const team = await queryOne(
-    'SELECT id, name, color, empresa_id FROM times WHERE LOWER(id) = LOWER(@teamId) AND LOWER(evento_id) = LOWER(@eventoId)',
+    'SELECT id, name, color, empresa_id FROM "time" WHERE LOWER(id) = LOWER(@teamId) AND LOWER(evento_id) = LOWER(@eventoId)',
     { teamId, eventoId }
   );
   if (!team) return { awarded: false, reason: 'team-not-found' };
 
   const members = await allQuery(
-    'SELECT id FROM criancas WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(time_id) = LOWER(@teamId)',
+    'SELECT id FROM "crianca" WHERE LOWER(evento_id) = LOWER(@eventoId) AND LOWER(time_id) = LOWER(@teamId)',
     { eventoId, teamId: team.id }
   );
 
@@ -55,7 +55,7 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
       { points, eventoId, teamId: team.id }
     );
     await query(
-      `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @teamId)
+      `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM "crianca" WHERE time_id = @teamId)
        WHERE id = @teamId`,
       { teamId: team.id }
     );

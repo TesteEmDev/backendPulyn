@@ -10,7 +10,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 async function initializeCheckpointStates(partidaId, empresaId, eventoId, gameType = 'team') {
   try {
     const checkpoints = await allQuery(
-      `SELECT id, name FROM checkpoints 
+      `SELECT id, name FROM "pontoVerificacao" 
        WHERE LOWER(evento_id) = LOWER(@eventoId)
        AND (checkpoint_purpose IS NULL OR checkpoint_purpose = 'game')`,
       { eventoId }
@@ -136,7 +136,7 @@ async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = '
 
     // Contar checkpoints por zona
     const checkpointsByZone = await allQuery(
-      `SELECT zone, COUNT(*) as count FROM checkpoints
+      `SELECT zone, COUNT(*) as count FROM "pontoVerificacao"
        WHERE LOWER(evento_id) = LOWER(@eventoId)
        GROUP BY zone`,
       { eventoId }

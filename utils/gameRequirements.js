@@ -51,10 +51,10 @@ function parseConfiguredIds(rawCheckpoints) {
  * @returns {Promise<{ ok: boolean, kind: string, required: number, available: number, message: string|null }>}
  */
 async function checkGameStartRequirements(eventoId, game) {
-  const row = game && typeof game === 'object' && 'type' in game && 'checkpoints' in game
+  const row = game && typeof game === 'object' && 'type' in game && '"pontoVerificacao"' in game
     ? game
     : await queryOne(
-      'SELECT id, name, type, game_type, checkpoints FROM brincadeiras WHERE LOWER(id) = LOWER(@id)',
+      'SELECT id, name, type, game_type, checkpoints FROM "brincadeira" WHERE LOWER(id) = LOWER(@id)',
       { id: typeof game === 'object' ? game?.id : game }
     );
 
@@ -62,7 +62,7 @@ async function checkGameStartRequirements(eventoId, game) {
   const required = MIN_CHECKPOINTS[kind];
 
   const online = await allQuery(
-    `SELECT id FROM checkpoints
+    `SELECT id FROM "pontoVerificacao"
      WHERE LOWER(evento_id) = LOWER(@eventoId)
        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
        AND LOWER(COALESCE(status, 'offline')) = 'online'`,
@@ -81,7 +81,7 @@ async function checkGameStartRequirements(eventoId, game) {
   if (available >= required) return { ok: true, kind, required, available, message: null };
 
   const name = row?.name ? `"${row.name}"` : GAME_LABELS[kind];
-  const plural = (n) => (n === 1 ? 'checkpoint' : 'checkpoints');
+  const plural = (n) => (n === 1 ? 'checkpoint' : '"pontoVerificacao"');
   const where = scopedToGame ? 'configurados neste jogo e online neste evento' : 'online neste evento';
   return {
     ok: false,

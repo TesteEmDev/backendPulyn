@@ -23,7 +23,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
 
     // 1. Validar brincadeira
     const brincadeira = await queryOne(
-      `SELECT id, name, type, empresa_id FROM brincadeiras WHERE id = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
+      `SELECT id, name, type, empresa_id FROM "brincadeira" WHERE id = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
     );
 
@@ -33,7 +33,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
 
     // 2. Buscar checkpoints do evento
     const checkpoints = await allQuery(
-      `SELECT id, name, evento_id FROM checkpoints 
+      `SELECT id, name, evento_id FROM "pontoVerificacao" 
        WHERE LOWER(evento_id) = LOWER(@eventoId)
          AND (checkpoint_purpose IS NULL OR checkpoint_purpose = 'game')
          AND status = 'online'`,
@@ -49,7 +49,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
     // 3. Buscar equipes participantes
     const times = await allQuery(
       `SELECT DISTINCT t.id, t.name, t.color 
-       FROM times t
+       FROM "time" t
        INNER JOIN criancas c ON c.time_id = t.id
        WHERE c.evento_id = @eventoId AND c.status = 'ativo'
        GROUP BY t.id, t.name, t.color`,
@@ -64,7 +64,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
 
     // 4. Buscar evento para validação
     const evento = await queryOne(
-      `SELECT id, empresa_id FROM eventos WHERE id = @id`,
+      `SELECT id, empresa_id FROM "evento" WHERE id = @id`,
       { id: eventoId }
     );
 
@@ -183,7 +183,7 @@ async function processZoneConquestTeamScan({
     // checkStaleTeamCheckpoints no index.js, que zera o domínio sozinho
     // depois desse tempo de inatividade).
     const checkpointState = await queryOne(
-      `SELECT territory_owner_crianca_id, last_conquered_at FROM checkpoints WHERE id = @checkpointId`,
+      `SELECT territory_owner_crianca_id, last_conquered_at FROM "pontoVerificacao" WHERE id = @checkpointId`,
       { checkpointId }
     );
     const lastConqueredAt = checkpointState?.last_conquered_at
@@ -274,7 +274,7 @@ async function processZoneConquestTeamScan({
         { points: pontos, criancaId: crianca.id }
       );
       await tx.query(
-        `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM criancas WHERE time_id = @timeId)
+        `UPDATE times SET points = (SELECT ISNULL(SUM(scores), 0) FROM "crianca" WHERE time_id = @timeId)
          WHERE id = @timeId`,
         { timeId: crianca.time_id }
       );
@@ -364,7 +364,7 @@ async function getZoneConquestTeamStatus(eventoId) {
     // 3. Obter checkpoints dominados
     const dominatedCheckpoints = await allQuery(
       `SELECT c.*, t.name AS team_name, t.color AS team_color
-       FROM checkpoints c
+       FROM "pontoVerificacao" c
        INNER JOIN times t ON t.id = c.territory_owner_time_id
        WHERE c.evento_id = @eventoId
          AND c.territory_owner_time_id IS NOT NULL`,
