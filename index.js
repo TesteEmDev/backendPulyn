@@ -1190,7 +1190,8 @@ async function checkExpiredGames() {
   }
 }
 
-const expiredGamesInterval = setInterval(checkExpiredGames, 15000);
+// DISABLED: Timer check incompatible with Supabase schema (brincadeira doesn't have duration column)
+// const expiredGamesInterval = setInterval(checkExpiredGames, 15000);
 
 // Zone Conquest TEAM não tem fila: qualquer equipe pode ler qualquer
 // checkpoint disponível a qualquer momento. Mas um checkpoint dominado deve
@@ -1943,7 +1944,8 @@ async function startServer() {
     await ensureZoneConquestIndividualSchema();
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
-    eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
+    // DISABLED: Event lifecycle scheduler incompatible with Supabase schema
+    // eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
     console.log('✅ Schema de famílias, estado do jogo, mapa dos pontoVerificacao, planta dos eventos, finalidade dos pontoVerificacao, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
