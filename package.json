@@ -17,7 +17,8 @@
     "test-postgres": "node test-postgres-connection.js",
     "test-api": "node test-api.js",
     "test": "node --test \"test/*.test.js\"",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "sync:conferir": "node conferir-sincronizacao.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
