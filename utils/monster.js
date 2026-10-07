@@ -325,7 +325,7 @@ async function getMonsterEventStatus(eventoId) {
     winnerTeamColor: legacyWinner?.color || null,
     monsterSpecialCheckpoint: session.checkpointEspecialId || null,
     monsterSpecialCheckpointId: session.checkpointEspecialId || null,
-    version: Number(session.version || 0),
+    version: Number(session.versao || 0),
     startedAt: session.iniciadoEm,
     finishedAt: session.finalizadoEm,
   };

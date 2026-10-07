@@ -70,7 +70,7 @@ async function sendProcessedReading(res, reading) {
     ? await queryOne('SELECT tipo FROM brincadeira WHERE brincadeiraId = @id', { id: reading.brincadeiraId })
     : null;
   const isTreasure = game?.tipo === 'treasure_hunt';
-  const isMonster = game?.tipo === 'monster_hunt' || Boolean(reading.monster_attack_type);
+  const isMonster = game?.tipo === 'monster_hunt' || Boolean(reading.monster_attack_tipo);
   const monsterStatus = isMonster && reading.eventoId
     ? await getMonsterEventStatus(reading.eventoId)
     : null;
@@ -81,10 +81,10 @@ async function sendProcessedReading(res, reading) {
     registered: true,
     autorizado: Boolean(reading.autorizado),
     idempotent: true,
-    readingId: reading.id,
+    readingId: reading.leituraId,
     braceletCode: reading.uid,
-    criancaName: reading.crianca_name || undefined,
-    teamName: reading.team_name || undefined,
+    criancaName: reading.crianca_nome || undefined,
+    teamName: reading.team_nome || undefined,
     teamColor: reading.team_color || '',
     points: Number(reading.pontosAtribuidos || 0),
     treasure: isTreasure,
@@ -92,7 +92,7 @@ async function sendProcessedReading(res, reading) {
     treasureTeamComplete: false,
     monster: isMonster,
     monsterAccepted: false,
-    attackType: isMonster ? reading.monster_attack_type : undefined,
+    attackType: isMonster ? reading.monster_attack_tipo : undefined,
     damage: isMonster ? Number(reading.monster_damage || 0) : undefined,
     monsterHp: isMonster ? Number(reading.vidaMonstroApos || 0) : undefined,
     monsterMaxHp: isMonster ? Number(reading.monster_max_hp || 500) : undefined,

@@ -63,13 +63,13 @@ async function ensureSupportTable() {
 function serializeTicket(ticket) {
   if (!ticket) return null;
   return {
-    id: ticket.id,
+    id: ticket.ticketId,
     empresaId: ticket.empresaId || null,
     cliente: ticket.cliente,
-    subject: ticket.subject,
+    subject: ticket.assunto,
     status: ticket.status,
-    priority: ticket.priority,
-    description: ticket.description || '',
+    priority: ticket.prioridade,
+    description: ticket.descricao || '',
     atribuidoPara: ticket.atribuidoPara || 'Atribuir',
     date: ticket.criadoEm,
     createdAt: ticket.criadoEm,

@@ -5,14 +5,14 @@ const toNumber = (value) => Number(value) || 0;
 const FINISHED = new Set(['finished', 'completed']);
 const RUNNING = new Set(['active', 'ongoing']);
 
-// eventRows: [{ id, name, date: 'YYYY-MM-DD', status, participants, teams, pontosTotais, scorings }]
+// eventRows: [{ eventoId, nome, date: 'YYYY-MM-DD', status, participants, teams, pontosTotais, scorings }]
 function summarizeEvents(eventRows) {
   const events = eventRows.map((row) => {
     const participants = toNumber(row.participants);
     const totalPoints = toNumber(row.pontosTotais);
     return {
-      id: row.id,
-      name: row.name,
+      id: row.eventoId,
+      name: row.nome,
       date: String(row.date || '').slice(0, 10),
       status: String(row.status || '').toLowerCase(),
       participants,

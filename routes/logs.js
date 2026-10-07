@@ -44,7 +44,7 @@ router.get('/', verifyToken, async (req, res) => {
 
     const log = [
       ...clientRows.map((c) => ({
-        id: `cliente-${c.id}`,
+        id: `cliente-${c.empresaId}`,
         timestamp: c.dataCriacao,
         cliente: c.empresa_nome,
         type: 'info',
@@ -52,11 +52,11 @@ router.get('/', verifyToken, async (req, res) => {
         details: '',
       })),
       ...ticketRows.map((t) => ({
-        id: `ticket-${t.id}`,
+        id: `ticket-${t.ticketId}`,
         timestamp: t.criadoEm,
         cliente: t.empresa_nome,
         type: t.status === 'resolvido' ? 'info' : 'warning',
-        message: `Ticket de suporte: ${t.subject}`,
+        message: `Ticket de suporte: ${t.assunto}`,
         details: `Status: ${t.status}`,
       })),
       ...checkpointRows.map((cp) => ({

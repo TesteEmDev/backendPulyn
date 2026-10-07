@@ -13,7 +13,7 @@ function hashToken(token) {
 }
 
 function isStaff(req) {
-  return STAFF_ROLES.includes(req.user?.perfil);
+  return STAFF_ROLES.includes(req.user?.role);
 }
 
 async function getInvite(token) {

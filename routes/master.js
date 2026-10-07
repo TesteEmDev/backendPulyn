@@ -86,9 +86,9 @@ router.get('/clients', verifyToken, async (req, res) => {
     // `empresa` e o cadastro legado `cliente` (ver utils/platformClients.js).
     const clients = (await listPlatformClients()).map((c) => ({
       id: c.id,
-      name: c.nome,
-      cidade: c.cidade,
-      estado: c.estado,
+      name: c.name,
+      city: c.city,
+      state: c.state,
       status: c.status,
       plan: c.plan,
     }));

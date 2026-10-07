@@ -78,7 +78,7 @@ router.put('/:codigo/status', verifyToken, async (req, res) => {
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({ error: 'Status de pulseira inválido' });
     }
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
       return res.status(403).json({ error: 'Acesso negado para alterar pulseira' });
     }
     

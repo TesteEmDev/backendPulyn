@@ -109,7 +109,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       };
     }));
   } catch (err) {
-    console.error('❌ Erro ao resumir pontoVerificacao:', err);
+    console.error('❌ Erro ao resumir checkpoints:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -148,11 +148,11 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
       { eventoId, empresaId: evento.empresaId }
     );
 
-    console.log(`📊 [CHECKPOINTS] Encontrados ${pontoVerificacao.length} pontoVerificacao para evento ${eventoId}`);
+    console.log(`📊 [CHECKPOINTS] Encontrados ${pontoVerificacao.length} checkpoints para evento ${eventoId}`);
     res.json(pontoVerificacao || []);
   } catch (err) {
-    console.error('❌ Erro ao listar pontoVerificacao:', err.message);
-    res.status(500).json({ error: err.message || 'Erro ao consultar pontoVerificacao' });
+    console.error('❌ Erro ao listar checkpoints:', err.message);
+    res.status(500).json({ error: err.message || 'Erro ao consultar checkpoints' });
   }
 });
 

@@ -903,7 +903,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       payload: { 
         eventoId,
         timestamp: new Date().toISOString(),
-        message: 'Leituras de pontoVerificacao foram resetadas. Novo jogo iniciado!'
+        message: 'Leituras de checkpoints foram resetadas. Novo jogo iniciado!'
       }
     });
     
@@ -989,7 +989,7 @@ async function stopGameForEvento(eventoId) {
       WHERE eventoId = @eventoId
         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
     `, { eventoId });
-    console.log(`   ✓ Domínios dos pontoVerificacao encerrados`);
+    console.log(`   ✓ Domínios dos checkpoints encerrados`);
     
     // 🆕 ATUALIZAR STATUS DA SESSÃO PARA 'finished'
     await query(
@@ -1235,7 +1235,7 @@ async function checkStaleTeamCheckpoints() {
       });
     }
   } catch (err) {
-    console.error('❌ [ZONE-TEAM] Erro ao liberar pontoVerificacao inativos:', err.message);
+    console.error('❌ [ZONE-TEAM] Erro ao liberar checkpoints inativos:', err.message);
   }
 }
 
@@ -1620,7 +1620,7 @@ app.post('/api/debug/reset-all-bracelets', verifyToken, requireRole('master'), a
 // ✨ NOVO: Deletar pontoVerificacao sem empresaId
 app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`🗑️  Deletando pontoVerificacao sem empresaId...`);
+    console.log(`🗑️  Deletando checkpoints sem empresaId...`);
     
     // 1. Listar pontoVerificacao sem empresaId
     const orphanedCheckpoints = await allQuery(`
@@ -1630,7 +1630,7 @@ app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requ
       ORDER BY nome
     `);
     
-    console.log(`   Encontrados ${orphanedCheckpoints.length} pontoVerificacao sem empresaId:`);
+    console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints sem empresaId:`);
     orphanedCheckpoints.forEach(cp => {
       console.log(`   - ${cp.nome} (id: ${cp.checkpointId}, eventoId: ${cp.eventoId})`);
     });
@@ -1645,7 +1645,7 @@ app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requ
     }
     
     // 2. Deletar leituras associadas
-    console.log(`   • Deletando leituras dos pontoVerificacao...`);
+    console.log(`   • Deletando leituras dos checkpoints...`);
     await query(`
       DELETE FROM leitura 
       WHERE checkpointId IN (
@@ -1655,7 +1655,7 @@ app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requ
     console.log(`   ✓ Leituras deletadas`);
     
     // 3. Deletar pontuações associadas
-    console.log(`   • Deletando pontuações dos pontoVerificacao...`);
+    console.log(`   • Deletando pontuações dos checkpoints...`);
     await query(`
       DELETE FROM pontuacao 
       WHERE checkpointId IN (
@@ -1665,18 +1665,18 @@ app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requ
     console.log(`   ✓ Pontuações deletadas`);
     
     // 4. Deletar os pontoVerificacao
-    console.log(`   • Deletando pontoVerificacao...`);
+    console.log(`   • Deletando checkpoints...`);
     const result = await query(`
       DELETE FROM pontoVerificacao 
       WHERE empresaId IS NULL
     `);
     console.log(`   ✓ Checkpoints deletados`);
     
-    console.log(`✅ ${orphanedCheckpoints.length} pontoVerificacao foram deletados com sucesso!\n`);
+    console.log(`✅ ${orphanedCheckpoints.length} checkpoints foram deletados com sucesso!\n`);
     
     res.json({ 
       ok: true, 
-      message: `${orphanedCheckpoints.length} pontoVerificacao sem empresaId foram deletados com sucesso!`,
+      message: `${orphanedCheckpoints.length} checkpoints sem empresaId foram deletados com sucesso!`,
       deleted: orphanedCheckpoints.length,
       pontoVerificacao: orphanedCheckpoints.map(cp => ({
         id: cp.checkpointId,
@@ -1687,7 +1687,7 @@ app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requ
     });
     
   } catch (err) {
-    console.error('❌ Erro ao deletar pontoVerificacao:', err.message);
+    console.error('❌ Erro ao deletar checkpoints:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1695,7 +1695,7 @@ app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requ
 // ✨ NOVO: Listar pontoVerificacao sem empresaId
 app.get('/api/debug/list-pontoVerificacao-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`📋 Listando pontoVerificacao sem empresaId...`);
+    console.log(`📋 Listando checkpoints sem empresaId...`);
     
     const orphanedCheckpoints = await allQuery(`
       SELECT checkpointId, nome, eventoId, empresaId, status, criadoEm
@@ -1704,7 +1704,7 @@ app.get('/api/debug/list-pontoVerificacao-without-empresa', verifyToken, require
       ORDER BY nome
     `);
     
-    console.log(`   Encontrados ${orphanedCheckpoints.length} pontoVerificacao`);
+    console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints`);
     
     res.json({ 
       total: orphanedCheckpoints.length,
@@ -1712,7 +1712,7 @@ app.get('/api/debug/list-pontoVerificacao-without-empresa', verifyToken, require
     });
     
   } catch (err) {
-    console.error('❌ Erro ao listar pontoVerificacao:', err.message);
+    console.error('❌ Erro ao listar checkpoints:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -1720,7 +1720,7 @@ app.get('/api/debug/list-pontoVerificacao-without-empresa', verifyToken, require
 // ✨ NOVO: Limpar todas as crianças, pulseiras e resetar pontoVerificacao
 app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`🗑️  Iniciando limpeza de crianças, pulseiras e pontoVerificacao...`);
+    console.log(`🗑️  Iniciando limpeza de crianças, pulseiras e checkpoints...`);
     
     // 1. Desassociar todas as pulseiras das crianças
     console.log(`   • Resetando pulseiras...`);
@@ -1735,7 +1735,7 @@ app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), as
     await query(`UPDATE "time" SET pontos = 0`);
     
     // 4. Resetar pontoVerificacao (limpar territories, lock, cooldown, scores)
-    console.log(`   • Resetando pontoVerificacao...`);
+    console.log(`   • Resetando checkpoints...`);
     await query(`
       UPDATE pontoVerificacao SET 
         territorioDonoTimeId = NULL,
@@ -1747,7 +1747,7 @@ app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), as
     console.log(`✅ Limpeza concluída com sucesso!`);
     res.json({ 
       ok: true, 
-      message: 'Crianças, pulseiras e pontoVerificacao limpas com sucesso',
+      message: 'Crianças, pulseiras e checkpoints limpas com sucesso',
       summary: {
         'Crianças': 'Todas deletadas ✓',
         'Pulseiras': 'Todas resetadas para disponível ✓',
@@ -1946,7 +1946,7 @@ async function startServer() {
     await addColorToParticipantStates();
     // DISABLED: Event lifecycle scheduler incompatible with Supabase schema
     // eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
-    console.log('✅ Schema de famílias, estado do jogo, mapa dos pontoVerificacao, planta dos eventos, finalidade dos pontoVerificacao, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
+    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);
@@ -1971,7 +1971,7 @@ async function startServer() {
   ║      ✓ /api/times                    ║
   ║      ✓ /api/criancas                 ║
   ║      ✓ /api/pulseiras                ║
-  ║      ✓ /api/pontoVerificacao              ║
+  ║      ✓ /api/checkpoints              ║
   ║      ✓ /api/leituras                 ║
   ║      ✓ /api/analytics                ║
   ║      ✓ /api/master                   ║
@@ -2041,7 +2041,7 @@ async function startServer() {
     `);
     
     if (!checkColumn) {
-      console.log('  • Adicionando coluna last_seen em pontoVerificacao...');
+      console.log('  • Adicionando coluna last_seen em checkpoints...');
       await query(`
         ALTER TABLE pontoVerificacao
         ADD ultimoVisto DATETIME NULL DEFAULT GETDATE()

@@ -150,7 +150,7 @@ async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = '
     await withTransaction(async (tx) => {
       for (const zone of zones) {
         const stateId = uuidv4();
-        const checkpointCount = zoneCheckpointMap.get(zone.name?.toLowerCase()) || 0;
+        const checkpointCount = zoneCheckpointMap.get(zone.nome?.toLowerCase()) || 0;
 
         await tx.query(
           `INSERT INTO zonaConquistaEstadoZona
@@ -161,7 +161,7 @@ async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = '
             partidaId,
             empresaId,
             eventoId,
-            zoneId: zone.id,
+            zoneId: zone.zonaId,
             ownerType: gameType,
             checkpointsCount: checkpointCount,
           }
