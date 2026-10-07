@@ -223,7 +223,7 @@ router.get('/:id/territory', async (req, res) => {
 
     // O ESP32 decide a cor do LED pelo campo `gameType`. Resolvemos ele de forma
     // explícita para que o espalhamento de um status não sobrescreva o do outro.
-    const activeGameType = [treasureStatus.gameTipo, monsterStatus.gameType]
+    const activeGameType = [treasureStatus.gameType, monsterStatus.gameType]
       .find(type => type && type !== 'none') || 'none';
 
     // `monsters` traz o progresso de todas as equipes e é grande demais para o
