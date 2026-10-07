@@ -118,7 +118,7 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
   if (!checkpointId) throw httpError('Escolha o checkpoint da brincadeira paralela', 400);
 
   const evento = await queryOne(
-    `SELECT eventoId, empresaId, status, COALESCE(tipoJogoAtivo, 'none') AS active_game_type
+    `SELECT eventoId, empresaId, status
      FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)`,
     { eventoId }
   );
@@ -128,9 +128,6 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
   }
   if (CLOSED_EVENT_STATUSES.has(String(evento.status || '').toLowerCase())) {
     throw httpError('Este evento não está aberto', 409);
-  }
-  if (String(evento.active_game_type).toLowerCase() === 'none') {
-    throw httpError('Inicie uma brincadeira principal antes de começar a paralela', 409);
   }
 
   const checkpoint = await queryOne(
