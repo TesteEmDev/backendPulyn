@@ -139,14 +139,14 @@ function broadcastEvent(data) {
  * errado no modo individual. Nunca lança erro — o rastreio não pode derrubar
  * uma leitura já confirmada.
  */
-async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameTipo, teamColor, leituraId, uid, now }) {
+async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameType, teamColor, leituraId, uid, now }) {
   try {
     const coords = await queryOne(
       'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (coords?.mapaX == null || coords?.mapaY == null) {
-      console.warn(`⚠️ [RASTREIO] Checkpoint ${checkpointId} sem mapaX/mapaY — avatar não poderá se mover (${gameTipo})`);
+      console.warn(`⚠️ [RASTREIO] Checkpoint ${checkpointId} sem mapaX/mapaY — avatar não poderá se mover (${gameType})`);
     }
 
     let color = teamColor || crianca.teamColor || null;
@@ -167,13 +167,13 @@ async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId,
         teamColor: color || '#1E9BD7',
         timestamp: now.toISOString(),
         eventoId,
-        gameTipo,
+        gameType,
         mapX: coords?.mapaX ?? null,
         mapY: coords?.mapaY ?? null,
       },
     });
   } catch (err) {
-    console.error(`❌ [RASTREIO] Falha ao enviar CHILD_CHECKPOINT_PASSED (${gameTipo}):`, err.message);
+    console.error(`❌ [RASTREIO] Falha ao enviar CHILD_CHECKPOINT_PASSED (${gameType}):`, err.message);
   }
 }
 
@@ -436,7 +436,7 @@ router.post('/', async (req, res) => {
       return res.json({
         ok: true,
         registered: true,
-        authorized: parallelResult.status === 'won',
+        autorizado: parallelResult.status === 'won',
         braceletCode: normalizedUid,
         readingId: leituraId,
         parallel: true,

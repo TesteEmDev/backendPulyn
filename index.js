@@ -1512,10 +1512,10 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
         const eventState = await getGameState(checkpoint.eventoId);
         if (eventState) {
           return res.json({
-            mode: eventState.mode,
+            mode: eventState.modo,
             gameType: eventState.tipoJogo,
             eventoId: eventState.eventoId,
-            updatedAt: eventState.updated_at,
+            updatedAt: eventState.atualizadoEm,
           });
         }
       }
