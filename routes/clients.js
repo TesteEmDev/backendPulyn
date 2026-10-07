@@ -33,10 +33,10 @@ router.get('/', verifyToken, async (req, res) => {
 
     const formatted = cliente.map((c) => ({
       id: c.id,
-      name: c.nome,
-      cidade: c.cidade,
-      estado: c.estado,
-      telefone: c.telefone,
+      name: c.name,
+      city: c.city,
+      state: c.state,
+      phone: c.phone,
       plan: c.plan,
       status: c.status,
       email: c.email,
@@ -85,14 +85,14 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     const planDefinition = PLAN_DEFINITIONS[planId] || null;
 
     const details = {
-      id: cliente.clienteId,
+      id: cliente.id,
       origin: cliente.origin,
-      name: cliente.nome,
+      name: cliente.name,
       cnpj: null,
-      cidade: cliente.cidade,
-      estado: cliente.estado,
+      city: cliente.city,
+      state: cliente.state,
       email: cliente.email,
-      telefone: cliente.telefone,
+      phone: cliente.phone,
       plan: planId,
       status: cliente.status,
       createdAt: toIso(cliente.createdAt),
@@ -139,7 +139,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       details.updatedAt = toIso(empresa?.dataAtualizacao);
 
       details.users = users.map((u) => ({
-        id: u.id,
+        id: u.loginId,
         email: u.email,
         role: u.perfil,
         status: u.status,
@@ -148,7 +148,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       }));
 
       details.events = events.map((e) => ({
-        id: e.id,
+        id: e.eventoId,
         name: e.nome,
         date: e.data_str,
         time: e.hora ? String(e.hora).slice(0, 5) : null,

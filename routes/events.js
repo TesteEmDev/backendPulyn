@@ -378,7 +378,7 @@ router.get('/:eventoId/game-status', verifyToken, async (req, res) => {
     // ciclo de vida do evento (agendado/ativo/encerrado).
     const gameEstado = await getGameState(evento.eventoId);
     res.json({
-      gameRunning: gameEstado?.mode === 'game' && !isClosedStatus(evento.status),
+      gameRunning: gameEstado?.modo === 'game' && !isClosedStatus(evento.status),
       status: evento.status
     });
   } catch (err) {
@@ -1044,7 +1044,7 @@ router.post('/:eventoId/setup-active-game', verifyToken, requireRole('admin', 'g
       `, {
         id: newBrincadeiraId,
         nome: 'Captura de Territórios',
-        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseira em pontoVerificacao',
+        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseira em checkpoints',
         tipo: 'team',
         gameTipo: 'standard',
         status: 'active',

@@ -32,7 +32,7 @@ async function getEventForUser(req, eventoId) {
 
 function serializeMessage(message) {
   return {
-    id: message.id,
+    id: message.mensagemId,
     eventoId: message.eventoId,
     texto: message.texto,
     type: message.tipo,

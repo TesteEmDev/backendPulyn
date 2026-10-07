@@ -43,7 +43,7 @@ function parseConfiguredIds(rawCheckpoints) {
 
 /**
  * Confere se o evento tem checkpoints online suficientes para o jogo começar.
- * `game` pode ser a linha da brincadeira (com `type` e `checkpoints`) ou só o id dela.
+ * `game` pode ser a linha da brincadeira (com `tipo` e `checkpoints`) ou só o id dela.
  * Só o Caça ao Tesouro restringe pela lista de checkpoints do jogo (é assim que a partida começa
  * de verdade: o alvo sai dessa lista). No Monstro a lista só escolhe o checkpoint especial e todos
  * os checkpoints do evento participam, como nos jogos de Zona; assim uma lista antiga, com

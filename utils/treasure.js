@@ -83,7 +83,7 @@ async function getTeamRaceTimes(eventoId, session) {
            AND LOWER(c.timeId) = LOWER(t.timeId)
        )
      ORDER BY t.nome`,
-    { eventoId, partidaId: session.id }
+    { eventoId, partidaId: session.partidaId }
   );
 
   const now = Date.now();
@@ -184,7 +184,7 @@ async function awardTreasureBonusOnStop(eventoId) {
   if (!winner) return null;
   return awardWinnerBonus({
     eventoId,
-    partidaId: session.id,
+    partidaId: session.partidaId,
     gameType: TREASURE_GAME_TYPE,
     teamId: winner.teamId,
   });
@@ -402,7 +402,7 @@ async function getTreasureEventStatus(eventoId) {
       active: false,
       completed: true,
       gameType: TREASURE_GAME_TYPE,
-      partidaId: session.id,
+      partidaId: session.partidaId,
       finishedAt: session.finalizadoEm,
       teamRaceTimes,
       winningTeamId: winningTeam?.teamId || null,
@@ -443,7 +443,7 @@ async function getTreasureEventStatus(eventoId) {
   return {
     active: true,
     gameType: TREASURE_GAME_TYPE,
-    partidaId: session.id,
+    partidaId: session.partidaId,
     roundNumber: session.numeroRonda,
     startingTeamId: session.timeInicialId || null,
     startingTeamName: startingTeam?.name || null,
@@ -485,7 +485,7 @@ async function getTeamsProgress(eventoId, session) {
            AND LOWER(c.timeId) = LOWER(t.timeId)
        )
      ORDER BY t.nome`,
-    { eventoId, partidaId: session.id, roundNumber: session.numeroRonda }
+    { eventoId, partidaId: session.partidaId, roundNumber: session.numeroRonda }
   );
 
   return teams.map(team => ({
@@ -587,7 +587,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
      WHERE LOWER(partidaId) = LOWER(@partidaId)
        AND numeroRonda = @roundNumber
        AND LOWER(criancaId) = LOWER(@criancaId)`,
-    { partidaId: session.id, roundNumber: session.numeroRonda, criancaId: crianca.criancaId }
+    { partidaId: session.partidaId, roundNumber: session.numeroRonda, criancaId: crianca.criancaId }
   );
   if (alreadyScanned) {
     const duplicateCount = await queryOne(
@@ -595,7 +595,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
        WHERE LOWER(partidaId) = LOWER(@partidaId)
          AND numeroRonda = @roundNumber
          AND LOWER(timeId) = LOWER(@timeId)`,
-      { partidaId: session.id, roundNumber: session.numeroRonda, timeId: crianca.timeId }
+      { partidaId: session.partidaId, roundNumber: session.numeroRonda, timeId: crianca.timeId }
     );
     return {
       handled: true,
@@ -616,7 +616,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
          @criancaId, @timeId, @uid, @scannedAt)`,
       {
         id: uuidv4(),
-        partidaId: session.id,
+        partidaId: session.partidaId,
         eventoId,
         brincadeiraId,
         roundNumber: session.numeroRonda,
@@ -635,7 +635,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
          WHERE LOWER(partidaId) = LOWER(@partidaId)
            AND numeroRonda = @roundNumber
            AND LOWER(timeId) = LOWER(@timeId)`,
-        { partidaId: session.id, roundNumber: session.numeroRonda, timeId: crianca.timeId }
+        { partidaId: session.partidaId, roundNumber: session.numeroRonda, timeId: crianca.timeId }
       );
       return {
         handled: true,
@@ -654,7 +654,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
      WHERE LOWER(partidaId) = LOWER(@partidaId)
        AND numeroRonda = @roundNumber
        AND LOWER(timeId) = LOWER(@timeId)`,
-    { partidaId: session.id, roundNumber: session.numeroRonda, timeId: crianca.timeId }
+    { partidaId: session.partidaId, roundNumber: session.numeroRonda, timeId: crianca.timeId }
   );
   const scanned = Number(countResult?.total || 0);
 
@@ -764,7 +764,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
          finalizadoEm = @finishedAt
        WHERE partidaId = @partidaId AND status = 'active' AND numeroRonda = @roundNumber`,
       {
-        partidaId: session.id,
+        partidaId: session.partidaId,
         roundNumber: session.numeroRonda,
         completedCheckpointIds: JSON.stringify(visibleCompletedCheckpointIds),
         finishedAt: now,
@@ -780,7 +780,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
          rondaIniciadaEm = @roundStartedAt
        WHERE partidaId = @partidaId AND status = 'active' AND numeroRonda = @roundNumber`,
       {
-        partidaId: session.id,
+        partidaId: session.partidaId,
         roundNumber: session.numeroRonda,
         turnTeamId: nextTurnTeam.teamId,
         turnAvailableAt: nextTurnAvailableAt,
@@ -808,7 +808,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   if (raceFinished && winningTeam) {
     winnerBonus = await awardWinnerBonus({
       eventoId,
-      partidaId: session.id,
+      partidaId: session.partidaId,
       gameType: TREASURE_GAME_TYPE,
       teamId: winningTeam.teamId,
     });

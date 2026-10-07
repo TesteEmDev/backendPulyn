@@ -193,7 +193,7 @@ router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apena
 });
 
 // ✅ Checkpoints cadastrados ao longo do tempo: novos no mês e total acumulado
-router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver pontoVerificacao globais'), async (req, res) => {
+router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver checkpoints globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
       SELECT k.criadoEm
@@ -218,7 +218,7 @@ router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso neg
       return { month: monthLabel(key), pontoVerificacao: added, total };
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar pontoVerificacao ao longo do tempo:', err);
+    console.error('❌ Erro ao buscar checkpoints ao longo do tempo:', err);
     res.status(500).json({ error: err.message });
   }
 });

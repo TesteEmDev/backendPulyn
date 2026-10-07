@@ -72,7 +72,7 @@ router.get('/overview', async (req, res) => {
       ...summary,
       topParticipants: topParticipants.map((c) => ({
         id: c.criancaId, name: c.nome, nickname: c.apelido || '', age: c.idade,
-        scores: Number(c.pontos) || 0, braceletCode: c.bracelet_code || '', eventName: c.event_nome, teamName: c.team_nome || '', teamColor: c.team_color || '',
+        scores: Number(c.pontos) || 0, eventName: c.event_nome, teamName: c.team_nome || '', teamColor: c.team_color || '',
       })),
       topTeams: topTeams.map((t) => ({
         id: t.timeId, name: t.nome, color: t.cor, points: Number(t.pontos) || 0, eventName: t.event_name,
