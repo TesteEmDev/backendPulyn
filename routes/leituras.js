@@ -490,7 +490,7 @@ router.post('/', async (req, res) => {
           });
           break;
         } catch (error) {
-          if (error.codigo === 'MONSTER_VERSION_CONFLICT') {
+          if (error.code === 'MONSTER_VERSION_CONFLICT') {
             // Outra tentativa pode ter confirmado a mesma leitura enquanto
             // esta transação aguardava o lock/índice único.
             const processedAfterConflict = await findProcessedReading(leituraId, checkpoint);
@@ -1185,7 +1185,7 @@ router.post('/', async (req, res) => {
     console.error('❌ [LEITURA] Erro ao processar leitura:', err);
     console.error('   Stack:', err.stack);
     console.error('   Message:', err.message);
-    console.error('   Code:', err.codigo);
+    console.error('   Code:', err.code);
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });

@@ -465,10 +465,10 @@ app.get('/api/debug/game-state/:eventoId', verifyToken, requireRole('admin', 're
 
     const state = await getGameState(evento.eventoId);
     const gameType = state?.tipoJogo || 'none';
-    const active = state?.mode === 'game' && !isClosedStatus(evento.status);
+    const active = state?.modo === 'game' && !isClosedStatus(evento.status);
     res.json({
       eventoId: evento.eventoId,
-      mode: state?.mode || 'idle',
+      mode: state?.modo || 'idle',
       gameType,
       gameId: state?.brincadeiraId || null,
       gameName: state?.nomeBrincadeira || null,
