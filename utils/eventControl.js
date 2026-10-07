@@ -59,7 +59,8 @@ async function setActiveEvent(empresaId, eventoId) {
     );
   }
 
-  return { event };
+  // Mesmo formato de getActiveEvent (id / name / status), que é o que as telas e o firmware leem.
+  return { event: event ? { id: event.eventoId, name: event.nome, status: event.status } : null };
 }
 
 module.exports = { getActiveEvent, setActiveEvent, isOpenEvent };
