@@ -19,11 +19,17 @@ function httpError(message, statusCode) {
 }
 
 function isDuplicateKeyError(error) {
-  return error?.codigo === '23505' || error?.number === 2601 || error?.number === 2627;
+  return error?.code === '23505' || error?.number === 2601 || error?.number === 2627;
 }
 
 // O kiosk tem uma superfície de API própria e não recebe acesso às rotas administrativas.
-router.use(verifyToken, requireRole('kiosk'));
+// A recepção também consulta as leituras do leitor (fallback do Check-in quando o WebSocket cai); o resto é só do kiosk.
+const RECEPTION_READINGS = /^\/events\/[^/]+\/reception-readings\/?$/;
+router.use(verifyToken, (req, res, next) => (
+  req.method === 'GET' && RECEPTION_READINGS.test(req.path)
+    ? requireRole('kiosk', 'reception')(req, res, next)
+    : requireRole('kiosk')(req, res, next)
+));
 
 // Eventos abertos da própria empresa, com somente os campos necessários ao visor.
 router.get('/events', async (req, res) => {
