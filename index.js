@@ -47,6 +47,11 @@ const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
+const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
+const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
+const { ensureParallelGamesSchema } = require('./migrations/parallelGames');
+const parallelGamesRoutes = require('./routes/parallelGames');
+const { startBraceletReleaseScheduler } = require('./utils/braceletRelease');
 const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
@@ -1245,6 +1250,7 @@ const staleTeamCheckpointsInterval = setInterval(checkStaleTeamCheckpoints, 1000
 // cadastradas (só eventos com autoInicio/autoFim ligados). Ver utils/eventLifecycle.js
 // Iniciada em startServer(), depois que o schema (colunas autoInicio/autoFim) existe.
 let eventLifecycleInterval = null;
+let braceletReleaseInterval = null;
 
 // DEBUG: Reset territory lock de um checkpoint
 app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
@@ -1886,6 +1892,7 @@ app.use('/api/planos', planosRoutes);
 app.use('/api/monitoring', monitoringRoutes);
 app.use('/api/support', supportRoutes);
 app.use('/api/messages', messagesRoutes);
+app.use('/api/parallel-games', parallelGamesRoutes);
 app.use('/api/familias', familiasRoutes);
 
 // Servir arquivos estáticos
@@ -1931,6 +1938,9 @@ async function startServer() {
     await ensureEmpresaCnpjSchema();
     await ensureSettingsPerCompanySchema();
     await ensureClienteUnidadeSchema();
+    await ensureCacaTesouroSchema();
+    await ensureBraceletHistorySchema();
+    await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
     await ensureMonsterHuntSchema();
@@ -1946,6 +1956,8 @@ async function startServer() {
     await addColorToParticipantStates();
     // DISABLED: Event lifecycle scheduler incompatible with Supabase schema
     // eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
+    // 10 minutos depois do fim do evento, as pulseiras dele voltam a ficar sem dono.
+    braceletReleaseInterval = startBraceletReleaseScheduler();
     console.log('✅ Schema de famílias, estado do jogo, mapa dos pontoVerificacao, planta dos eventos, finalidade dos pontoVerificacao, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
@@ -2200,6 +2212,7 @@ async function shutdown(signal) {
   clearInterval(interval);
   clearInterval(staleTeamCheckpointsInterval);
   clearInterval(eventLifecycleInterval);
+  clearInterval(braceletReleaseInterval);
   wss.clients.forEach((cliente) => cliente.close(1001, 'Servidor reiniciando'));
 
   server.close(() => {

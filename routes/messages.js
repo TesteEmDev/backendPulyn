@@ -11,7 +11,7 @@ const MESSAGE_TYPES = new Set(['preset', 'custom']);
 
 function requireRole(roles) {
   return (req, res, next) => {
-    if (!roles.has(req.user?.perfil)) {
+    if (!roles.has(req.user?.role)) {
       return res.status(403).json({ error: 'Acesso negado para este perfil' });
     }
     return next();

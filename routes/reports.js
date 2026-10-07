@@ -32,6 +32,7 @@ router.get('/overview', async (req, res) => {
       `, params),
       allQuery(`
         SELECT TOP 10 c.criancaId, c.nome, c.apelido, c.idade, c.pontos,
+          COALESCE(c.codigoPulseira, c.ultimaPulseira) AS bracelet_code,
           e.nome AS event_nome, t.nome AS team_nome, t.cor AS team_color
         FROM crianca c
         JOIN evento e ON e.eventoId = c.eventoId
@@ -70,16 +71,16 @@ router.get('/overview', async (req, res) => {
     res.json({
       ...summary,
       topParticipants: topParticipants.map((c) => ({
-        id: c.id, name: c.nome, nickname: c.nickname || '', age: c.age,
-        scores: Number(c.scores) || 0, eventName: c.event_nome, teamName: c.team_name || '', teamColor: c.team_color || '',
+        id: c.criancaId, name: c.nome, nickname: c.apelido || '', age: c.idade,
+        scores: Number(c.pontos) || 0, braceletCode: c.bracelet_code || '', eventName: c.event_nome, teamName: c.team_nome || '', teamColor: c.team_color || '',
       })),
       topTeams: topTeams.map((t) => ({
-        id: t.id, name: t.nome, color: t.cor, points: Number(t.points) || 0, eventName: t.event_nome,
+        id: t.timeId, name: t.nome, color: t.cor, points: Number(t.pontos) || 0, eventName: t.event_name,
       })),
       topCheckpoints: topCheckpoints.map((c) => ({
-        id: c.id, name: c.nome, zone: c.zone || '', eventName: c.event_nome, readings: Number(c.readings) || 0,
+        id: c.checkpointId, name: c.nome, zone: c.zona || '', eventName: c.event_nome, readings: Number(c.readings) || 0,
       })),
-      topGames: topGames.map((g) => ({ id: g.id, name: g.nome, plays: Number(g.plays) || 0 })),
+      topGames: topGames.map((g) => ({ id: g.brincadeiraId, name: g.nome, plays: Number(g.plays) || 0 })),
     });
   } catch (err) {
     console.error('❌ Erro ao gerar relatório geral:', err);

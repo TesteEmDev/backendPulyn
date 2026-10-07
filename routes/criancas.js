@@ -308,7 +308,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
 router.delete('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
       return res.status(403).json({ error: 'Acesso negado para excluir participantes' });
     }
 
@@ -378,7 +378,7 @@ router.delete('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, r
 router.post('/:criancaId/unassign-bracelet', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
       return res.status(403).json({ error: 'Acesso negado para desvincular pulseira' });
     }
     const { criancaId } = req.params;
@@ -399,7 +399,7 @@ router.post('/:criancaId/unassign-bracelet', verifyToken, async (req, res) => {
     const braceletCode = crianca.codigoPulseira;
     
     await query(
-      `UPDATE crianca SET codigoPulseira = NULL
+      `UPDATE crianca SET ultimaPulseira = codigoPulseira, codigoPulseira = NULL
        WHERE criancaId = @criancaId AND (empresaId = @empresaId OR @isMaster = 1)`,
       { criancaId: criancaId, empresaId: crianca.empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
@@ -519,7 +519,7 @@ router.get('/:criancaId/qrcode-image', verifyToken, async (req, res) => {
 router.post('/evento/:eventoId/generate-qrcodes-batch', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
-    if (!isMaster(req) && !allowedRoles.includes(req.user?.perfil)) {
+    if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
       return res.status(403).json({ error: 'Acesso negado para esta operação em lote' });
     }
 

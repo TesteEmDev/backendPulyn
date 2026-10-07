@@ -2,6 +2,17 @@
 
 const { query, DB_DRIVER } = require('../database');
 
+// Garante que uma leitura não pontue duas vezes. Se o banco já tiver leituras repetidas (dados antigos),
+// o índice não pode ser criado: avisa e segue, em vez de impedir o servidor de subir.
+async function createReadingIndex(indexName, tableName) {
+  try {
+    await query(`CREATE UNIQUE INDEX IF NOT EXISTS ${indexName} ON ${tableName} (leituraId) WHERE leituraId IS NOT NULL`);
+  } catch (err) {
+    if (err.code !== '23505') throw err;
+    console.warn(`⚠️ ${tableName}: há leituras repetidas, o índice ${indexName} não foi criado. Remova as duplicatas (migrations/016-remover-dados-duplicados.sql) para ativá-lo.`);
+  }
+}
+
 async function ensureZoneConquestSchema() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
@@ -138,13 +149,13 @@ async function ensureZoneConquestSchema() {
     // TEAM indices
     await query('CREATE INDEX IF NOT EXISTS idx_zone_team_partidas_evento ON zonaConquistaPartidaTime (eventoId, status)');
     await query('CREATE INDEX IF NOT EXISTS idx_zone_team_tempos_partida ON zonaConquistaTempoTime (partidaId, timeId)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zone_team_scan_reading ON zonaConquistaLeituraTime (leituraId) WHERE "leituraId" IS NOT NULL');
+    await createReadingIndex('uq_zone_team_scan_reading', 'zonaConquistaLeituraTime');
     await query('CREATE INDEX IF NOT EXISTS idx_zone_team_scans_partida ON zonaConquistaLeituraTime (partidaId, numeroRonda)');
 
     // INDIVIDUAL indices
     await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_partidas_evento ON zonaConquistaPartidaIndividual (eventoId, status)');
     await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_states_partida ON zonaConquistaEstadoParticipanteIndividual (partidaId, criancaId)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_zone_individual_scan_reading ON zonaConquistaLeituraIndividual (leituraId) WHERE "leituraId" IS NOT NULL');
+    await createReadingIndex('uq_zone_individual_scan_reading', 'zonaConquistaLeituraIndividual');
     await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_scans_partida ON zonaConquistaLeituraIndividual (partidaId, criancaId)');
     await query('CREATE INDEX IF NOT EXISTS idx_zone_individual_protection_checkpoint ON zonaConquistaProtecaoCheckpointIndividual (checkpointId, protegidoAte)');
 
