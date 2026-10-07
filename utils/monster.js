@@ -620,7 +620,46 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
   };
 }
 
+// Depois de trocar a lista de checkpoints do jogo com a partida em andamento: o checkpoint especial
+// precisa continuar sendo um checkpoint da lista. Se a lista marcar um novo especial, ele passa a valer;
+// se o atual saiu da lista, sorteia outro. O bloqueio de cada checkpoint já é lido da lista a cada leitura.
+async function refreshMonsterSpecialAfterListChange(eventoId) {
+  const session = await getActiveMonsterGame(eventoId);
+  if (!session) return null;
+
+  const game = await queryOne(
+    'SELECT checkpoints FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id)',
+    { id: session.brincadeiraId }
+  );
+  const items = parseJson(game?.checkpoints, []);
+  const configured = items.map(item => String(item?.id || item || '').trim()).filter(Boolean);
+  const configuredSet = new Set(configured.map(id => id.toLowerCase()));
+
+  const checkpoints = await getMonsterCheckpoints(eventoId);
+  const candidates = configured.length
+    ? checkpoints.filter(checkpoint => configuredSet.has(String(checkpoint.checkpointId).toLowerCase()))
+    : checkpoints;
+  if (!candidates.length) return null;
+
+  const explicit = items.find(item => item && typeof item === 'object' && item.special);
+  const explicitId = explicit?.id ? String(explicit.id).trim().toLowerCase() : '';
+  const chosen = (explicitId && candidates.find(checkpoint => String(checkpoint.checkpointId).toLowerCase() === explicitId))
+    || candidates.find(checkpoint => sameId(checkpoint.checkpointId, session.checkpointEspecialId))
+    || candidates[Math.floor(Math.random() * candidates.length)];
+
+  if (sameId(chosen.checkpointId, session.checkpointEspecialId)) {
+    return { changed: false, specialCheckpointId: String(chosen.checkpointId) };
+  }
+  await query(
+    `UPDATE monsterCacaPartida SET checkpointEspecialId = @specialId
+     WHERE id = @partidaId AND status = 'active'`,
+    { specialId: chosen.checkpointId, partidaId: session.id }
+  );
+  return { changed: true, specialCheckpointId: String(chosen.checkpointId) };
+}
+
 module.exports = {
+  refreshMonsterSpecialAfterListChange,
   MONSTER_GAME_TYPE,
   MONSTER_DEFAULTS,
   getActiveMonsterGame,

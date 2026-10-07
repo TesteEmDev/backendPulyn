@@ -32,6 +32,7 @@ router.get('/overview', async (req, res) => {
       `, params),
       allQuery(`
         SELECT TOP 10 c.criancaId, c.nome, c.apelido, c.idade, c.pontos,
+          COALESCE(c.codigoPulseira, c.ultimaPulseira) AS bracelet_code,
           e.nome AS event_nome, t.nome AS team_nome, t.cor AS team_color
         FROM crianca c
         JOIN evento e ON e.eventoId = c.eventoId
