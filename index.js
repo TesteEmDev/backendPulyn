@@ -39,8 +39,7 @@ const familiasRoutes = require('./routes/familias');
 const qrcodeRoutes = require('./routes/qrcode');
 const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
-const { ensureNomenclaturaSchema } = require('./migrations/nomenclatura');
-const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
+const companyMapRoutes = require('./routes/companyMap');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -49,17 +48,17 @@ const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
+const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
 const { ensureParallelGamesSchema } = require('./migrations/parallelGames');
 const parallelGamesRoutes = require('./routes/parallelGames');
-const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { startBraceletReleaseScheduler } = require('./utils/braceletRelease');
+const { startLifecycleScheduler, ensureEventActive, isClosedStatus } = require('./utils/eventLifecycle');
 const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpose');
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
-const { ensureEventFloorPlanSchema } = require('./migrations/eventFloorPlan');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureGameWinnerBonusesSchema } = require('./migrations/gameWinnerBonuses');
 const { ensureAvatarSchema } = require('./migrations/avatar');
-const { ensureEventZonesSchema } = require('./migrations/eventZones');
+const { ensureCompanyMapSchema, migrateExistingEventMapDataToCompanies } = require('./migrations/companyMap');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
 const { ensureGameSessionsSchema } = require('./migrations/gameSessions');
 const { addSessionIdToLeituras } = require('./migrations/leiturasSessionId');
@@ -122,14 +121,14 @@ const interval = setInterval(() => {
   });
 }, 30000);
 
-// ✨ NOVO: Verificar checkpoints offline (não enviaram leitura há 5 minutos)
+// ✨ NOVO: Verificar pontoVerificacao offline (não enviaram leitura há 5 minutos)
 // 🔴 DESABILITADO TEMPORARIAMENTE: Causa timeout ao tentar conectar ao banco remoto
 // const offlineCheckInterval = setInterval(async () => {
 //   try {
 //     // Verificar se coluna last_seen existe
 //     const checkColumn = await require('./database').queryOne(`
 //       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS 
-//       WHERE TABLE_NAME = 'checkpoints' AND COLUMN_NAME = 'last_seen'
+//       WHERE TABLE_NAME = 'pontoVerificacao' AND COLUMN_NAME = 'last_seen'
 //     `);
 //     
 //     if (!checkColumn) {
@@ -141,15 +140,15 @@ const interval = setInterval(() => {
 //     
 //     // Marcar como offline se não foram vistos há 5 minutos
 //     await require('./database').query(
-//       `UPDATE checkpoints 
+//       `UPDATE pontoVerificacao 
 //        SET status = 'offline' 
 //        WHERE status = 'online'
-//        AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+//        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
 //        AND (last_seen IS NULL OR last_seen < @fiveMinutesAgo)`,
 //       { fiveMinutesAgo }
 //     );
 //   } catch (err) {
-//     console.error('❌ Erro ao verificar checkpoints offline:', err);
+//     console.error('❌ Erro ao verificar pontoVerificacao offline:', err);
 //   }
 // }, 60000); // A cada 1 minuto
 
@@ -164,9 +163,9 @@ global.wsServer = wss;
 // Função de broadcast para todos os clientes WebSocket
 global.broadcast = (message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1) { // 1 = OPEN
-      client.send(msgStr);
+  wss.clients.forEach((cliente) => {
+    if (cliente.readyState === 1) { // 1 = OPEN
+      cliente.send(msgStr);
     }
   });
 };
@@ -175,10 +174,10 @@ global.broadcast = (message) => {
 global.broadcastToEvent = (eventoId, message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
   
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1
-      && String(client.eventoId || '').trim().toLowerCase() === String(eventoId || '').trim().toLowerCase()) {
-      client.send(msgStr);
+  wss.clients.forEach((cliente) => {
+    if (cliente.readyState === 1
+      && String(cliente.eventoId || '').trim().toLowerCase() === String(eventoId || '').trim().toLowerCase()) {
+      cliente.send(msgStr);
     }
   });
 };
@@ -186,10 +185,10 @@ global.broadcastToEvent = (eventoId, message) => {
 // Controle operacional do evento, isolado por empresa.
 global.broadcastToCompany = (empresaId, message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1
-      && String(client.companyId || '').trim().toLowerCase() === String(empresaId || '').trim().toLowerCase()) {
-      client.send(msgStr);
+  wss.clients.forEach((cliente) => {
+    if (cliente.readyState === 1
+      && String(cliente.companyId || '').trim().toLowerCase() === String(empresaId || '').trim().toLowerCase()) {
+      cliente.send(msgStr);
     }
   });
 };
@@ -202,14 +201,14 @@ global.broadcastAll = (message) => {
 async function persistEventMode(eventoId, mode, gameType = currentGameType, details = {}) {
   if (!eventoId || eventoId === 'global') return;
   const evento = await queryOne(
-    'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+    'SELECT eventoId, empresaId FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return;
 
   await saveGameState({
-    eventoId: evento.id,
-    empresaId: evento.empresa_id,
+    eventoId: evento.eventoId,
+    empresaId: evento.empresaId,
     mode,
     gameType: gameType || 'none',
     gameId: details.gameId || null,
@@ -259,9 +258,9 @@ function getWebSocketToken(req, url) {
 
 // WebSocket Connection com Rooms
 wss.on('connection', async (ws, req) => {
-  // Extrair evento_id da URL query string
+  // Extrair eventoId da URL query string
   const url = new URL(req.url, `ws://${req.headers.host}`);
-  const eventoId = url.searchParams.get('evento_id') || 'global';
+  const eventoId = url.searchParams.get('eventoId') || 'global';
   const controlScope = url.searchParams.get('scope') === 'company';
   const wsToken = getWebSocketToken(req, url);
   
@@ -289,10 +288,10 @@ wss.on('connection', async (ws, req) => {
   if (wsUser && !controlScope && wsUser.role !== 'master') {
     try {
       const authorizedEvent = await queryOne(
-        `SELECT eventoId FROM evento
-         WHERE LOWER(eventoId) = LOWER(@eventoId)
+        `SELECT eventoId FROM "evento"
+         WHERE LOWER("eventoId") = LOWER(@eventoId)
            AND LOWER(empresaId) = LOWER(@empresaId)`,
-        { eventoId, empresaId: wsUser.empresa_id }
+        { eventoId, empresaId: wsUser.empresaId }
       );
       if (!authorizedEvent) {
         ws.close(1008, 'Evento não autorizado para esta empresa');
@@ -306,7 +305,7 @@ wss.on('connection', async (ws, req) => {
   }
 
   ws.eventoId = controlScope ? 'company-control' : eventoId;
-  ws.companyId = wsUser?.empresa_id;
+  ws.companyId = wsUser?.empresaId;
   ws.controlScope = controlScope;
   ws.user = wsUser;
   // Conexões sem usuário podem receber broadcasts públicos, mas nunca
@@ -316,7 +315,7 @@ wss.on('connection', async (ws, req) => {
 
   if (controlScope) {
     try {
-      const activeEvent = await getActiveEvent(wsUser.empresa_id);
+      const activeEvent = await getActiveEvent(wsUser.empresaId);
       ws.send(JSON.stringify({
         type: 'EVENT_SELECTED',
         payload: {
@@ -335,11 +334,11 @@ wss.on('connection', async (ws, req) => {
   if (KIOSK_ROLES.has(wsUser?.role) && !controlScope) {
     try {
       const kioskEvent = await queryOne(
-        `SELECT eventoId FROM evento
-         WHERE eventoId = @eventoId
+        `SELECT eventoId FROM "evento"
+         WHERE "eventoId" = @eventoId
            AND empresaId = @empresaId
            AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
-        { eventoId, empresaId: wsUser.empresa_id }
+        { eventoId, empresaId: wsUser.empresaId }
       );
       if (!kioskEvent) {
         ws.close(1008, 'Evento não autorizado para este kiosk');
@@ -359,7 +358,7 @@ wss.on('connection', async (ws, req) => {
     ws.isAlive = true;
   });
   
-  ws.on('message', (message) => {
+  ws.on('mensagem', (message) => {
     try {
       const data = JSON.parse(message.toString());
       
@@ -456,25 +455,25 @@ app.get('/api/debug/game-status', verifyToken, requireRole('admin', 'reception',
 app.get('/api/debug/game-state/:eventoId', verifyToken, requireRole('admin', 'reception', 'game_master', 'display', 'master'), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId, status FROM evento WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && String(evento.empresa_id).trim().toLowerCase() !== String(req.user.empresa_id).trim().toLowerCase()) {
+    if (!isMaster(req) && String(evento.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
-    const state = await getGameState(evento.id);
-    const gameType = state?.game_type || 'none';
+    const state = await getGameState(evento.eventoId);
+    const gameType = state?.tipoJogo || 'none';
     const active = state?.mode === 'game' && !isClosedStatus(evento.status);
     res.json({
-      eventoId: evento.id,
+      eventoId: evento.eventoId,
       mode: state?.mode || 'idle',
       gameType,
-      gameId: state?.game_id || null,
-      gameName: state?.game_name || null,
-      startedAt: state?.started_at || null,
-      stoppedAt: state?.stopped_at || null,
+      gameId: state?.brincadeiraId || null,
+      gameName: state?.nomeBrincadeira || null,
+      startedAt: state?.iniciadoEm || null,
+      stoppedAt: state?.paradoEm || null,
       active,
       selected: Boolean(gameType && gameType !== 'none'),
     });
@@ -492,25 +491,25 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const evento = await queryOne(
-      'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId, status FROM evento WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+    if (!isMaster(req) && String(evento.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
     const game = await queryOne(
-      'SELECT brincadeiraId, nome, tipo, eventoId, empresaId FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
+      'SELECT brincadeiraId, nome, tipo, eventoId, empresaId FROM "brincadeira" WHERE LOWER("eventoId") = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
       { gameId }
     );
     if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
-    if (String(game.empresa_id).toLowerCase() !== String(evento.empresa_id).toLowerCase()) {
+    if (String(game.empresaId).toLowerCase() !== String(evento.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: jogo e evento pertencem a empresas diferentes' });
     }
 
-    const directEventMatch = game.evento_id
-      && String(game.evento_id).trim().toLowerCase() === String(eventoId).trim().toLowerCase();
+    const directEventMatch = game.eventoId
+      && String(game.eventoId).trim().toLowerCase() === String(eventoId).trim().toLowerCase();
     const linkedEvent = directEventMatch
       ? true
       : await queryOne(
@@ -523,7 +522,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
-    const currentState = await getGameState(evento.id);
+    const currentState = await getGameState(evento.eventoId);
     // "Jogo rodando" vem do estado do jogo; o status do evento (agendado/ativo/
     // encerrado) é só o ciclo de vida e ficaria sempre 'ativo' durante o evento.
     if (isClosedStatus(evento.status)) {
@@ -534,30 +533,30 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
       return res.status(409).json({ error: 'Finalize o jogo atual antes de selecionar outro jogo' });
     }
 
-    const gameType = game.type === TREASURE_GAME_TYPE
+    const gameType = game.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : game.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : game.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
     await saveGameState({
-      eventoId: evento.id,
-      empresaId: evento.empresa_id,
+      eventoId: evento.eventoId,
+      empresaId: evento.empresaId,
       mode: 'idle',
       gameType,
-      gameId: game.id,
-      gameName: game.name || null,
+      gameId: game.brincadeiraId,
+      gameName: game.nome || null,
       startedAt: null,
-      stoppedAt: currentState?.stopped_at || null,
+      stoppedAt: currentState?.paradoEm || null,
     });
 
     const payload = {
-      gameId: game.id,
-      gameName: game.name || null,
+      gameId: game.brincadeiraId,
+      gameName: game.nome || null,
       gameType,
-      eventoId: evento.id,
+      eventoId: evento.eventoId,
       selectionOnly: true,
       selectedAt: new Date().toISOString(),
     };
     if (global.broadcastToEvent) {
-      global.broadcastToEvent(evento.id, { type: 'GAME_SELECTED', payload });
+      global.broadcastToEvent(evento.eventoId, { type: 'GAME_SELECTED', payload });
     }
     res.json({ ok: true, ...payload });
   } catch (error) {
@@ -587,7 +586,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [INICIAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+      `SELECT eventoId, empresaId, status FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -596,7 +595,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       console.error(`❌ [INICIAR-JOGO] Evento NÃO ENCONTRADO no banco de dados!`);
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
-    if (!isMaster(req) && String(eventoAntes.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+    if (!isMaster(req) && String(eventoAntes.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
     if (isClosedStatus(eventoAntes.status)) {
@@ -605,20 +604,20 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     const selectedGame = await queryOne(
       `SELECT brincadeiraId, nome, tipo, eventoId, empresaId
-       FROM brincadeira
-       WHERE LOWER(brincadeiraId) = LOWER(@gameId)
+       FROM "brincadeira"
+       WHERE LOWER("eventoId") = LOWER(@gameId)
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { gameId }
     );
     if (!selectedGame) {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
-    if (String(selectedGame.empresa_id).toLowerCase() !== String(eventoAntes.empresa_id).toLowerCase()) {
+    if (String(selectedGame.empresaId).toLowerCase() !== String(eventoAntes.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: jogo e evento pertencem a empresas diferentes' });
     }
 
-    const directEventMatch = selectedGame.evento_id
-      && String(selectedGame.evento_id).trim().toLowerCase() === String(eventoId).trim().toLowerCase();
+    const directEventMatch = selectedGame.eventoId
+      && String(selectedGame.eventoId).trim().toLowerCase() === String(eventoId).trim().toLowerCase();
     const linkedEvent = directEventMatch
       ? true
       : await queryOne(
@@ -631,23 +630,23 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
-    // O jogo só começa se o evento tiver o mínimo de checkpoints online para ele (confere antes de mexer em qualquer dado)
+    // O jogo só começa se o evento tiver o mínimo de pontoVerificacao online para ele (confere antes de mexer em qualquer dado)
     const requirement = await checkGameStartRequirements(eventoId, selectedGame);
     if (!requirement.ok) {
       console.warn(`⛔ [INICIAR-JOGO] ${requirement.message}`);
       return res.status(409).json({ error: requirement.message, requirement });
     }
 
-    const gameType = selectedGame.type === TREASURE_GAME_TYPE
+    const gameType = selectedGame.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : selectedGame.type === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : selectedGame.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
     // O modo (equipe/individual) é um dado persistido em brincadeiras.type,
     // escolhido pelo admin ao criar o jogo (AdminGameForm). Nunca inferir
     // isso do nome do jogo (texto livre) ou aceitar cegamente o que o
     // cliente mandou em zoneConquestMode — isso já causou domínios sendo
     // renderizados como se fossem do modo errado.
     const zoneMode = gameType === 'zone_conquest'
-      ? (selectedGame.type === 'individual' ? 'individual' : 'team')
+      ? (selectedGame.tipo === 'individual' ? 'individual' : 'team')
       : null;
     let treasureStart = null;
     let monsterStart = null;
@@ -655,19 +654,19 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
-      treasureStart = await startTreasureGame(eventoId, selectedGame.id);
+      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId);
       await stopMonsterGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
     } else if (gameType === MONSTER_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch MONSTER`);
-      monsterStart = await startMonsterGame(eventoId, selectedGame.id);
+      monsterStart = await startMonsterGame(eventoId, selectedGame.brincadeiraId);
       await stopTreasureGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Monstro iniciado com checkpoint especial`);
     } else if (gameType === ZONE_CONQUEST_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch ZONE_CONQUEST`);
-      zoneConquestStart = await startZoneConquestGame(eventoId, selectedGame.id);
+      zoneConquestStart = await startZoneConquestGame(eventoId, selectedGame.brincadeiraId);
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
       console.log(`   ✓ Zona Conquest iniciado`);
@@ -731,7 +730,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         } = require('./utils/zoneConquestStateManager');
         
         const evento = await queryOne(
-          `SELECT empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+          `SELECT empresaId FROM evento WHERE LOWER("eventoId") = LOWER(@eventoId)`,
           { eventoId }
         );
         
@@ -743,7 +742,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             // início empilha mais uma linha 'active' e nenhuma é finalizada).
             // Em try/catch: uma falha aqui não pode impedir a criação da
             // partida nova abaixo — foi exatamente isso que aconteceu com o
-            // bug do "column finished_at does not exist", que abortava a
+            // bug do "column finalizadoEm does not exist", que abortava a
             // criação inteira da partida TEAM silenciosamente.
             try {
               await stopZoneConquestTeam(eventoId);
@@ -762,7 +761,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             try {
               teamsWithChildren = await allQuery(
                 `SELECT DISTINCT t.timeId, t.criadoEm
-                 FROM time t
+                 FROM "time" t
                  INNER JOIN crianca c ON c.timeId = t.timeId
                  WHERE LOWER(t.eventoId) = LOWER(@eventoId) AND c.status = 'active'
                  ORDER BY t.criadoEm ASC`,
@@ -771,7 +770,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
             } catch (err) {
               console.warn(`   ⚠️ Erro ao buscar equipes com participantes: ${err.message}`);
             }
-            const firstTeamId = teamsWithChildren[0]?.id || null;
+            const firstTeamId = teamsWithChildren[0]?.timeId || null;
 
             const partidaId = require('uuid').v4();
             await query(
@@ -780,7 +779,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
               {
                 id: partidaId,
                 eventoId,
-                empresaId: evento.empresa_id,
+                empresaId: evento.empresaId,
                 brincadeiraId: gameId,
                 currentTeamId: firstTeamId,
               }
@@ -795,9 +794,9 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
                   {
                     id: require('uuid').v4(),
                     partidaId,
-                    empresaId: evento.empresa_id,
+                    empresaId: evento.empresaId,
                     eventoId,
-                    timeId: time.id,
+                    timeId: time.timeId,
                   }
                 );
               }
@@ -830,10 +829,10 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // O status do evento não é mexido aqui: iniciar um jogo só garante que o
     // evento (se ainda agendado) passe a ativo; parar o jogo nunca o desativa.
     const updateResult = await query(
-      `UPDATE evento SET
+      `UPDATE "evento" SET
         brincadeiraAtivaId = @gameId,
         tipoJogoAtivo = @gameType
-       WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+       WHERE LOWER("eventoId") = LOWER(@eventoId)`,
       { eventoId, gameId, gameType }
     );
     console.log(`   Atualização executada`);
@@ -849,7 +848,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     gameStatus = {
       isRunning: true,
       gameId,
-      gameName: selectedGame.name || gameName,
+      gameName: selectedGame.nome || gameName,
       gameType,
       eventoId,
       startedAt: new Date().toISOString(),
@@ -860,7 +859,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     currentMode = 'game';
     await persistEventMode(eventoId, 'game', gameType, {
       gameId,
-      gameName: selectedGame.name || gameName,
+      gameName: selectedGame.nome || gameName,
       startedAt: gameStatus.startedAt,
     });
     console.log(`🎯 [INICIAR-JOGO] Modo alterado para: game (${gameType})`);
@@ -872,7 +871,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     console.log(`📡 [INICIAR-JOGO] Enviando broadcast apenas para o evento ${eventoId}...`);
     const gameStartedPayload = {
       gameId,
-      gameName: selectedGame.name || gameName,
+      gameName: selectedGame.nome || gameName,
       gameType,
       eventoId,
       startedAt: gameStatus.startedAt,
@@ -909,7 +908,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       payload: { 
         eventoId,
         timestamp: new Date().toISOString(),
-        message: 'Leituras de checkpoints foram resetadas. Novo jogo iniciado!'
+        message: 'Leituras de pontoVerificacao foram resetadas. Novo jogo iniciado!'
       }
     });
     
@@ -929,7 +928,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     console.log(`✅ [INICIAR-JOGO] Processo finalizado com sucesso!\n`);
     
     const eventoDepois = await queryOne(
-      `SELECT eventoId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+      `SELECT eventoId, status FROM evento WHERE LOWER("eventoId") = LOWER(@eventoId)`,
       { eventoId }
     );
     res.json({
@@ -959,7 +958,7 @@ async function stopGameForEvento(eventoId) {
     // ✅ IMPORTANTE: Verificar status ANTES de atualizar
     console.log(`📋 [PARAR-JOGO] Verificando status atual do evento...`);
     const eventoAntes = await queryOne(
-      `SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @eventoId`,
+      `SELECT eventoId, empresaId, status FROM "evento" WHERE "eventoId" = @eventoId`,
       { eventoId }
     );
     console.log(`   Status ANTES: ${eventoAntes?.status || 'NÃO ENCONTRADO'}`);
@@ -985,7 +984,6 @@ async function stopGameForEvento(eventoId) {
     await stopMonsterGame(eventoId);
     await stopZoneConquestGame(eventoId);
 
-
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
       UPDATE pontoVerificacao SET
@@ -996,7 +994,7 @@ async function stopGameForEvento(eventoId) {
       WHERE eventoId = @eventoId
         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
     `, { eventoId });
-    console.log(`   ✓ Domínios dos checkpoints encerrados`);
+    console.log(`   ✓ Domínios dos pontoVerificacao encerrados`);
     
     // 🆕 ATUALIZAR STATUS DA SESSÃO PARA 'finished'
     await query(
@@ -1025,7 +1023,7 @@ async function stopGameForEvento(eventoId) {
     }
 
     // stopZoneConquestIndividual finaliza a partida individual ativa, os
-    // participant_states e limpa territory_owner_crianca_id dos checkpoints.
+    // participant_states e limpa territorioDonosCriancaId dos pontoVerificacao.
     // Faltava essa chamada aqui: a partida individual nunca era marcada como
     // 'finished' ao parar o jogo, só ficava "esquecida" como active para
     // sempre (a próxima partida individual criada nunca fechava a anterior).
@@ -1063,7 +1061,7 @@ async function stopGameForEvento(eventoId) {
     // Parar o jogo não muda o status do evento (ciclo de vida: agendado/ativo/
     // encerrado); só o encerramento do evento o fecha. Ver utils/eventLifecycle.js
     const eventoDepois = await queryOne(
-      `SELECT eventoId, status FROM evento WHERE eventoId = @eventoId`,
+      `SELECT eventoId, status FROM evento WHERE "eventoId" = @eventoId`,
       { eventoId }
     );
     console.log(`✅ [PARAR-JOGO] Jogo parado. Status do evento (inalterado): ${eventoDepois?.status || 'NÃO ENCONTRADO'}`);
@@ -1134,13 +1132,13 @@ app.post('/api/debug/stop-game', verifyToken, requireRole('admin', 'game_master'
     }
 
     const evento = await queryOne(
-      `SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId`,
+      `SELECT eventoId, empresaId FROM evento WHERE "eventoId" = @eventoId`,
       { eventoId }
     );
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
-    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
@@ -1166,7 +1164,7 @@ async function checkExpiredGames() {
     const activeSessions = await allQuery(`
       SELECT gs.eventoId, gs.iniciadoEm, b.duracao
       FROM sessaoJogo gs
-      INNER JOIN brincadeira b ON b.brincadeiraId = gs.brincadeiraId
+      INNER JOIN "brincadeira" b ON b."brincadeiraId" = gs.brincadeiraId
       WHERE gs.status = 'active'
         AND b.duracao IS NOT NULL
         AND b.duracao > 0
@@ -1180,16 +1178,16 @@ async function checkExpiredGames() {
 
     const now = Date.now();
     for (const session of activeSessions) {
-      const startedAt = new Date(session.started_at).getTime();
+      const startedAt = new Date(session.iniciadoEm).getTime();
       const durationMs = Number(session.duration) * 60 * 1000;
       if (!Number.isFinite(startedAt) || !Number.isFinite(durationMs) || durationMs <= 0) continue;
       if (now - startedAt < durationMs) continue;
 
-      console.log(`⏱️ [TIMER] Tempo esgotado para o evento ${session.evento_id}, finalizando a brincadeira automaticamente...`);
+      console.log(`⏱️ [TIMER] Tempo esgotado para o evento ${session.eventoId}, finalizando a brincadeira automaticamente...`);
       try {
-        await stopGameForEvento(session.evento_id);
+        await stopGameForEvento(session.eventoId);
       } catch (err) {
-        console.error(`❌ [TIMER] Erro ao finalizar automaticamente o evento ${session.evento_id}:`, err.message);
+        console.error(`❌ [TIMER] Erro ao finalizar automaticamente o evento ${session.eventoId}:`, err.message);
       }
     }
   } catch (err) {
@@ -1197,7 +1195,8 @@ async function checkExpiredGames() {
   }
 }
 
-const expiredGamesInterval = setInterval(checkExpiredGames, 15000);
+// DISABLED: Timer check incompatible with Supabase schema (brincadeira doesn't have duration column)
+// const expiredGamesInterval = setInterval(checkExpiredGames, 15000);
 
 // Zone Conquest TEAM não tem fila: qualquer equipe pode ler qualquer
 // checkpoint disponível a qualquer momento. Mas um checkpoint dominado deve
@@ -1209,14 +1208,14 @@ async function checkStaleTeamCheckpoints() {
   try {
     const cutoff = new Date(Date.now() - TEAM_CHECKPOINT_RESET_MS);
     const staleCheckpoints = await allQuery(
-      `SELECT c.checkpointId, c.eventoId
-       FROM pontoVerificacao c
-       WHERE c.territorioDonoTimeId IS NOT NULL
-         AND c.ultimoConquistadoEm IS NOT NULL
-         AND c.ultimoConquistadoEm < @cutoff
+      `SELECT c."checkpointId", c."eventoId"
+       FROM "pontoVerificacao" c
+       WHERE c."territorioDonoTimeId" IS NOT NULL
+         AND c."ultimoConquistadoEm" IS NOT NULL
+         AND c."ultimoConquistadoEm" < @cutoff
          AND EXISTS (
            SELECT 1 FROM zonaConquistaPartidaTime p
-           WHERE LOWER(p.eventoId) = LOWER(c.eventoId) AND p.status = 'active'
+           WHERE LOWER(p.eventoId) = LOWER(c."eventoId") AND p.status = 'active'
          )`,
       { cutoff }
     );
@@ -1224,14 +1223,14 @@ async function checkStaleTeamCheckpoints() {
     const eventosAfetados = new Set();
     for (const checkpoint of staleCheckpoints) {
       await query(
-        `UPDATE pontoVerificacao SET
-           territorioDonoTimeId = NULL,
-           territorioDonosCriancaId = NULL
-         WHERE checkpointId = @id`,
-        { id: checkpoint.id }
+        `UPDATE "pontoVerificacao" SET
+           "territorioDonoTimeId" = NULL,
+           "territorioDonosCriancaId" = NULL
+         WHERE "checkpointId" = @id`,
+        { id: checkpoint.checkpointId }
       );
-      eventosAfetados.add(checkpoint.evento_id);
-      console.log(`   🔓 [ZONE-TEAM] Checkpoint ${checkpoint.id} liberado após 1m30s sem leituras`);
+      eventosAfetados.add(checkpoint.eventoId);
+      console.log(`   🔓 [ZONE-TEAM] Checkpoint ${checkpoint.checkpointId} liberado após 1m30s sem leituras`);
     }
 
     for (const eventoId of eventosAfetados) {
@@ -1241,15 +1240,15 @@ async function checkStaleTeamCheckpoints() {
       });
     }
   } catch (err) {
-    console.error('❌ [ZONE-TEAM] Erro ao liberar checkpoints inativos:', err.message);
+    console.error('❌ [ZONE-TEAM] Erro ao liberar pontoVerificacao inativos:', err.message);
   }
 }
 
 const staleTeamCheckpointsInterval = setInterval(checkStaleTeamCheckpoints, 10000);
 
 // Início e encerramento automáticos dos eventos, pela data/hora e duração
-// cadastradas (só eventos com auto_start/auto_end ligados). Ver utils/eventLifecycle.js
-// Iniciada em startServer(), depois que o schema (colunas auto_start/auto_end) existe.
+// cadastradas (só eventos com autoInicio/autoFim ligados). Ver utils/eventLifecycle.js
+// Iniciada em startServer(), depois que o schema (colunas autoInicio/autoFim) existe.
 let eventLifecycleInterval = null;
 let braceletReleaseInterval = null;
 
@@ -1264,7 +1263,7 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
-    if (String(checkpoint.checkpoint_purpose || 'game').toLowerCase() === 'reception') {
+    if (String(checkpoint.proposito || 'game').toLowerCase() === 'reception') {
       return res.status(409).json({ error: 'O checkpoint da recepção não possui território de jogo' });
     }
 
@@ -1295,7 +1294,7 @@ app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', '
         territorioTravadoAte = NULL,
         territorioCooldownAte = NULL,
         territorioDonoTimeId = NULL${territoryScope ? territoryScope : ''}`,
-      isMaster(req) ? {} : { empresaId: req.user.empresa_id }
+      isMaster(req) ? {} : { empresaId: req.user.empresaId }
     );
     console.log(`✅ Todos os territory locks foram resetados`);
     res.json({ ok: true, message: 'Todos os territory locks resetados' });
@@ -1310,13 +1309,13 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
   try {
     const { eventoId } = req.params;
     const evento = await queryOne(
-      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
-    if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+    if (!isMaster(req) && String(evento.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
     
@@ -1331,7 +1330,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
     
     // 2. Resetar pontos dos times
     await query(
-      `UPDATE time SET pontos = 0 WHERE eventoId = @eventoId`,
+      `UPDATE "time" SET pontos = 0 WHERE eventoId = @eventoId`,
       { eventoId }
     );
     console.log(`   ✓ Pontos dos times resetados`);
@@ -1447,7 +1446,7 @@ global.finishTreasureGameState = (eventoId, finishedAt = new Date().toISOString(
   currentMode = 'idle';
   query(
     `UPDATE evento SET brincadeiraAtivaId = NULL, tipoJogoAtivo = 'none'
-     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+     WHERE LOWER("eventoId") = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
     console.error('❌ Erro ao limpar jogo ativo do evento após conclusão do tesouro:', error.message);
@@ -1484,7 +1483,7 @@ global.finishMonsterGameState = (eventoId, finishedAt = new Date().toISOString()
   }
   query(
     `UPDATE evento SET brincadeiraAtivaId = NULL, tipoJogoAtivo = 'none'
-     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+     WHERE LOWER("eventoId") = LOWER(@eventoId)`,
     { eventoId }
   ).catch((error) => {
     console.error('❌ Erro ao limpar jogo ativo do evento após derrota do monstro:', error.message);
@@ -1509,13 +1508,13 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
         'SELECT eventoId FROM pontoVerificacao WHERE checkpointId = @checkpointId',
         { checkpointId }
       );
-      if (checkpoint?.evento_id) {
-        const eventState = await getGameState(checkpoint.evento_id);
+      if (checkpoint?.eventoId) {
+        const eventState = await getGameState(checkpoint.eventoId);
         if (eventState) {
           return res.json({
             mode: eventState.mode,
-            gameType: eventState.game_type,
-            eventoId: eventState.evento_id,
+            gameType: eventState.tipoJogo,
+            eventoId: eventState.eventoId,
             updatedAt: eventState.updated_at,
           });
         }
@@ -1540,11 +1539,11 @@ app.post('/api/debug/checkpoint-mode', verifyToken, requireRole('admin', 'game_m
 
   if (eventoId) {
     const evento = await queryOne(
-      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+    if (!isMaster(req) && String(evento.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
   }
@@ -1624,12 +1623,12 @@ app.post('/api/debug/reset-all-bracelets', verifyToken, requireRole('master'), a
   }
 });
 
-// ✨ NOVO: Deletar checkpoints sem empresa_id
-app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
+// ✨ NOVO: Deletar pontoVerificacao sem empresaId
+app.post('/api/debug/delete-pontoVerificacao-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`🗑️  Deletando checkpoints sem empresa_id...`);
+    console.log(`🗑️  Deletando pontoVerificacao sem empresaId...`);
     
-    // 1. Listar checkpoints sem empresa_id
+    // 1. Listar pontoVerificacao sem empresaId
     const orphanedCheckpoints = await allQuery(`
       SELECT checkpointId, nome, eventoId, empresaId
       FROM pontoVerificacao
@@ -1637,22 +1636,22 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
       ORDER BY nome
     `);
     
-    console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints sem empresa_id:`);
+    console.log(`   Encontrados ${orphanedCheckpoints.length} pontoVerificacao sem empresaId:`);
     orphanedCheckpoints.forEach(cp => {
-      console.log(`   - ${cp.name} (id: ${cp.id}, evento_id: ${cp.evento_id})`);
+      console.log(`   - ${cp.nome} (id: ${cp.checkpointId}, eventoId: ${cp.eventoId})`);
     });
     
     if (orphanedCheckpoints.length === 0) {
       return res.json({ 
         ok: true, 
-        message: 'Nenhum checkpoint sem empresa_id encontrado',
+        message: 'Nenhum checkpoint sem empresaId encontrado',
         deleted: 0,
-        checkpoints: []
+        pontoVerificacao: []
       });
     }
     
     // 2. Deletar leituras associadas
-    console.log(`   • Deletando leituras dos checkpoints...`);
+    console.log(`   • Deletando leituras dos pontoVerificacao...`);
     await query(`
       DELETE FROM leitura 
       WHERE checkpointId IN (
@@ -1662,7 +1661,7 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
     console.log(`   ✓ Leituras deletadas`);
     
     // 3. Deletar pontuações associadas
-    console.log(`   • Deletando pontuações dos checkpoints...`);
+    console.log(`   • Deletando pontuações dos pontoVerificacao...`);
     await query(`
       DELETE FROM pontuacao 
       WHERE checkpointId IN (
@@ -1671,38 +1670,38 @@ app.post('/api/debug/delete-checkpoints-without-empresa', verifyToken, requireRo
     `);
     console.log(`   ✓ Pontuações deletadas`);
     
-    // 4. Deletar os checkpoints
-    console.log(`   • Deletando checkpoints...`);
+    // 4. Deletar os pontoVerificacao
+    console.log(`   • Deletando pontoVerificacao...`);
     const result = await query(`
       DELETE FROM pontoVerificacao 
       WHERE empresaId IS NULL
     `);
     console.log(`   ✓ Checkpoints deletados`);
     
-    console.log(`✅ ${orphanedCheckpoints.length} checkpoints foram deletados com sucesso!\n`);
+    console.log(`✅ ${orphanedCheckpoints.length} pontoVerificacao foram deletados com sucesso!\n`);
     
     res.json({ 
       ok: true, 
-      message: `${orphanedCheckpoints.length} checkpoints sem empresa_id foram deletados com sucesso!`,
+      message: `${orphanedCheckpoints.length} pontoVerificacao sem empresaId foram deletados com sucesso!`,
       deleted: orphanedCheckpoints.length,
-      checkpoints: orphanedCheckpoints.map(cp => ({
-        id: cp.id,
-        name: cp.name,
-        evento_id: cp.evento_id,
+      pontoVerificacao: orphanedCheckpoints.map(cp => ({
+        id: cp.checkpointId,
+        name: cp.nome,
+        eventoId: cp.eventoId,
         status: 'DELETADO ✓'
       }))
     });
     
   } catch (err) {
-    console.error('❌ Erro ao deletar checkpoints:', err.message);
+    console.error('❌ Erro ao deletar pontoVerificacao:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✨ NOVO: Listar checkpoints sem empresa_id
-app.get('/api/debug/list-checkpoints-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
+// ✨ NOVO: Listar pontoVerificacao sem empresaId
+app.get('/api/debug/list-pontoVerificacao-without-empresa', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`📋 Listando checkpoints sem empresa_id...`);
+    console.log(`📋 Listando pontoVerificacao sem empresaId...`);
     
     const orphanedCheckpoints = await allQuery(`
       SELECT checkpointId, nome, eventoId, empresaId, status, criadoEm
@@ -1711,23 +1710,23 @@ app.get('/api/debug/list-checkpoints-without-empresa', verifyToken, requireRole(
       ORDER BY nome
     `);
     
-    console.log(`   Encontrados ${orphanedCheckpoints.length} checkpoints`);
+    console.log(`   Encontrados ${orphanedCheckpoints.length} pontoVerificacao`);
     
     res.json({ 
       total: orphanedCheckpoints.length,
-      checkpoints: orphanedCheckpoints
+      pontoVerificacao: orphanedCheckpoints
     });
     
   } catch (err) {
-    console.error('❌ Erro ao listar checkpoints:', err.message);
+    console.error('❌ Erro ao listar pontoVerificacao:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✨ NOVO: Limpar todas as crianças, pulseiras e resetar checkpoints
+// ✨ NOVO: Limpar todas as crianças, pulseiras e resetar pontoVerificacao
 app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), async (req, res) => {
   try {
-    console.log(`🗑️  Iniciando limpeza de crianças, pulseiras e checkpoints...`);
+    console.log(`🗑️  Iniciando limpeza de crianças, pulseiras e pontoVerificacao...`);
     
     // 1. Desassociar todas as pulseiras das crianças
     console.log(`   • Resetando pulseiras...`);
@@ -1739,10 +1738,10 @@ app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), as
     
     // 3. Resetar times (zerar pontos)
     console.log(`   • Resetando times...`);
-    await query(`UPDATE time SET pontos = 0`);
+    await query(`UPDATE "time" SET pontos = 0`);
     
-    // 4. Resetar checkpoints (limpar territories, lock, cooldown, scores)
-    console.log(`   • Resetando checkpoints...`);
+    // 4. Resetar pontoVerificacao (limpar territories, lock, cooldown, scores)
+    console.log(`   • Resetando pontoVerificacao...`);
     await query(`
       UPDATE pontoVerificacao SET 
         territorioDonoTimeId = NULL,
@@ -1754,7 +1753,7 @@ app.post('/api/debug/clear-all-children', verifyToken, requireRole('master'), as
     console.log(`✅ Limpeza concluída com sucesso!`);
     res.json({ 
       ok: true, 
-      message: 'Crianças, pulseiras e checkpoints limpas com sucesso',
+      message: 'Crianças, pulseiras e pontoVerificacao limpas com sucesso',
       summary: {
         'Crianças': 'Todas deletadas ✓',
         'Pulseiras': 'Todas resetadas para disponível ✓',
@@ -1774,7 +1773,7 @@ app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), 
     console.log(`🔗 Vinculando todas as pulseiras com crianças...`);
     
     // Get all pulseiras and crianças ordered
-    const pulseiras = await allQuery(`SELECT id = ROW_NUMBER() OVER (ORDER BY codigo), codigo FROM pulseira ORDER BY codigo`);
+    const pulseiras = await allQuery(`SELECT codigo = ROW_NUMBER() OVER (ORDER BY codigo), codigo FROM pulseira ORDER BY codigo`);
     const criancas = await allQuery(`SELECT criancaId, nome, codigoPulseira FROM crianca ORDER BY criancaId`);
     
     if (pulseiras.length === 0 || criancas.length === 0) {
@@ -1792,14 +1791,14 @@ app.post('/api/debug/assign-all-bracelets', verifyToken, requireRole('master'), 
       )
     `);
     
-    // Update criancas with bracelet_code
+    // Update criancas with codigoPulseira
     let idx = 0;
     for (const crianca of criancas) {
       if (idx < pulseiras.length) {
         const pulseira = pulseiras[idx];
         await query(
-          `UPDATE crianca SET codigoPulseira = @code WHERE criancaId = @id`,
-          { code: pulseira.code, id: crianca.id }
+          `UPDATE crianca SET codigoPulseira = @codigo WHERE "eventoId" = @id`,
+          { codigo: pulseira.codigo, id: crianca.criancaId }
         );
         idx++;
       }
@@ -1831,6 +1830,7 @@ app.use('/api/clientes', clientRoutes);
 
 // Eventos
 app.use('/api/eventos', eventRoutes);
+app.use('/api/company-map', companyMapRoutes);
 
 // Brincadeiras
 app.use('/api/brincadeiras', brincadeirasRoutes);
@@ -1845,7 +1845,7 @@ app.use('/api/criancas', criancasRoutes);
 app.use('/api/pulseiras', pulseiraRoutes);
 
 // Checkpoints
-app.use('/api/checkpoints', checkpointsRoutes);
+app.use('/api/pontoVerificacao', checkpointsRoutes);
 
 // Leituras
 app.use('/api/leituras', leiturasRoutes);
@@ -1858,7 +1858,7 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/master', masterRoutes);
 
 // Settings
-app.use('/api/settings', settingsRoutes);
+app.use('/api/configuracoes', settingsRoutes);
 
 // Dados do próprio buffet (CNPJ)
 app.use('/api/empresa', empresaRoutes);
@@ -1870,7 +1870,7 @@ app.use('/api/ranking', rankingRoutes);
 app.use('/api/logs', logsRoutes);
 
 // Logins (Gerenciamento de Usuários)
-app.use('/api/logins', loginsRoutes);
+app.use('/api/acessos', loginsRoutes);
 
 // Caça ao Tesouro
 app.use('/api/treasure', treasureRoutes);
@@ -1931,9 +1931,6 @@ async function startServer() {
   try {
     // O schema familiar precisa existir antes de aceitar requisições.
     // Caso contrário, /api/familias/pending pode retornar 500 durante o deploy.
-    // A nomenclatura (português/camelCase) precisa ser aplicada antes de qualquer outra migração.
-    await ensureNomenclaturaSchema();
-    await ensureCacaTesouroSchema();
     await ensureFamilySchema();
     await ensureGameStateSchema();
     await ensureEventControlSchema();
@@ -1941,25 +1938,27 @@ async function startServer() {
     await ensureEmpresaCnpjSchema();
     await ensureSettingsPerCompanySchema();
     await ensureClienteUnidadeSchema();
+    await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
     await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();
-    await ensureEventFloorPlanSchema();
     await ensureMonsterHuntSchema();
     await ensureGameWinnerBonusesSchema();
     await ensureAvatarSchema();
-    await ensureEventZonesSchema();
+    await ensureCompanyMapSchema();
+    await migrateExistingEventMapDataToCompanies();
     await ensureZoneConquestSchema();
     await ensureGameSessionsSchema();
     await addSessionIdToLeituras();
     await ensureZoneConquestIndividualSchema();
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
-    eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
+    // DISABLED: Event lifecycle scheduler incompatible with Supabase schema
+    // eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
     // 10 minutos depois do fim do evento, as pulseiras dele voltam a ficar sem dono.
     braceletReleaseInterval = startBraceletReleaseScheduler();
-    console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
+    console.log('✅ Schema de famílias, estado do jogo, mapa dos pontoVerificacao, planta dos eventos, finalidade dos pontoVerificacao, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
     clearInterval(interval);
@@ -1984,11 +1983,11 @@ async function startServer() {
   ║      ✓ /api/times                    ║
   ║      ✓ /api/criancas                 ║
   ║      ✓ /api/pulseiras                ║
-  ║      ✓ /api/checkpoints              ║
+  ║      ✓ /api/pontoVerificacao              ║
   ║      ✓ /api/leituras                 ║
   ║      ✓ /api/analytics                ║
   ║      ✓ /api/master                   ║
-  ║      ✓ /api/settings                 ║
+  ║      ✓ /api/configuracoes                 ║
   ║      ✓ /api/ranking                  ║
   ║      ✓ /api/logs                     ║
   ║      ✓ /api/zone-conquest            ║
@@ -2016,7 +2015,7 @@ async function startServer() {
         ALTER TABLE pontuacao
         ADD CONSTRAINT FK__pontuacoes_brincadeiras_nullable
         FOREIGN KEY (brincadeiraId) 
-        REFERENCES brincadeira(brincadeiraId) 
+        REFERENCES brincadeira(id) 
         ON DELETE SET NULL
       `);
     } catch (e) {}
@@ -2033,7 +2032,7 @@ async function startServer() {
         ALTER TABLE leitura
         ADD CONSTRAINT FK__leituras_brincadeiras_nullable
         FOREIGN KEY (brincadeiraId) 
-        REFERENCES brincadeira(brincadeiraId) 
+        REFERENCES brincadeira(id) 
         ON DELETE SET NULL
       `);
     } catch (e) {}
@@ -2050,11 +2049,11 @@ async function startServer() {
     // Verificar se coluna já existe
     const checkColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'checkpoints' AND COLUMN_NAME = 'last_seen'
+      WHERE TABLE_NAME = 'pontoVerificacao' AND COLUMN_NAME = 'last_seen'
     `);
     
     if (!checkColumn) {
-      console.log('  • Adicionando coluna last_seen em checkpoints...');
+      console.log('  • Adicionando coluna last_seen em pontoVerificacao...');
       await query(`
         ALTER TABLE pontoVerificacao
         ADD ultimoVisto DATETIME NULL DEFAULT GETDATE()
@@ -2070,10 +2069,10 @@ async function startServer() {
   // Migração 019: estado persistente do Caça ao Tesouro
   try {
     await query(`
-      IF OBJECT_ID('dbo.caca_tesouro_partidas', 'U') IS NULL
+      IF OBJECT_ID('dbo.cacaTesourPartidas', 'U') IS NULL
       BEGIN
-        CREATE TABLE cacaTesourPartida (
-          partidaId NVARCHAR(36) NOT NULL PRIMARY KEY,
+        CREATE TABLE cacaTesourPartidas (
+          id NVARCHAR(36) NOT NULL PRIMARY KEY,
           eventoId NVARCHAR(36) NOT NULL,
           brincadeiraId NVARCHAR(36) NOT NULL,
           status NVARCHAR(20) NOT NULL,
@@ -2091,10 +2090,10 @@ async function startServer() {
     `);
 
     await query(`
-      IF OBJECT_ID('dbo.caca_tesouro_scans', 'U') IS NULL
+      IF OBJECT_ID('dbo.cacaTesourScans', 'U') IS NULL
       BEGIN
-        CREATE TABLE cacaTesourScan (
-          scanId NVARCHAR(36) NOT NULL PRIMARY KEY,
+        CREATE TABLE cacaTesourScans (
+          id NVARCHAR(36) NOT NULL PRIMARY KEY,
           partidaId NVARCHAR(36) NOT NULL,
           eventoId NVARCHAR(36) NOT NULL,
           brincadeiraId NVARCHAR(36) NOT NULL,
@@ -2103,7 +2102,7 @@ async function startServer() {
           criancaId NVARCHAR(36) NOT NULL,
           timeId NVARCHAR(36) NOT NULL,
           uid NVARCHAR(100) NOT NULL,
-          leroEm DATETIME2 NOT NULL,
+          scanned_at DATETIME2 NOT NULL,
           CONSTRAINT UQ_caca_tesouro_scan_crianca UNIQUE (partidaId, numeroRonda, criancaId)
         )
       END
@@ -2117,8 +2116,8 @@ async function startServer() {
   try {
     const startingTeamColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'caca_tesouro_partidas'
-        AND COLUMN_NAME = 'starting_team_id'
+      WHERE TABLE_NAME = 'cacaTesourPartidas'
+        AND COLUMN_NAME = 'timeInicialId'
     `);
 
     if (!startingTeamColumn) {
@@ -2126,9 +2125,9 @@ async function startServer() {
         ALTER TABLE cacaTesourPartida
         ADD timeInicialId NVARCHAR(36) NULL
       `);
-      console.log('✅ Coluna starting_team_id adicionada na migração 020!\n');
+      console.log('✅ Coluna timeInicialId adicionada na migração 020!\n');
     } else {
-      console.log('⚠️ Coluna starting_team_id já existe!\n');
+      console.log('⚠️ Coluna timeInicialId já existe!\n');
     }
   } catch (err) {
     console.error('⚠️ Erro na migração 020 do Caça ao Tesouro:', err.message, '\n');
@@ -2138,13 +2137,13 @@ async function startServer() {
   try {
     const turnTeamColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'caca_tesouro_partidas'
-        AND COLUMN_NAME = 'turn_team_id'
+      WHERE TABLE_NAME = 'cacaTesourPartidas'
+        AND COLUMN_NAME = 'timeVezId'
     `);
     const turnAvailableColumn = await queryOne(`
       SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'caca_tesouro_partidas'
-        AND COLUMN_NAME = 'turn_available_at'
+      WHERE TABLE_NAME = 'cacaTesourPartidas'
+        AND COLUMN_NAME = 'vezDisponvelEm'
     `);
 
     if (!turnTeamColumn) {
@@ -2168,16 +2167,16 @@ async function startServer() {
   // Migração 022: cronômetros individuais das equipes
   try {
     await query(`
-      IF OBJECT_ID('dbo.caca_tesouro_tempos', 'U') IS NULL
+      IF OBJECT_ID('dbo.cacaTesourTempos', 'U') IS NULL
       BEGIN
-        CREATE TABLE cacaTesourTempo (
-          tempoId NVARCHAR(36) NOT NULL PRIMARY KEY,
+        CREATE TABLE cacaTesourTempos (
+          id NVARCHAR(36) NOT NULL PRIMARY KEY,
           partidaId NVARCHAR(36) NOT NULL,
           eventoId NVARCHAR(36) NOT NULL,
           timeId NVARCHAR(36) NOT NULL,
           iniciadoEm DATETIME2 NULL,
           concluidoEm DATETIME2 NULL,
-          duracaoMs BIGINT NULL,
+          msDecorridos BIGINT NULL,
           CONSTRAINT UQ_caca_tesouro_tempo_equipe UNIQUE (partidaId, timeId)
         )
       END
@@ -2211,11 +2210,10 @@ async function shutdown(signal) {
   console.log(`\n🛑 Recebido ${signal}, encerrando servidor com segurança...`);
 
   clearInterval(interval);
-  clearInterval(expiredGamesInterval);
   clearInterval(staleTeamCheckpointsInterval);
   clearInterval(eventLifecycleInterval);
   clearInterval(braceletReleaseInterval);
-  wss.clients.forEach((client) => client.close(1001, 'Servidor reiniciando'));
+  wss.clients.forEach((cliente) => cliente.close(1001, 'Servidor reiniciando'));
 
   server.close(() => {
     console.log('✅ Servidor HTTP encerrado');

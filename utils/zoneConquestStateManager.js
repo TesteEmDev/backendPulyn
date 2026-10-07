@@ -10,7 +10,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 async function initializeCheckpointStates(partidaId, empresaId, eventoId, gameType = 'team') {
   try {
     const checkpoints = await allQuery(
-      `SELECT checkpointId, nome FROM pontoVerificacao 
+      `SELECT checkpointId, nome FROM "pontoVerificacao" 
        WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND (proposito IS NULL OR proposito = 'game')`,
       { eventoId }
@@ -28,7 +28,7 @@ async function initializeCheckpointStates(partidaId, empresaId, eventoId, gameTy
             partidaId,
             empresaId,
             eventoId,
-            checkpointId: cp.id,
+            checkpointId: cp.checkpointId,
             ownerType: gameType, // 'team' ou 'individual'
           }
         );
@@ -70,21 +70,20 @@ async function getCheckpointStates(partidaId, eventoId) {
  */
 async function updateCheckpointState(checkpointStateId, updates) {
   try {
-    const columns = { current_owner_id: 'donoAtualId', protected_until: 'protegidoAte', last_conquered_at: 'ultimoConquistadoEm', conquest_count: 'totalConquistas' };
-    const allowedFields = Object.keys(columns);
+    const allowedFields = ['donoAtualId', 'protegidoAte', 'ultimoConquistadoEm', 'totalConquistas'];
     const setClauses = [];
     const params = { id: checkpointStateId };
 
     Object.entries(updates).forEach(([key, value]) => {
       if (allowedFields.includes(key)) {
-        setClauses.push(`${columns[key]} = @${key}`);
+        setClauses.push(`${key} = @${key}`);
         params[key] = value;
       }
     });
 
     if (setClauses.length === 0) return null;
 
-    setClauses.push('atualizadoEm = CURRENT_TIMESTAMP');
+    setClauses.push('updated_at = CURRENT_TIMESTAMP');
 
     const result = await queryOne(
       `UPDATE zonaConquistaEstadoCheckpoint
@@ -137,7 +136,7 @@ async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = '
 
     // Contar checkpoints por zona
     const checkpointsByZone = await allQuery(
-      `SELECT zona, COUNT(*) as count FROM pontoVerificacao
+      `SELECT zona, COUNT(*) as count FROM "pontoVerificacao"
        WHERE LOWER(eventoId) = LOWER(@eventoId)
        GROUP BY zona`,
       { eventoId }
@@ -145,7 +144,7 @@ async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = '
 
     const zoneCheckpointMap = new Map();
     checkpointsByZone.forEach((row) => {
-      zoneCheckpointMap.set(row.zone?.toLowerCase(), row.count || 0);
+      zoneCheckpointMap.set(row.zona?.toLowerCase(), row.count || 0);
     });
 
     await withTransaction(async (tx) => {
@@ -156,7 +155,7 @@ async function initializeZoneStates(partidaId, empresaId, eventoId, gameType = '
         await tx.query(
           `INSERT INTO zonaConquistaEstadoZona
            (id, partidaId, empresaId, eventoId, zonaId, donoAtualId, tipoDono, disputada, totalCheckpoints, checkpointsConquistados, ultimaAtualizacaoEm)
-           VALUES (@id, @partidaId, @empresaId, @eventoId, @zoneId, NULL, @ownerType, 0, @checkpointsCount, 0, NULL)`,
+           VALUES (@id, @partidaId, @empresaId, @eventoId, @zoneId, NULL, @ownerType, FALSE, @checkpointsCount, 0, NULL)`,
           {
             id: stateId,
             partidaId,
@@ -205,21 +204,20 @@ async function getZoneStates(partidaId, eventoId) {
  */
 async function updateZoneState(zoneStateId, updates) {
   try {
-    const columns = { current_owner_id: 'donoAtualId', is_disputed: 'disputada', checkpoints_owned: 'checkpointsConquistados', last_updated_at: 'ultimaAtualizacaoEm' };
-    const allowedFields = Object.keys(columns);
+    const allowedFields = ['donoAtualId', 'disputada', 'checkpointsConquistados', 'ultimaAtualizacaoEm'];
     const setClauses = [];
     const params = { id: zoneStateId };
 
     Object.entries(updates).forEach(([key, value]) => {
       if (allowedFields.includes(key)) {
-        setClauses.push(`${columns[key]} = @${key}`);
+        setClauses.push(`${key} = @${key}`);
         params[key] = value;
       }
     });
 
     if (setClauses.length === 0) return null;
 
-    setClauses.push('atualizadoEm = CURRENT_TIMESTAMP');
+    setClauses.push('updated_at = CURRENT_TIMESTAMP');
 
     const result = await queryOne(
       `UPDATE zonaConquistaEstadoZona

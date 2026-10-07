@@ -9,7 +9,7 @@ function httpError(message, statusCode) {
   return error;
 }
 
-const serialize = (row) => ({ id: row.id, name: row.name });
+const serialize = (row) => ({ id: row.id, name: row.nome });
 
 // A primeira vez que a empresa usa a brincadeira, ganha a lista inicial. Objetos removidos continuam na
 // tabela (status 'removed'), então apagar tudo não faz a lista inicial voltar sozinha.
@@ -38,7 +38,7 @@ async function assertNameFree(empresaId, name, exceptId = null) {
     `SELECT id, nome FROM objetoBrincadeiraParalela WHERE empresaId = @empresaId AND status = 'active'`,
     { empresaId }
   );
-  if (rows.some((row) => row.id !== exceptId && sameName(row.name, name))) {
+  if (rows.some((row) => row.id !== exceptId && sameName(row.nome, name))) {
     throw httpError('Este objeto já está na lista', 409);
   }
 }

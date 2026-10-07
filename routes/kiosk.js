@@ -19,7 +19,7 @@ function httpError(message, statusCode) {
 }
 
 function isDuplicateKeyError(error) {
-  return error?.code === '23505' || error?.number === 2601 || error?.number === 2627;
+  return error?.codigo === '23505' || error?.number === 2601 || error?.number === 2627;
 }
 
 // O kiosk tem uma superfície de API própria e não recebe acesso às rotas administrativas.
@@ -40,30 +40,30 @@ router.get('/events', async (req, res) => {
        WHERE e.empresaId = @empresaId
          AND LOWER(COALESCE(e.status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
        ORDER BY e.data DESC`,
-      { empresaId: req.user.empresa_id }
+      { empresaId: req.user.empresaId }
     );
     res.json(events || []);
   } catch (error) {
-    console.error('❌ Kiosk: erro ao carregar eventos:', error.message);
-    res.status(500).json({ error: 'Não foi possível carregar os eventos' });
+    console.error('❌ Kiosk: erro ao carregar evento:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os evento' });
   }
 });
 
-// Recupera leituras recentes caso o navegador perca o broadcast WebSocket.
-// A fila é somente do processo atual e fica limitada às leituras recentes.
+// Recupera leitura recentes caso o navegador perca o broadcast WebSocket.
+// A fila é somente do processo atual e fica limitada às leitura recentes.
 router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const { queryOne } = require('../database');
     const event = await queryOne(
       `SELECT eventoId, empresaId, status FROM evento
        WHERE eventoId = @eventId AND empresaId = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const since = Number(req.query.since || 0);
-    const eventKey = String(event.id).trim().toLowerCase();
+    const eventKey = String(event.eventoId).trim().toLowerCase();
     const queue = global.receptionReadingQueues?.get(eventKey) || [];
     const readings = queue.filter(reading => Number(reading.receivedAt || 0) > since);
     res.json({ readings });
@@ -80,48 +80,48 @@ router.get('/events/:eventId/teams', async (req, res) => {
     const event = await queryOne(
       `SELECT eventoId, empresaId, status FROM evento
        WHERE eventoId = @eventId AND empresaId = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
 
     const teams = await allQuery(
       `SELECT timeId, nome, cor, pontos
-       FROM time
+       FROM "time"
        WHERE eventoId = @eventId AND empresaId = @empresaId
        ORDER BY nome`,
-      { eventId: event.id, empresaId: req.user.empresa_id }
+      { eventId: event.eventoId, empresaId: req.user.empresaId }
     );
     res.json(teams || []);
   } catch (error) {
-    console.error('❌ Kiosk: erro ao carregar times:', error.message);
-    res.status(500).json({ error: 'Não foi possível carregar os times' });
+    console.error('❌ Kiosk: erro ao carregar time:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os time' });
   }
 });
 
 // Consulta mínima de uma pulseira; não expõe inventário ou dados de crianças.
-router.get('/bracelets/:code', async (req, res) => {
+router.get('/bracelets/:codigo', async (req, res) => {
   try {
-    const code = normalizeUid(req.params.code);
-    if (!code) return res.status(400).json({ error: 'Código da pulseira inválido' });
+    const codigo = normalizeUid(req.params.codigo);
+    if (!codigo) return res.status(400).json({ error: 'Código da pulseira inválido' });
 
     const { queryOne } = require('../database');
     const bracelet = await queryOne(
       `SELECT codigo, status, criancaId, empresaId
        FROM pulseira
-       WHERE ${uidSqlExpression('codigo')} = @code`,
-      { code }
+       WHERE ${uidSqlExpression('codigo')} = @codigo`,
+      { codigo }
     );
 
     if (!bracelet) {
-      return res.json({ code, exists: false, status: null, available: true });
+      return res.json({ codigo, exists: false, status: null, available: true });
     }
-    if (String(bracelet.empresa_id).trim().toLowerCase() !== String(req.user.empresa_id).trim().toLowerCase()) {
+    if (String(bracelet.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
       return res.status(403).json({ error: 'Esta pulseira não pertence a esta empresa' });
     }
 
-    const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.crianca_id;
-    res.json({ code: bracelet.code, exists: true, status: bracelet.status, available });
+    const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.criancaId;
+    res.json({ codigo: bracelet.codigo, exists: true, status: bracelet.status, available });
   } catch (error) {
     console.error('❌ Kiosk: erro ao consultar pulseira:', error.message);
     res.status(500).json({ error: 'Não foi possível verificar a pulseira' });
@@ -131,20 +131,20 @@ router.get('/bracelets/:code', async (req, res) => {
 // Cadastro atômico: cria (se necessário) e vincula a pulseira junto com a criança.
 router.post('/participants', async (req, res) => {
   try {
-    const { eventId, name, nickname, age, avatar, braceletCode, timeId } = req.body || {};
-    const code = normalizeUid(braceletCode);
-    const cleanName = String(name || '').trim();
+    const { eventId, nome, apelido, age, avatar, braceletCode, timeId } = req.body || {};
+    const codigo = normalizeUid(braceletCode);
+    const cleanName = String(nome || '').trim();
     const avatarValue = getAvatarForCreate(avatar);
 
     if (!avatarValue) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
 
-    // O time é opcional: o recreacionista define (ou sorteia) os times depois do cadastro.
-    if (!eventId || !cleanName || !code) {
+    // O time é opcional: o recreacionista define (ou sorteia) os time depois do cadastro.
+    if (!eventId || !cleanName || !codigo) {
       return res.status(400).json({ error: 'Evento, nome e pulseira são obrigatórios' });
     }
-    if (cleanName.length > 100 || String(nickname || '').trim().length > 100) {
+    if (cleanName.length > 100 || String(apelido || '').trim().length > 100) {
       return res.status(400).json({ error: 'Nome ou apelido excede o limite permitido' });
     }
 
@@ -152,7 +152,7 @@ router.post('/participants', async (req, res) => {
       const event = await tx.queryOne(
         `SELECT eventoId, empresaId, status FROM evento
          WHERE eventoId = @eventId AND empresaId = @empresaId`,
-        { eventId, empresaId: req.user.empresa_id }
+        { eventId, empresaId: req.user.empresaId }
       );
       if (!event) throw httpError('Evento não encontrado', 404);
       if (!isOpenEvent(event)) throw httpError('Este evento não está aberto para cadastro', 409);
@@ -160,9 +160,9 @@ router.post('/participants', async (req, res) => {
       let team = null;
       if (timeId) {
         team = await tx.queryOne(
-          `SELECT timeId, nome FROM time
+          `SELECT timeId, nome FROM "time"
            WHERE timeId = @timeId AND eventoId = @eventId AND empresaId = @empresaId`,
-          { timeId, eventId, empresaId: event.empresa_id }
+          { timeId, eventId, empresaId: event.empresaId }
         );
         if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
       }
@@ -170,23 +170,23 @@ router.post('/participants', async (req, res) => {
       let bracelet = await tx.queryOne(
         `SELECT codigo, status, criancaId, empresaId
          FROM pulseira
-         WHERE ${uidSqlExpression('codigo')} = @code`,
-        { code }
+         WHERE ${uidSqlExpression('codigo')} = @codigo`,
+        { codigo }
       );
 
-      if (bracelet && String(bracelet.empresa_id).trim().toLowerCase() !== String(event.empresa_id).trim().toLowerCase()) {
+      if (bracelet && String(bracelet.empresaId).trim().toLowerCase() !== String(event.empresaId).trim().toLowerCase()) {
         throw httpError('Esta pulseira pertence a outra empresa', 403);
       }
       if (!bracelet) {
         await tx.query(
           `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
-           VALUES (@code, 'disponivel', @empresaId, GETDATE())`,
-          { code, empresaId: event.empresa_id }
+           VALUES (@codigo, 'disponivel', @empresaId, GETDATE())`,
+          { codigo, empresaId: event.empresaId }
         );
-        bracelet = { code, status: 'disponivel', crianca_id: null, empresa_id: event.empresa_id };
+        bracelet = { codigo, status: 'disponivel', criancaId: null, empresaId: event.empresaId };
       }
 
-      if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.crianca_id) {
+      if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.criancaId) {
         throw httpError('Esta pulseira não está disponível para vínculo', 409);
       }
 
@@ -194,28 +194,28 @@ router.post('/participants', async (req, res) => {
       await tx.query(
         `INSERT INTO crianca
           (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos)
-         VALUES (@id, @eventId, @empresaId, @timeId, @name, @nickname, @age, @avatar, @code, 0)`,
+         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigo, 0)`,
         {
           id: childId,
-          eventId: event.id,
-          empresaId: event.empresa_id,
-          timeId: team ? team.id : null,
-          name: cleanName,
-          nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
+          eventId: event.eventoId,
+          empresaId: event.empresaId,
+          timeId: team ? team.timeId : null,
+          nome: cleanName,
+          apelido: String(apelido || '').trim() || cleanName.split(/\s+/)[0],
           age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
           avatar: avatarValue,
-          code,
+          codigo,
         }
       );
 
       const braceletUpdate = await tx.query(
         `UPDATE pulseira
          SET status = 'em_uso', criancaId = @childId
-         WHERE ${uidSqlExpression('codigo')} = @code
+         WHERE ${uidSqlExpression('codigo')} = @codigo
            AND empresaId = @empresaId
            AND status = 'disponivel'
            AND criancaId IS NULL`,
-        { code, childId, empresaId: event.empresa_id }
+        { codigo, childId, empresaId: event.empresaId }
       );
       if ((braceletUpdate.rowsAffected?.[0] || 0) === 0) {
         throw httpError('Esta pulseira acabou de ser vinculada. Aproxime outra pulseira', 409);
@@ -224,12 +224,12 @@ router.post('/participants', async (req, res) => {
       return {
         id: childId,
         name: cleanName,
-        nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
+        nickname: String(apelido || '').trim() || cleanName.split(/\s+/)[0],
         age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
         avatar: avatarValue,
-        braceletCode: code,
-        timeId: team ? team.id : null,
-        teamName: team ? team.name : null,
+        braceletCode: codigo,
+        timeId: team ? team.timeId : null,
+        teamName: team ? team.nome : null,
         scores: 0,
       };
     });

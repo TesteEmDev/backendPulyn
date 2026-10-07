@@ -10,9 +10,9 @@ const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'fa
 // Login: validar email + senha contra tabela logins
 router.post('/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { email, senha } = req.body;
 
-    if (!email || !password) {
+    if (!email || !senha) {
       console.log('❌ Email ou senha não fornecidos');
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     }
@@ -20,7 +20,7 @@ router.post('/login', async (req, res) => {
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
       `SELECT l.loginId, l.email, l.senha, l.status, l.perfil, l.nomeFamilia,
-              e.empresaId as empresa_id, e.nome as empresa_nome, e.[plano]
+              e.empresaId as empresaId, e.nome as empresa_nome, e.[plano]
        FROM login l
        JOIN empresa e ON l.empresaId = e.empresaId
        WHERE LOWER(l.email) = LOWER(@email)`,
@@ -32,33 +32,33 @@ router.post('/login', async (req, res) => {
     }
 
     // Comparar senha (base64)
-    const hashedPassword = Buffer.from(password).toString('base64');
-    if (login.password !== hashedPassword) {
+    const hashedPassword = Buffer.from(senha).toString('base64');
+    if (login.senha !== hashedPassword) {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
     }
     if (login.status === 'pending') {
-      return res.status(403).json({ error: 'Sua conta familiar aguarda aprovação da recepção', code: 'FAMILY_PENDING' });
+      return res.status(403).json({ error: 'Sua conta familiar aguarda aprovação da recepção', codigo: 'FAMILY_PENDING' });
     }
     if (login.status !== 'active') {
       return res.status(401).json({ error: 'Email ou senha incorretos' });
     }
 
-    if (!VALID_ROLES.has(login.role)) {
-      console.error(`❌ Role inválido configurado para o usuário ${email}: ${login.role}`);
+    if (!VALID_ROLES.has(login.perfil)) {
+      console.error(`❌ Role inválido configurado para o usuário ${email}: ${login.perfil}`);
       return res.status(403).json({ error: 'Perfil de usuário inválido. Procure o administrador.' });
     }
 
     // ✅ Login bem-sucedido
-    console.log(`✅ Login bem-sucedido: ${email} (role: ${login.role})`);
+    console.log(`✅ Login bem-sucedido: ${email} (role: ${login.perfil})`);
 
-    // Gerar JWT com empresa_id e role
+    // Gerar JWT com empresaId e role
     const token = jwt.sign(
       { 
-        id: login.id,
+        id: login.loginId,
         email: login.email,
-        empresa_id: login.empresa_id,
+        empresaId: login.empresaId,
         empresa_nome: login.empresa_nome,
-        role: login.role
+        role: login.perfil
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -67,7 +67,7 @@ router.post('/login', async (req, res) => {
     // Atualizar último acesso
     await query(
       'UPDATE login SET ultimoAcesso = GETDATE() WHERE loginId = @id',
-      { id: login.id }
+      { id: login.loginId }
     );
 
     // Definir redirect baseado no role
@@ -86,13 +86,13 @@ router.post('/login', async (req, res) => {
       success: true,
       token: token,
       user: {
-        id: login.id,
-        name: login.family_name || login.empresa_nome,
+        id: login.loginId,
+        name: login.nomeFamilia || login.empresa_nome,
         email: login.email,
-        role: login.role,
-        redirect: roleRedirects[login.role] || '/admin',
+        role: login.perfil,
+        redirect: roleRedirects[login.perfil] || '/admin',
         plan: login.plano,
-        empresa_id: login.empresa_id
+        empresaId: login.empresaId
       }
     });
 
@@ -102,7 +102,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// Logout (opcional - apenas para logs)
+// Logout (opcional - apenas para log)
 router.post('/logout', async (req, res) => {
   try {
     console.log('👋 Logout realizado');
@@ -113,19 +113,69 @@ router.post('/logout', async (req, res) => {
   }
 });
 
+// ✅ Validação de email: verificar se já existe
+// GET /auth/check-email?email=user@example.com
+router.get('/check-email', async (req, res) => {
+  try {
+    const { email } = req.query;
+
+    if (!email) {
+      console.log('❌ Email não fornecido');
+      return res.status(400).json({ error: 'Email é obrigatório' });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
+
+    // Validação básica de email
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+      console.log('❌ Email inválido:', normalizedEmail);
+      return res.status(400).json({
+        available: false,
+        error: 'Email inválido'
+      });
+    }
+
+    console.log('🔍 Verificando disponibilidade de email:', normalizedEmail);
+
+    // Verificar se email já existe
+    const existingLogin = await queryOne(
+      'SELECT loginId FROM login WHERE LOWER(email) = @email',
+      { email: normalizedEmail }
+    );
+
+    if (existingLogin) {
+      console.log('❌ Email já registrado:', normalizedEmail);
+      return res.json({
+        available: false,
+        message: 'Este email já foi registrado'
+      });
+    }
+
+    console.log('✅ Email disponível:', normalizedEmail);
+    return res.json({
+      available: true,
+      message: 'Email disponível para registro'
+    });
+
+  } catch (err) {
+    console.error('❌ Erro ao verificar email:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Registro direto: criar conta familiar sem convite
 // POST /auth/register
 router.post('/register', async (req, res) => {
   try {
-    const { email, password, name, family_name } = req.body;
+    const { email, senha, nome, nomeFamilia } = req.body;
 
-    if (!email || !password || !name) {
+    if (!email || !senha || !nome) {
       console.log('❌ Email, senha ou nome não fornecidos');
       return res.status(400).json({ error: 'Email, senha e nome são obrigatórios' });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const hashedPassword = Buffer.from(String(password)).toString('base64');
+    const hashedPassword = Buffer.from(String(senha)).toString('base64');
 
     console.log('🔍 Verificando se email já existe:', normalizedEmail);
     
@@ -141,7 +191,7 @@ router.post('/register', async (req, res) => {
     }
 
     // Validações
-    if (String(password).length < 6) {
+    if (String(senha).length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
 
@@ -160,7 +210,7 @@ router.post('/register', async (req, res) => {
        VALUES (@id, @nome, 'family', 'active', GETDATE())`,
       { 
         id: empresaId, 
-        nome: `${name}'s Family` 
+        nome: `${nome}'s Family` 
       }
     );
 
@@ -172,13 +222,13 @@ router.post('/register', async (req, res) => {
     
     await query(
       `INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
-       VALUES (@id, @empresaId, @email, @password, @familyName, 'family', 'active', GETDATE())`,
+       VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', 'active', GETDATE())`,
       {
         id: loginId,
         empresaId: empresaId,
         email: normalizedEmail,
-        password: hashedPassword,
-        familyName: family_name || name
+        senha: hashedPassword,
+        familyNome: nomeFamilia || nome
       }
     );
 
@@ -189,8 +239,8 @@ router.post('/register', async (req, res) => {
       {
         id: loginId,
         email: normalizedEmail,
-        empresa_id: empresaId,
-        empresa_nome: `${name}'s Family`,
+        empresaId: empresaId,
+        empresa_nome: `${nome}'s Family`,
         role: 'family'
       },
       JWT_SECRET,
@@ -206,11 +256,11 @@ router.post('/register', async (req, res) => {
       user: {
         id: loginId,
         email: normalizedEmail,
-        name: name,
-        family_name: family_name || name,
+        name: nome,
+        nomeFamilia: nomeFamilia || nome,
         role: 'family',
-        empresa_id: empresaId,
-        empresa_nome: `${name}'s Family`
+        empresaId: empresaId,
+        empresa_nome: `${nome}'s Family`
       }
     });
 

@@ -1,8 +1,8 @@
 // routes/analytics.js - métricas da plataforma (visão master)
 //
-// Tudo aqui vem do banco: clientes = empresas + cadastro legado (utils/platformClients.js),
-// receita = valor do plano (utils/planDefinitions.js) dos clientes ativos, e os números
-// de eventos, crianças e checkpoints consideram só o que pertence a clientes (empresa).
+// Tudo aqui vem do banco: cliente = empresa + cadastro legado (utils/platformClients.js),
+// receita = valor do plano (utils/planDefinitions.js) dos cliente ativos, e os números
+// de evento, crianças e pontoVerificacao consideram só o que pertence a cliente (empresa).
 const express = require('express');
 const router = express.Router();
 const { allQuery, queryOne } = require('../database');
@@ -27,7 +27,7 @@ function monthKeyOf(value) {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  const parts = Object.fromEntries(monthFormatter.formatToParts(date).map((p) => [p.type, p.value]));
+  const parts = Object.fromEntries(monthFormatter.formatToParts(date).map((p) => [p.tipo, p.value]));
   return `${parts.year}-${parts.month}`;
 }
 
@@ -49,14 +49,14 @@ function monthRange(start, end) {
   return keys;
 }
 
-const isActive = (client) => String(client.status || '').toLowerCase() === 'active';
-const planPrice = (client) => PLAN_DEFINITIONS[String(client.plan || '').trim().toLowerCase()]?.price || 0;
+const isActive = (cliente) => String(cliente.status || '').toLowerCase() === 'active';
+const planPrice = (cliente) => PLAN_DEFINITIONS[String(cliente.plan || '').trim().toLowerCase()]?.price || 0;
 const round1 = (value) => Math.round(value * 10) / 10;
 
-// Receita mensal recorrente: só clientes ativos pagam (trial e bloqueado não entram).
+// Receita mensal recorrente: só cliente ativos pagam (trial e bloqueado não entram).
 const sumMrr = (clients) => clients.filter(isActive).reduce((sum, c) => sum + planPrice(c), 0);
 
-// Escopo "de clientes": eventos de empresas (não os de teste sem empresa nem da conta Master).
+// Escopo "de cliente": evento de empresa (não os de teste sem empresa nem da conta Master).
 const CUSTOMER_EVENTS = `e.empresaId IS NOT NULL
   AND e.empresaId NOT IN (SELECT empresaId FROM empresa WHERE nome = 'Master Admin')`;
 
@@ -97,7 +97,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
     const activeClients = clients.filter(isActive).length;
     const mrr = sumMrr(clients);
 
-    // Crescimento em 12 meses: clientes hoje contra os que já existiam há 12 meses.
+    // Crescimento em 12 meses: cliente hoje contra os que já existiam há 12 meses.
     // Sem nenhum cliente com 12 meses de casa não há base de comparação (null, não zero).
     const now = Date.now();
     const timeOf = (c) => (c.createdAt ? new Date(c.createdAt).getTime() : NaN);
@@ -130,12 +130,12 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
   }
 });
 
-// ✅ Crescimento de clientes: novos no mês e total acumulado, sem meses faltando
-router.get('/client-growth', verifyToken, requireMaster('Acesso negado: apenas master pode ver crescimento de clientes'), async (req, res) => {
+// ✅ Crescimento de cliente: novos no mês e total acumulado, sem meses faltando
+router.get('/cliente-growth', verifyToken, requireMaster('Acesso negado: apenas master pode ver crescimento de cliente'), async (req, res) => {
   try {
     const perMonth = new Map();
-    (await listPlatformClients()).forEach((client) => {
-      const key = monthKeyOf(client.createdAt);
+    (await listPlatformClients()).forEach((cliente) => {
+      const key = monthKeyOf(cliente.createdAt);
       if (key) perMonth.set(key, (perMonth.get(key) || 0) + 1);
     });
     if (perMonth.size === 0) return res.json([]);
@@ -148,13 +148,13 @@ router.get('/client-growth', verifyToken, requireMaster('Acesso negado: apenas m
       return { month: monthLabel(key), clients: added, total };
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar crescimento de clientes:', err);
+    console.error('❌ Erro ao buscar crescimento de cliente:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ✅ Eventos por mês (pela data do evento), separados por situação
-router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apenas master pode ver eventos globais'), async (req, res) => {
+router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apenas master pode ver evento globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
       SELECT TO_CHAR(e.data, 'YYYY-MM') AS month, LOWER(COALESCE(e.status, '')) AS status
@@ -187,13 +187,13 @@ router.get('/events-per-month', verifyToken, requireMaster('Acesso negado: apena
       };
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar eventos por mês:', err);
+    console.error('❌ Erro ao buscar evento por mês:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // ✅ Checkpoints cadastrados ao longo do tempo: novos no mês e total acumulado
-router.get('/checkpoints-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver checkpoints globais'), async (req, res) => {
+router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso negado: apenas master pode ver pontoVerificacao globais'), async (req, res) => {
   try {
     const rows = await allQuery(`
       SELECT k.criadoEm
@@ -205,7 +205,7 @@ router.get('/checkpoints-over-time', verifyToken, requireMaster('Acesso negado: 
 
     const perMonth = new Map();
     rows.forEach((row) => {
-      const key = monthKeyOf(row.created_at);
+      const key = monthKeyOf(row.criadoEm);
       if (key) perMonth.set(key, (perMonth.get(key) || 0) + 1);
     });
     if (perMonth.size === 0) return res.json([]);
@@ -215,21 +215,21 @@ router.get('/checkpoints-over-time', verifyToken, requireMaster('Acesso negado: 
     res.json(monthRange(first, monthKeyOf(new Date())).map((key) => {
       const added = perMonth.get(key) || 0;
       total += added;
-      return { month: monthLabel(key), checkpoints: added, total };
+      return { month: monthLabel(key), pontoVerificacao: added, total };
     }));
   } catch (err) {
-    console.error('❌ Erro ao buscar checkpoints ao longo do tempo:', err);
+    console.error('❌ Erro ao buscar pontoVerificacao ao longo do tempo:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ Receita por plano (clientes ativos, valor do plano), do maior plano para o menor
+// ✅ Receita por plano (cliente ativos, valor do plano), do maior plano para o menor
 router.get('/revenue-by-plan', verifyToken, requireMaster('Acesso negado: apenas master pode ver receita'), async (req, res) => {
   try {
     const active = (await listPlatformClients()).filter(isActive);
     const byPlan = new Map();
-    active.forEach((client) => {
-      const plan = String(client.plan || 'starter').trim().toLowerCase();
+    active.forEach((cliente) => {
+      const plan = String(cliente.plan || 'starter').trim().toLowerCase();
       if (!PLAN_DEFINITIONS[plan]) return; // sem plano pago conhecido não gera receita
       byPlan.set(plan, (byPlan.get(plan) || 0) + 1);
     });
@@ -238,7 +238,7 @@ router.get('/revenue-by-plan', verifyToken, requireMaster('Acesso negado: apenas
       Array.from(byPlan.entries())
         .map(([plan, clientCount]) => ({
           plan,
-          name: PLAN_DEFINITIONS[plan].name,
+          name: PLAN_DEFINITIONS[plan].nome,
           clientCount,
           price: PLAN_DEFINITIONS[plan].price,
           revenue: clientCount * PLAN_DEFINITIONS[plan].price,

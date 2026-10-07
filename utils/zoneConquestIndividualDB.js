@@ -34,7 +34,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
     // 1. Validar brincadeira
     const brincadeira = await queryOne(
-      `SELECT brincadeiraId, nome, tipo, empresaId FROM brincadeira WHERE brincadeiraId = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
+      `SELECT brincadeiraId, nome, tipo, empresaId FROM "brincadeira" WHERE brincadeiraId = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
     );
 
@@ -44,7 +44,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
     // 2. Buscar evento
     const evento = await queryOne(
-      `SELECT eventoId, empresaId FROM evento WHERE eventoId = @id`,
+      `SELECT eventoId, empresaId FROM "evento" WHERE eventoId = @id`,
       { id: eventoId }
     );
 
@@ -74,7 +74,7 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
        VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', @startedAt, @startedAt, @startedAt)`,
       {
         id: partidaId,
-        empresaId: evento.empresa_id,
+        empresaId: evento.empresaId,
         eventoId,
         brincadeiraId,
         startedAt: agora,
@@ -85,8 +85,8 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
     console.log(`   📝 Participantes serão criados sob demanda na primeira leitura`);
 
     return {
-      partida_id: partidaId,
-      started_at: agora,
+      partidaId: partidaId,
+      iniciadoEm: agora,
       message: 'Partida criada - participantes sob demanda',
     };
   } catch (err) {
@@ -119,7 +119,7 @@ async function processZoneConquestIndividualScan({
   }
 
   try {
-    console.log(`\n📖 [ZONE-INDIVIDUAL-DB] Processando scan: ${crianca.name} em checkpoint ${checkpointId}`);
+    console.log(`\n📖 [ZONE-INDIVIDUAL-DB] Processando scan: ${crianca.nome} em checkpoint ${checkpointId}`);
 
     // 1. Obter partida ativa
     const partida = await queryOne(
@@ -138,7 +138,7 @@ async function processZoneConquestIndividualScan({
       };
     }
 
-    console.log(`   📋 Partida: ${partida.id}, Version: ${partida.version}`);
+    console.log(`   📋 Partida: ${partida.id}, Version: ${partida.versao}`);
 
     // 2. Obter participant state com VERSIONNING (para optimistic locking)
     // Se não existir, criar sob demanda
@@ -148,7 +148,7 @@ async function processZoneConquestIndividualScan({
          AND criancaId = @criancaId`,
       {
         partidaId: partida.id,
-        criancaId: crianca.id,
+        criancaId: crianca.criancaId,
       }
     );
 
@@ -156,7 +156,7 @@ async function processZoneConquestIndividualScan({
       console.log(`   📝 Participant state não encontrado - criando sob demanda...`);
       // Criar participant state sob demanda
       const participantId = uuidv4();
-      const participantColor = generateColorFromId(crianca.id);
+      const participantColor = generateColorFromId(crianca.criancaId);
       await query(
         `INSERT INTO zonaConquistaEstadoParticipanteIndividual
          (id, partidaId, empresaId, eventoId, criancaId, status, checkpointsLidos, pontosTotais, ranking, cor, versao, iniciadoEm, criadoEm, atualizadoEm)
@@ -164,9 +164,9 @@ async function processZoneConquestIndividualScan({
         {
           id: participantId,
           partidaId: partida.id,
-          empresaId: crianca.empresa_id,
+          empresaId: crianca.empresaId,
           eventoId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           color: participantColor,
           agora: now,
         }
@@ -206,11 +206,11 @@ async function processZoneConquestIndividualScan({
        WHERE partidaId = @partidaId AND criancaId = @criancaId
        ORDER BY lidoEm DESC
        LIMIT 3`,
-      { partidaId: partida.id, criancaId: crianca.id }
+      { partidaId: partida.id, criancaId: crianca.criancaId }
     );
-    const repeatedTooSoon = recentScans.some((scan) => String(scan.checkpoint_id) === String(checkpointId));
+    const repeatedTooSoon = recentScans.some((scan) => String(scan.checkpointId) === String(checkpointId));
     if (repeatedTooSoon) {
-      const otherCheckpointsSince = recentScans.findIndex((scan) => String(scan.checkpoint_id) === String(checkpointId));
+      const otherCheckpointsSince = recentScans.findIndex((scan) => String(scan.checkpointId) === String(checkpointId));
       const remainingReads = 3 - otherCheckpointsSince;
       console.log(`   ⚠️ Releitura bloqueada: faltam ${remainingReads} checkpoint(s) diferente(s) antes de reler este`);
       return {
@@ -222,7 +222,7 @@ async function processZoneConquestIndividualScan({
     }
 
     // 4. Calcular pontos com multiplicador
-    const checkpointsReadCount = participantState.checkpoints_read;
+    const checkpointsReadCount = participantState.checkpointsLidos;
     const basePoints = 10;
     const multiplier = 1 + checkpointsReadCount * 0.01;
     const pontosDecimal = Math.round(basePoints * multiplier * 100) / 100;
@@ -232,9 +232,9 @@ async function processZoneConquestIndividualScan({
 
     // 5. TRANSAÇÃO: INSERT scan + UPDATE participant state com VERSIONNING
     const resultado = await withTransaction(async (tx) => {
-      const nextVersion = participantState.version + 1;
-      const novosPontos = participantState.total_points + pontos; // pontos já é inteiro
-      const novosCheckpoints = participantState.checkpoints_read + 1;
+      const nextVersion = participantState.versao + 1;
+      const novosPontos = participantState.pontosTotais + pontos; // pontos já é inteiro
+      const novosCheckpoints = participantState.checkpointsLidos + 1;
 
       // INSERT scan
       await tx.query(
@@ -246,11 +246,11 @@ async function processZoneConquestIndividualScan({
         {
           id: uuidv4(),
           partidaId: partida.id,
-          empresaId: crianca.empresa_id,
+          empresaId: crianca.empresaId,
           eventoId,
           brincadeiraId,
           checkpointId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           uid,
           leituraId,
           pontos,
@@ -269,12 +269,12 @@ async function processZoneConquestIndividualScan({
         {
           id: leituraId,
           checkpointId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           uid,
           brincadeiraId,
           points: pontos,
           signal: -45,
-          empresaId: crianca.empresa_id,
+          empresaId: crianca.empresaId,
           sessionId: sessionId || null,
         }
       );
@@ -294,7 +294,7 @@ async function processZoneConquestIndividualScan({
           novosCheckpoints,
           novosPontos,
           nextVersion,
-          currentVersion: participantState.version,
+          currentVersion: participantState.versao,
           agora: now,
         }
       );
@@ -314,11 +314,11 @@ async function processZoneConquestIndividualScan({
       // ("Top Participantes"), o card de Pontuação e o app da família leem.
       await tx.query(
         'UPDATE crianca SET pontos = pontos + @points WHERE criancaId = @criancaId',
-        { points: pontos, criancaId: crianca.id }
+        { points: pontos, criancaId: crianca.criancaId }
       );
 
       // UPDATE checkpoint: marcar como dominado pelo participante
-      // Em modo INDIVIDUAL, usamos territory_owner_crianca_id (novo campo)
+      // Em modo INDIVIDUAL, usamos territorioDonosCriancaId (novo campo)
       await tx.query(
         `UPDATE pontoVerificacao SET
            territorioDonosCriancaId = @criancaId,
@@ -326,11 +326,11 @@ async function processZoneConquestIndividualScan({
          WHERE checkpointId = @checkpointId`,
         {
           checkpointId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           agora: now,
         }
       );
-      console.log(`   🎨 [ZONE-INDIVIDUAL] Checkpoint ${checkpointId} conquistado por participante ${crianca.id}`);
+      console.log(`   🎨 [ZONE-INDIVIDUAL] Checkpoint ${checkpointId} conquistado por participante ${crianca.criancaId}`);
 
       // TODO: Recalcular ranking para a partida (precisa ser feito corretamente com transação)
       // await recalculateRanking(tx, partida.id);
@@ -489,7 +489,7 @@ async function getZoneConquestIndividualStatus(eventoId) {
     // 3. Obter checkpoints dominados
     const allCheckpoints = await allQuery(
       `SELECT c.checkpointId, c.nome, c.territorioDonosCriancaId AS owner_crianca_id, cr.nome AS owner_name, ps.cor AS owner_color
-       FROM pontoVerificacao c
+       FROM "pontoVerificacao" c
        LEFT JOIN crianca cr ON cr.criancaId = c.territorioDonosCriancaId
        LEFT JOIN zonaConquistaEstadoParticipanteIndividual ps ON ps.criancaId = c.territorioDonosCriancaId
        WHERE c.eventoId = @eventoId`,
@@ -499,20 +499,20 @@ async function getZoneConquestIndividualStatus(eventoId) {
     return {
       gameRunning: true,
       mode: 'individual',
-      partida_id: partida.id,
+      partidaId: partida.id,
       status: partida.status,
-      version: partida.version,
+      version: partida.versao,
       participants: participantes.map(p => ({
-        criancaId: p.crianca_id,
+        criancaId: p.criancaId,
         name: p.name,
-        totalPoints: p.total_points,
-        checkpointsRead: p.checkpoints_read,
+        totalPoints: p.pontosTotais,
+        checkpointsRead: p.checkpointsLidos,
         ranking: p.ranking,
-        color: p.color || generateColorFromId(p.crianca_id), // Use stored color or generate if missing
+        color: p.color || generateColorFromId(p.criancaId), // Use stored color or generate if missing
         status: p.status,
       })),
       checkpoints: allCheckpoints.map(c => ({
-        id: c.id,
+        id: c.checkpointId,
         participantId: c.owner_crianca_id || null,
         participantName: c.owner_name || null,
         participantColor: c.owner_crianca_id
@@ -523,13 +523,13 @@ async function getZoneConquestIndividualStatus(eventoId) {
         lastReadAt: null,
       })),
       dominated_checkpoins: allCheckpoints.filter(c => c.owner_crianca_id).map( c => ({
-        checkpointId: c.id,
-        checkpointName: c.name,
+        checkpointId: c.checkpointId,
+        checkpointName: c.nome,
         ownerCriancaId: c.owner_crianca_id,
         ownerName: c.owner_name,
         ownerColor: c.owner_color || generateColorFromId(c.owner_crianca_id),
       })),
-      created_at: partida.started_at,
+      created_at: partida.iniciadoEm,
     };
   } catch (err) {
     console.error('❌ Erro ao obter status:', err);
@@ -578,7 +578,7 @@ async function stopZoneConquestIndividual(eventoId) {
         }
       );
 
-      // LIMPAR territory_owner_crianca_id dos checkpoints
+      // LIMPAR territorioDonosCriancaId dos checkpoints
       await tx.query(
         `UPDATE pontoVerificacao SET
            territorioDonosCriancaId = NULL,

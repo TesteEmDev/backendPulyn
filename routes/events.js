@@ -40,63 +40,55 @@ function sameId(left, right) {
     && String(left).trim().toLowerCase() === String(right).trim().toLowerCase();
 }
 
-function broadcastGameEvent(eventoId, type, payload = {}) {
+function broadcastGameEvent(eventoId, tipo, payload = {}) {
   if (global.broadcastToEvent) {
     global.broadcastToEvent(eventoId, {
-      type,
+      tipo,
       payload: { ...payload, eventoId },
     });
   }
 }
 
-// ✅ Exceção: leitura de zonas e planta baixa do mapa — o app da família
-// precisa desses dois endpoints para exibir o mapa/rastreio do evento (eles
-// já têm sua própria checagem de acesso liberando o role 'family' logo
-// abaixo). Sem essa exceção, esse portão bloqueava a requisição antes
-// mesmo de chegar nessa checagem, tornando-a inalcançável.
-const FAMILY_ALLOWED_READ_PATH = /\/[^/]+\/(zones|floor-plan)$/;
-
 router.use(verifyToken, (req, res, next) => {
-  const isFamilyAllowedRead = req.method === 'GET' && FAMILY_ALLOWED_READ_PATH.test(req.path);
-  if (req.user?.role === 'family' && !isFamilyAllowedRead) {
+  if (req.user?.role === 'family') {
     return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
   }
   next();
 });
 
-// Listar eventos
+// Listar evento
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const role = req.user.role;
     
-    // Se for master, retorna eventos de TODAS as empresas (exceto Master Admin)
-    let eventos;
+    // Se for master, retorna evento de TODAS as empresa (exceto Master Admin)
+    let evento;
     if (isMaster(req)) {
-      eventos = await allQuery(
+      evento = await allQuery(
         `SELECT * FROM evento 
          WHERE empresaId IS NOT NULL
            AND empresaId NOT IN (SELECT empresaId FROM empresa WHERE nome = 'Master Admin')
          ORDER BY data DESC`
       );
     } else {
-      eventos = await allQuery(
-        'SELECT * FROM evento WHERE empresaId = @empresa_id ORDER BY data DESC',
-        { empresa_id }
+      evento = await allQuery(
+        'SELECT * FROM evento WHERE empresaId = @empresaId ORDER BY data DESC',
+        { empresaId }
       );
     }
     
-    res.json(eventos);
+    res.json(evento);
   } catch (err) {
-    console.error('❌ Erro ao listar eventos:', err);
+    console.error('❌ Erro ao listar evento:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 const MAX_RESPONSIBLE_NAME = 150;
 
-// Jogos do evento: um jogo pertence a um evento pelo vínculo direto (brincadeiras.evento_id, do
-// evento em que foi criado) ou por um vínculo extra em evento_brincadeiras. Deixa o evento com
+// Jogos do evento: um jogo pertence a um evento pelo vínculo direto (brincadeira.eventoId, do
+// evento em que foi criado) ou por um vínculo extra em eventoBrincadeira. Deixa o evento com
 // exatamente os jogos informados: vincula os novos, tira os desmarcados e, se um jogo criado
 // neste evento for desmarcado, solta o vínculo direto dele. Deve rodar dentro de uma transação.
 async function syncEventGames(eventoId, empresaId, gameIds) {
@@ -113,7 +105,7 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
       error.statusCode = 400;
       throw error;
     }
-    if (!same(game.empresa_id, empresaId)) {
+    if (!same(game.empresaId, empresaId)) {
       const error = new Error('Um dos jogos selecionados pertence a outra empresa');
       error.statusCode = 403;
       throw error;
@@ -129,8 +121,8 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
     { eventoId }
   );
   const isWanted = (id) => wanted.some((w) => same(w, id));
-  const isOwned = (id) => owned.some((o) => same(o.id, id));
-  const isLinked = (id) => links.some((l) => same(l.brincadeira_id, id));
+  const isOwned = (id) => owned.some((o) => same(o.brincadeiraId, id));
+  const isLinked = (id) => links.some((l) => same(l.brincadeiraId, id));
 
   for (const [order, gameId] of wanted.entries()) {
     if (!isOwned(gameId) && !isLinked(gameId)) {
@@ -141,16 +133,16 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
     }
   }
   for (const link of links) {
-    if (!isWanted(link.brincadeira_id)) {
+    if (!isWanted(link.brincadeiraId)) {
       await query(
         'DELETE FROM eventoBrincadeira WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(brincadeiraId) = LOWER(@gameId)',
-        { eventoId, gameId: link.brincadeira_id }
+        { eventoId, gameId: link.brincadeiraId }
       );
     }
   }
   for (const game of owned) {
-    if (!isWanted(game.id)) {
-      await query('UPDATE brincadeira SET eventoId = NULL WHERE LOWER(brincadeiraId) = LOWER(@gameId)', { gameId: game.id });
+    if (!isWanted(game.brincadeiraId)) {
+      await query('UPDATE brincadeira SET eventoId = NULL WHERE LOWER(brincadeiraId) = LOWER(@gameId)', { gameId: game.brincadeiraId });
     }
   }
 }
@@ -158,15 +150,15 @@ async function syncEventGames(eventoId, empresaId, gameIds) {
 // Criar evento
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd, games } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { nome, description, date, time, duration, enableDisplay, enableLocation, responsibleNome, autoStart, autoEnd, games } = req.body;
+    const empresaId = req.user.empresaId;
     const id = uuidv4();
 
     // Validar campos obrigatórios
-    if (!name || !date) {
+    if (!nome || !date) {
       return res.status(400).json({ error: 'Nome e data são obrigatórios' });
     }
-    const responsible = String(responsibleName || '').trim();
+    const responsible = String(responsibleNome || '').trim();
     if (!responsible) {
       return res.status(400).json({ error: 'Informe o nome do contratante/responsável pelo evento' });
     }
@@ -187,32 +179,32 @@ router.post('/', verifyToken, async (req, res) => {
       await query(
         `INSERT INTO evento (eventoId, empresaId, nome, descricao, data, hora, duracao, exibirDisplay, exibirLocalizacao, status,
                               nomeResponsavel, autoInicio, autoFim)
-         VALUES (@id, @empresa_id, @name, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
-                 @responsibleName, @autoStart, @autoEnd)`,
+         VALUES (@id, @empresaId, @nome, @description, @date, @time, @duration, @enableDisplay, @enableLocation, 'scheduled',
+                 @responsibleNome, @autoStart, @autoEnd)`,
         {
           id,
-          empresa_id,
-          name,
+          empresaId,
+          nome,
           description,
           date,
           time: time || null,
           duration: parseInt(duration) || 60,
           enableDisplay: enableDisplay ? 1 : 0,
           enableLocation: enableLocation ? 1 : 0,
-          responsibleName: responsible,
+          responsibleNome: responsible,
           autoStart: wantsAutoStart ? 1 : 0,
           autoEnd: wantsAutoEnd ? 1 : 0,
         }
       );
-      if (Array.isArray(games)) await syncEventGames(id, empresa_id, games);
+      if (Array.isArray(games)) await syncEventGames(id, empresaId, games);
     });
 
     res.json({
-      id, empresa_id, name, description, date, time, duration, enableDisplay, enableLocation,
+      id, empresaId, nome, description, date, time, duration, enableDisplay, enableLocation,
       status: 'scheduled',
-      responsible_name: responsible,
-      auto_start: wantsAutoStart ? 1 : 0,
-      auto_end: wantsAutoEnd ? 1 : 0,
+      nomeResponsavel: responsible,
+      autoInicio: wantsAutoStart ? 1 : 0,
+      autoFim: wantsAutoEnd ? 1 : 0,
     });
   } catch (err) {
     console.error('❌ Erro ao criar evento:', err);
@@ -223,46 +215,46 @@ router.post('/', verifyToken, async (req, res) => {
 // ==================== ROTAS ANINHADAS (devem estar ANTES de /:id) ====================
 
 // Listar crianças de um evento
-router.get('/:evento_id/criancas', verifyToken, async (req, res) => {
+router.get('/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.params.evento_id;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
       'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
-      { id: evento_id }
+      { id: eventoId }
     );
     
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
     
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
-    const criancas = await allQuery(`
-      SELECT c.*, t.nome as time_name, t.cor as time_color 
+    const crianca = await allQuery(`
+      SELECT c.*, t.nome as time_nome, t.cor as time_color 
       FROM crianca c
-      LEFT JOIN time t ON c.timeId = t.timeId
-      WHERE c.eventoId = @evento_id
-      AND c.empresaId = @empresa_id
+      LEFT JOIN "time" t ON c.timeId = t.timeId
+      WHERE c.eventoId = @eventoId
+      AND c.empresaId = @empresaId
       ORDER BY c.pontos DESC
-    `, { evento_id, empresa_id });
-    res.json(criancas);
+    `, { eventoId, empresaId });
+    res.json(crianca);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // Criar criança em um evento
-router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
+router.post('/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
-    const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, apelido, age, avatar, braceletCode, timeId } = req.body;
     const avatarValue = getAvatarForCreate(avatar);
-    const evento_id = req.params.evento_id;
-    const empresa_id = req.user.empresa_id;
+    const eventoId = req.params.eventoId;
+    const empresaId = req.user.empresaId;
     const id = uuidv4();
 
     if (!avatarValue) {
@@ -270,19 +262,19 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
     }
     
     // 1. Validar evento e verificar permissão
-    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @id', { id: evento_id });
-    if (!evento || !evento.empresa_id) {
+    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @id', { id: eventoId });
+    if (!evento || !evento.empresaId) {
       return res.status(404).json({ error: 'Evento não encontrado ou sem empresa definida' });
     }
     
     // ✅ Verificar permissão (apenas master ou de mesma empresa)
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
     // 2. Validar se pulseira já está vinculada
     if (braceletCode) {
-      const existing = await queryOne('SELECT criancaId FROM crianca WHERE codigoPulseira = @code', { code: braceletCode });
+      const existing = await queryOne('SELECT criancaId FROM crianca WHERE codigoPulseira = @codigo', { codigo: braceletCode });
       if (existing) {
         return res.status(400).json({ error: 'Pulseira já está vinculada a outra criança' });
       }
@@ -291,102 +283,102 @@ router.post('/:evento_id/criancas', verifyToken, async (req, res) => {
     // 3. Inserir criança
     await query(
       `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos) 
-       VALUES (@id, @evento_id, @empresa_id, @time_id, @name, @nickname, @age, @avatar, @bracelet_code, 0)`,
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigoPulseira, 0)`,
       { 
         id, 
-        evento_id,
-        empresa_id: evento.empresa_id,
-        time_id: timeId || null, 
-        name, 
-        nickname, 
+        eventoId,
+        empresaId: evento.empresaId,
+        timeId: timeId || null, 
+        nome, 
+        apelido, 
         age: parseInt(age) || 0, 
         avatar: avatarValue,
-        bracelet_code: braceletCode || null
+        codigoPulseira: braceletCode || null
       }
     );
     
     // 4. Atualizar status da pulseira se foi fornecida
     if (braceletCode) {
       await query(
-        'UPDATE pulseira SET status = @status, criancaId = @crianca_id WHERE codigo = @code', 
-        { status: 'em_uso', crianca_id: id, code: braceletCode }
+        'UPDATE pulseira SET status = @status, criancaId = @criancaId WHERE codigo = @codigo', 
+        { status: 'em_uso', criancaId: id, codigo: braceletCode }
       );
     }
     
     // 5. Atualizar pontos do time
     if (timeId) {
       await query(
-        `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @time_id) 
-         WHERE timeId = @time_id`,
-        { time_id: timeId }
+        `UPDATE "time" SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId) 
+         WHERE timeId = @timeId`,
+        { timeId: timeId }
       );
     }
     
-    res.json({ id, name, nickname, age, avatar: avatarValue, braceletCode, timeId, scores: 0, empresa_id: evento.empresa_id });
+    res.json({ id, nome, apelido, age, avatar: avatarValue, braceletCode, timeId, scores: 0, empresaId: evento.empresaId });
   } catch (err) {
     console.error('❌ Erro ao criar criança:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Listar times de um evento
-router.get('/:evento_id/times', verifyToken, async (req, res) => {
+// Listar time de um evento
+router.get('/:eventoId/time', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.params.evento_id;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
       'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
-      { id: evento_id }
+      { id: eventoId }
     );
     
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
     
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
-    const times = await allQuery(`
-      SELECT * FROM time 
-      WHERE eventoId = @evento_id
-      AND empresaId = @empresa_id
+    const time = await allQuery(`
+      SELECT * FROM "time" 
+      WHERE eventoId = @eventoId
+      AND empresaId = @empresaId
       ORDER BY pontos DESC
-    `, { evento_id, empresa_id });
-    res.json(times);
+    `, { eventoId, empresaId });
+    res.json(time);
   } catch (err) {
-    console.error('❌ Erro ao listar times:', err);
+    console.error('❌ Erro ao listar time:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // Status do jogo (se está em andamento ou não)
-router.get('/:evento_id/game-status', verifyToken, async (req, res) => {
+router.get('/:eventoId/game-status', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.params.evento_id;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
       'SELECT eventoId, status, empresaId FROM evento WHERE eventoId = @id',
-      { id: evento_id }
+      { id: eventoId }
     );
     
     if (!evento) {
       return res.status(404).json({ gameRunning: false });
     }
     
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
-    // "Jogo em andamento" vem do estado do jogo. eventos.status agora é só o
+    // "Jogo em andamento" vem do estado do jogo. evento.status agora é só o
     // ciclo de vida do evento (agendado/ativo/encerrado).
-    const gameState = await getGameState(evento.id);
+    const gameEstado = await getGameState(evento.eventoId);
     res.json({
-      gameRunning: gameState?.mode === 'game' && !isClosedStatus(evento.status),
+      gameRunning: gameEstado?.mode === 'game' && !isClosedStatus(evento.status),
       status: evento.status
     });
   } catch (err) {
@@ -396,31 +388,31 @@ router.get('/:evento_id/game-status', verifyToken, async (req, res) => {
 });
 
 // Jogo ativo (tipo de jogo em execução: color_detection, zone_conquest, etc)
-router.get('/:evento_id/active-game', verifyToken, async (req, res) => {
+router.get('/:eventoId/active-game', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.params.evento_id;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT e.eventoId, e.empresaId, e.tipoJogoAtivo, b.nome as game_name, b.tipo as game_type FROM evento e LEFT JOIN brincadeira b ON e.brincadeiraAtivaId = b.brincadeiraId WHERE e.eventoId = @id',
-      { id: evento_id }
+      'SELECT e.eventoId, e.empresaId, e.tipoJogoAtivo, b.nome as game_nome, b.tipo as tipoJogo FROM evento e LEFT JOIN brincadeira b ON e.brincadeiraAtivaId = b.brincadeiraId WHERE e.eventoId = @id',
+      { id: eventoId }
     );
     
     if (!evento) {
       return res.status(404).json({ gameType: 'none' });
     }
     
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
-    const gameType = evento.active_game_type || evento.game_type || 'none';
+    const gameType = evento.tipoJogoAtivo || evento.tipoJogo || 'none';
     
     res.json({ 
       gameType,
-      gameName: evento.game_name,
-      eventoId: evento.id
+      gameName: evento.game_nome,
+      eventoId: evento.eventoId
     });
   } catch (err) {
     console.error('❌ Erro ao buscar jogo ativo:', err);
@@ -430,17 +422,17 @@ router.get('/:evento_id/active-game', verifyToken, async (req, res) => {
 });
 
 // Iniciar jogo (define o tipo de jogo e ativa o evento)
-router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+router.post('/:eventoId/start-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
     const { brincadeiraId } = req.body;
-    const evento_id = req.params.evento_id;
+    const eventoId = req.params.eventoId;
     
     const evento = await queryOne(
       'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @id',
-      { id: evento_id }
+      { id: eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     if (isClosedStatus(evento.status)) {
@@ -458,22 +450,22 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
     if (!brincadeira) {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
-    if (!isMaster(req) && brincadeira.empresa_id && brincadeira.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req) && brincadeira.empresaId && brincadeira.empresaId !== req.user.empresaId) {
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
 
-    // O jogo só começa se o evento tiver o mínimo de checkpoints online para ele (antes de apagar/resetar qualquer dado)
-    const requirement = await checkGameStartRequirements(evento_id, brincadeira);
+    // O jogo só começa se o evento tiver o mínimo de pontoVerificacao online para ele (antes de apagar/resetar qualquer dado)
+    const requirement = await checkGameStartRequirements(eventoId, brincadeira);
     if (!requirement.ok) {
       return res.status(409).json({ error: requirement.message, requirement });
     }
 
-    const rawGameType = brincadeira.type || brincadeira.game_type || 'standard';
+    const rawGameType = brincadeira.tipo || brincadeira.tipoJogo || 'standard';
     const gameType = [MONSTER_GAME_TYPE, TREASURE_GAME_TYPE, 'zone_conquest_team', 'zone_conquest_individual'].includes(rawGameType)
       ? rawGameType
       : rawGameType || 'standard';
     
-    // 🆕 Resetar dados de leituras anteriores (reset dos dados de jogo)
+    // 🆕 Resetar dados de leitura anteriores (reset dos dados de jogo)
     await query(
       `DELETE FROM leitura 
        WHERE criancaId IN (
@@ -483,67 +475,67 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
          SELECT brincadeiraId FROM brincadeira 
          WHERE LOWER(COALESCE(status, 'active')) = 'archived'
        )`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     
     // 🆕 Resetar dados de Zone Conquest INDIVIDUAL (na ordem correta das foreign keys)
     await query(
-      `DELETE FROM zonaConquistaLeituraIndividual
+      `DELETE FROM "zonaConquistaLeituraIndividual"
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zonaConquistaProtecaoCheckpointIndividual
+      `DELETE FROM "zonaConquistaProtecaoCheckpointIndividual"
        WHERE partidaId IN (
-         SELECT id FROM zonaConquistaPartidaIndividual WHERE eventoId = @eventoId
+         SELECT id FROM "zonaConquistaPartidaIndividual" WHERE eventoId = @eventoId
        )`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     await query(
       `DELETE FROM zonaConquistaEstadoParticipanteIndividual
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zonaConquistaPartidaIndividual
+      `DELETE FROM "zonaConquistaPartidaIndividual"
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     
     // 🆕 Resetar dados de Zone Conquest TEAM (na ordem correta das foreign keys)
     await query(
-      `DELETE FROM zonaConquistaLeituraTime
+      `DELETE FROM "zonaConquistaLeituraTime"
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zonaConquistaTempoTime
+      `DELETE FROM "zonaConquistaTempoTime"
        WHERE partidaId IN (
-         SELECT id FROM zonaConquistaPartidaTime WHERE eventoId = @eventoId
+         SELECT id FROM "zonaConquistaPartidaTime" WHERE eventoId = @eventoId
        )`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     await query(
-      `DELETE FROM zonaConquistaPartidaTime
+      `DELETE FROM "zonaConquistaPartidaTime"
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     
     // 🆕 Resetar scores dos participantes
     await query(
       `UPDATE crianca SET pontos = 0 
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     
-    // 🆕 Resetar pontos dos times
+    // 🆕 Resetar pontos dos time
     await query(
-      `UPDATE time SET pontos = 0 
+      `UPDATE "time" SET pontos = 0 
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     
-    // 🆕 Resetar domínio dos checkpoints (zona-equipe)
+    // 🆕 Resetar domínio dos pontoVerificacao (zona-equipe)
     await query(
       `UPDATE pontoVerificacao 
        SET territorioDonoTimeId = NULL,
@@ -551,40 +543,40 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
            territorioCooldownAte = NULL,
            ultimoConquistadoEm = NULL
        WHERE eventoId = @eventoId`,
-      { eventoId: evento_id }
+      { eventoId: eventoId }
     );
     
     // Iniciar o jogo conforme seu tipo
     if (gameType === MONSTER_GAME_TYPE) {
       console.log('📍 [routes/events.js] Iniciando Monster Game');
-      await startMonsterGame(evento_id, brincadeira.id);
-      await stopTreasureGame(evento_id);
-      await stopZoneConquestTeam(evento_id);
-      await stopZoneConquestIndividual(evento_id);
+      await startMonsterGame(eventoId, brincadeira.brincadeiraId);
+      await stopTreasureGame(eventoId);
+      await stopZoneConquestTeam(eventoId);
+      await stopZoneConquestIndividual(eventoId);
     } else if (gameType === TREASURE_GAME_TYPE) {
       console.log('📍 [routes/events.js] Iniciando Treasure Game');
-      await startTreasureGame(evento_id, brincadeira.id);
-      await stopMonsterGame(evento_id);
-      await stopZoneConquestTeam(evento_id);
-      await stopZoneConquestIndividual(evento_id);
+      await startTreasureGame(eventoId, brincadeira.brincadeiraId);
+      await stopMonsterGame(eventoId);
+      await stopZoneConquestTeam(eventoId);
+      await stopZoneConquestIndividual(eventoId);
     } else if (gameType === 'zone_conquest_team') {
-      console.log(`🎮 [EVENTS] Iniciando Zone Conquest TEAM para evento: ${evento_id}`);
-      await startZoneConquestTeam(evento_id, brincadeira.id);
-      await stopMonsterGame(evento_id);
-      await stopTreasureGame(evento_id);
-      await stopZoneConquestIndividual(evento_id);
+      console.log(`🎮 [EVENTS] Iniciando Zone Conquest TEAM para evento: ${eventoId}`);
+      await startZoneConquestTeam(eventoId, brincadeira.brincadeiraId);
+      await stopMonsterGame(eventoId);
+      await stopTreasureGame(eventoId);
+      await stopZoneConquestIndividual(eventoId);
     } else if (gameType === 'zone_conquest_individual') {
-      console.log(`🎮 [EVENTS] Iniciando Zone Conquest INDIVIDUAL para evento: ${evento_id}`);
-      await startZoneConquestIndividual(evento_id, brincadeira.id);
-      await stopMonsterGame(evento_id);
-      await stopTreasureGame(evento_id);
-      await stopZoneConquestTeam(evento_id);
+      console.log(`🎮 [EVENTS] Iniciando Zone Conquest INDIVIDUAL para evento: ${eventoId}`);
+      await startZoneConquestIndividual(eventoId, brincadeira.brincadeiraId);
+      await stopMonsterGame(eventoId);
+      await stopTreasureGame(eventoId);
+      await stopZoneConquestTeam(eventoId);
     } else {
       console.log('📍 [routes/events.js] Parando todos os jogos (tipo:', gameType, ')');
-      await stopMonsterGame(evento_id);
-      await stopTreasureGame(evento_id);
-      await stopZoneConquestTeam(evento_id);
-      await stopZoneConquestIndividual(evento_id);
+      await stopMonsterGame(eventoId);
+      await stopTreasureGame(eventoId);
+      await stopZoneConquestTeam(eventoId);
+      await stopZoneConquestIndividual(eventoId);
     }
     
     // Registrar o jogo ativo. O status do evento não é mexido aqui: iniciar um
@@ -597,29 +589,29 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
       {
         brincadeiraId,
         gameType,
-        id: evento_id
+        id: eventoId
       }
     );
-    await ensureEventActive(evento_id);
+    await ensureEventActive(eventoId);
 
     const startedAt = new Date();
     await saveGameState({
-      eventoId: evento_id,
-      empresaId: evento.empresa_id,
+      eventoId: eventoId,
+      empresaId: evento.empresaId,
       mode: 'game',
       gameType,
-      gameId: brincadeira.id,
-      gameName: brincadeira.name || null,
+      gameId: brincadeira.brincadeiraId,
+      gameName: brincadeira.nome || null,
       startedAt,
     });
 
-    broadcastGameEvent(evento_id, 'GAME_STARTED', {
-      gameId: brincadeira.id,
-      gameName: brincadeira.name || null,
+    broadcastGameEvent(eventoId, 'GAME_STARTED', {
+      gameId: brincadeira.brincadeiraId,
+      gameName: brincadeira.nome || null,
       gameType,
       startedAt: startedAt.toISOString(),
     });
-    broadcastGameEvent(evento_id, 'CHECKPOINT_MODE_CHANGED', {
+    broadcastGameEvent(eventoId, 'CHECKPOINT_MODE_CHANGED', {
       mode: 'game',
       gameType,
       timestamp: startedAt.toISOString(),
@@ -638,20 +630,20 @@ router.post('/:evento_id/start-game', verifyToken, requireRole('admin', 'game_ma
 });
 
 // Parar jogo
-router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+router.post('/:eventoId/stop-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
-    const evento_id = req.params.evento_id;
-    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @id', { id: evento_id });
+    const eventoId = req.params.eventoId;
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @id', { id: eventoId });
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
     // Atualizar evento para pausar jogo
-    await stopMonsterGame(evento_id);
-    await stopTreasureGame(evento_id);
-    await stopZoneConquestTeam(evento_id);
-    await stopZoneConquestIndividual(evento_id);
+    await stopMonsterGame(eventoId);
+    await stopTreasureGame(eventoId);
+    await stopZoneConquestTeam(eventoId);
+    await stopZoneConquestIndividual(eventoId);
     
     // Parar o jogo não desativa o evento: só limpa o jogo ativo.
     await query(
@@ -659,22 +651,22 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
        SET brincadeiraAtivaId = NULL,
            tipoJogoAtivo = 'none'
        WHERE eventoId = @id`,
-      { id: evento_id }
+      { id: eventoId }
     );
     
     const stoppedAt = new Date();
     await saveGameState({
-      eventoId: evento_id,
-      empresaId: evento.empresa_id,
+      eventoId: eventoId,
+      empresaId: evento.empresaId,
       mode: 'idle',
       gameType: 'none',
       stoppedAt,
     });
 
-    broadcastGameEvent(evento_id, 'GAME_STOPPED', {
+    broadcastGameEvent(eventoId, 'GAME_STOPPED', {
       stoppedAt: stoppedAt.toISOString(),
     });
-    broadcastGameEvent(evento_id, 'CHECKPOINT_MODE_CHANGED', {
+    broadcastGameEvent(eventoId, 'CHECKPOINT_MODE_CHANGED', {
       mode: 'idle',
       gameType: 'none',
       timestamp: stoppedAt.toISOString(),
@@ -687,150 +679,35 @@ router.post('/:evento_id/stop-game', verifyToken, requireRole('admin', 'game_mas
   }
 });
 
-// Listar checkpoints de um evento
-router.get('/:evento_id/checkpoints', verifyToken, async (req, res) => {
+// Listar pontoVerificacao de um evento
+router.get('/:eventoId/pontoVerificacao', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento_id = req.params.evento_id;
+    const empresaId = req.user.empresaId;
+    const eventoId = req.params.eventoId;
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
       'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
-      { id: evento_id }
+      { id: eventoId }
     );
     
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
     
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     
-    const checkpoints = await allQuery(`
+    const pontoVerificacao = await allQuery(`
       SELECT * FROM pontoVerificacao 
-      WHERE eventoId = @evento_id
-      AND empresaId = @empresa_id
+      WHERE eventoId = @eventoId
+      AND empresaId = @empresaId
       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
       ORDER BY nome ASC
-    `, { evento_id, empresa_id });
-    res.json(checkpoints);
+    `, { eventoId, empresaId });
+    res.json(pontoVerificacao);
   } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Planta do evento: armazenada no banco para sobreviver a reload/redeploy do frontend.
-router.get('/:id/floor-plan', verifyToken, async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log(`📍 [FLOOR-PLAN] GET /:id/floor-plan chamado`);
-    console.log(`   👤 User: ${req.user.email} (role: ${req.user.role})`);
-    console.log(`   🎯 evento_id: ${id}`);
-    
-    let query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id';
-    let params = { id };
-    
-    if (isMaster(req)) {
-      // Master: acesso total
-      query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id';
-    } else if (req.user.role === 'family') {
-      // Family: acesso à qualquer evento (para visualizar o mapa/zonas/checkpoints)
-      // Permissão mais granular é feita em outros endpoints (pontuação, etc)
-      query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id';
-    } else {
-      // Admin/Reception/Game Master/Display: vê eventos da sua empresa
-      query = 'SELECT eventoId, empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento WHERE eventoId = @id AND empresaId = @empresa_id';
-      params.empresa_id = req.user.empresa_id;
-    }
-    
-    const evento = await queryOne(query, params);
-
-    if (!evento) {
-      console.log(`❌ [FLOOR-PLAN] Evento ${id} NÃO ENCONTRADO para usuário ${req.user.email}`);
-      return res.status(404).json({ error: 'Evento não encontrado ou você não tem permissão' });
-    }
-    
-    console.log(`✅ [FLOOR-PLAN] Evento ${id} encontrado`);
-    res.json({
-      eventId: evento.id,
-      floorPlan: evento.floor_plan_data
-        ? {
-            dataUrl: evento.floor_plan_data,
-            name: evento.floor_plan_name,
-            type: evento.floor_plan_type,
-          }
-        : null,
-    });
-  } catch (err) {
-    console.error('❌ Erro ao carregar planta do evento:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
-  try {
-    const { dataUrl, name, type } = req.body || {};
-    if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
-      return res.status(400).json({ error: 'A planta deve ser enviada como uma imagem válida' });
-    }
-    if (dataUrl.length > 9 * 1024 * 1024) {
-      return res.status(413).json({ error: 'A planta é muito grande. Reduza o tamanho da imagem e tente novamente.' });
-    }
-
-    const evento = await queryOne(
-      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
-      { id: req.params.id }
-    );
-    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
-      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
-    }
-
-    await query(
-      `UPDATE evento
-       SET dadosPlanoPiso = @dataUrl,
-           nomePlanoPiso = @name,
-           tipoPlanoPiso = @type
-       WHERE eventoId = @id AND empresaId = @empresa_id`,
-      {
-        dataUrl,
-        name: String(name || 'planta-do-evento').slice(0, 255),
-        type: String(type || 'image/jpeg').slice(0, 100),
-        id: evento.id,
-        empresa_id: evento.empresa_id,
-      }
-    );
-
-    res.json({ success: true, eventId: evento.id });
-  } catch (err) {
-    console.error('❌ Erro ao salvar planta do evento:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.delete('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
-  try {
-    const evento = await queryOne(
-      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
-      { id: req.params.id }
-    );
-    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
-      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
-    }
-
-    await query(
-      `UPDATE evento
-       SET dadosPlanoPiso = NULL,
-           nomePlanoPiso = NULL,
-           tipoPlanoPiso = NULL
-       WHERE eventoId = @id AND empresaId = @empresa_id`,
-      { id: evento.id, empresa_id: evento.empresa_id }
-    );
-    res.json({ success: true, eventId: evento.id });
-  } catch (err) {
-    console.error('❌ Erro ao remover planta do evento:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -840,7 +717,7 @@ router.delete('/:id/floor-plan', verifyToken, requireRole('admin', 'master'), as
 // Buscar evento por ID
 router.get('/:id', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     
     let evento;
     if (isMaster(req)) {
@@ -850,10 +727,10 @@ router.get('/:id', verifyToken, async (req, res) => {
         { id: req.params.id }
       );
     } else {
-      // Usuário regular vê apenas eventos da sua empresa
+      // Usuário regular vê apenas evento da sua empresa
       evento = await queryOne(
-        'SELECT * FROM evento WHERE eventoId = @id AND empresaId = @empresa_id', 
-        { id: req.params.id, empresa_id }
+        'SELECT * FROM evento WHERE eventoId = @id AND empresaId = @empresaId', 
+        { id: req.params.id, empresaId }
       );
     }
     
@@ -867,8 +744,8 @@ router.get('/:id', verifyToken, async (req, res) => {
 // Atualizar evento
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, description, date, time, duration, enableDisplay, enableLocation, responsibleName, autoStart, autoEnd, games } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { nome, description, date, time, duration, enableDisplay, enableLocation, responsibleNome, autoStart, autoEnd, games } = req.body;
+    const empresaId = req.user.empresaId;
 
     // Verificar que o evento pertence à empresa (ou user é master)
     const evento = await queryOne(
@@ -880,13 +757,13 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
     let responsible = null;
-    if (responsibleName !== undefined) {
-      responsible = String(responsibleName || '').trim();
+    if (responsibleNome !== undefined) {
+      responsible = String(responsibleNome || '').trim();
       if (!responsible) {
         return res.status(400).json({ error: 'Informe o nome do contratante/responsável pelo evento' });
       }
@@ -902,33 +779,33 @@ router.put('/:id', verifyToken, async (req, res) => {
     await withTransaction(async () => {
       await query(
         `UPDATE evento SET
-           nome = COALESCE(@name, nome),
+           nome = COALESCE(@nome, nome),
            descricao = COALESCE(@description, descricao),
            data = COALESCE(@date, data),
            hora = COALESCE(@time, hora),
            duracao = COALESCE(@duration, duracao),
            exibirDisplay = COALESCE(@enableDisplay, exibirDisplay),
            exibirLocalizacao = COALESCE(@enableLocation, exibirLocalizacao),
-           nomeResponsavel = COALESCE(@responsibleName, nomeResponsavel),
+           nomeResponsavel = COALESCE(@responsibleNome, nomeResponsavel),
            autoInicio = COALESCE(@autoStart, autoInicio),
            autoFim = COALESCE(@autoEnd, autoFim)
          WHERE eventoId = @id`,
         {
-          name: name || null,
+          nome: nome || null,
           description: description ?? null,
           date: date || null,
           time: time || null,
           duration: duration === undefined ? null : (parseInt(duration) || 60),
           enableDisplay: flag(enableDisplay),
           enableLocation: flag(enableLocation),
-          responsibleName: responsible,
+          responsibleNome: responsible,
           autoStart: flag(autoStart),
           autoEnd: flag(autoEnd),
           id: req.params.id,
         }
       );
       // Sem `games` no corpo, os jogos do evento ficam como estão (quem não conhece o campo não apaga nada).
-      if (Array.isArray(games)) await syncEventGames(req.params.id, evento.empresa_id, games);
+      if (Array.isArray(games)) await syncEventGames(req.params.id, evento.empresaId, games);
     });
 
     res.json({ updated: true });
@@ -946,17 +823,17 @@ router.post('/:id/start', verifyToken, requireRole('admin', 'master'), async (re
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+    if (!isMaster(req) && !sameId(evento.empresaId, req.user.empresaId)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     if (isClosedStatus(evento.status)) {
       return res.status(409).json({ error: 'Este evento já foi encerrado e não pode ser iniciado novamente.' });
     }
 
-    const changed = await startEvent(evento.id, { source: 'manual' });
+    const changed = await startEvent(evento.eventoId, { source: 'manual' });
     if (!changed) return res.status(409).json({ error: 'Este evento já está ativo.' });
 
-    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.eventoId });
     res.json({ started: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao iniciar evento:', err);
@@ -972,7 +849,7 @@ router.post('/:id/finish', verifyToken, requireRole('admin', 'master'), async (r
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+    if (!isMaster(req) && !sameId(evento.empresaId, req.user.empresaId)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     if (isClosedStatus(evento.status)) {
@@ -982,10 +859,10 @@ router.post('/:id/finish', verifyToken, requireRole('admin', 'master'), async (r
       return res.status(409).json({ error: 'Só é possível encerrar um evento ativo. Para descartar um evento agendado, exclua-o.' });
     }
 
-    const result = await finishEvent(evento.id, { source: 'manual', stopGame: global.stopGameForEvento });
+    const result = await finishEvent(evento.eventoId, { source: 'manual', stopGame: global.stopGameForEvento });
     if (!result.changed) return res.status(409).json({ error: 'Este evento já foi encerrado.' });
 
-    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.eventoId });
     res.json({ finished: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao encerrar evento:', err);
@@ -1021,7 +898,7 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+    if (!isMaster(req) && !sameId(evento.empresaId, req.user.empresaId)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     if (isClosedStatus(evento.status)) {
@@ -1036,7 +913,7 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
 
     // A nova data/hora é lida no relógio do buffet (mesmo fuso do início automático).
     const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
-    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
+    if (wallClockOf(schedule.data, schedule.hora) < nowMinute) {
       return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
     }
 
@@ -1044,14 +921,14 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
       `UPDATE evento
        SET data = @date, hora = @time, duracao = COALESCE(@duration, duracao)
        WHERE eventoId = @id AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
-      { date: schedule.date, time: schedule.time, duration: schedule.duration, id: evento.id }
+      { date: schedule.data, time: schedule.hora, duration: schedule.duracao, id: evento.eventoId }
     );
     if (!Number(result?.rowsAffected?.[0] || 0)) {
       return res.status(409).json({ error: 'O evento mudou de situação e não pode mais ser reagendado.' });
     }
 
-    console.log(`📅 [EVENTO] ${evento.id} reagendado para ${schedule.date} ${schedule.time}`);
-    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
+    console.log(`📅 [EVENTO] ${evento.eventoId} reagendado para ${schedule.data} ${schedule.hora}`);
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.eventoId });
     res.json({ rescheduled: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao reagendar evento:', err);
@@ -1067,27 +944,27 @@ router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (r
       { id: req.params.id }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && !sameId(evento.empresa_id, req.user.empresa_id)) {
+    if (!isMaster(req) && !sameId(evento.empresaId, req.user.empresaId)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
     if (!isClosedStatus(evento.status)) {
-      return res.status(409).json({ error: 'Só eventos encerrados podem ser reabertos.' });
+      return res.status(409).json({ error: 'Só evento encerrados podem ser reabertos.' });
     }
 
     const schedule = parseSchedule(req.body || {});
     if (schedule.error) return res.status(400).json({ error: schedule.error });
 
     const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
-    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
+    if (wallClockOf(schedule.data, schedule.hora) < nowMinute) {
       return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
     }
 
-    const result = await reopenEvent(evento.id, schedule);
+    const result = await reopenEvent(evento.eventoId, schedule);
     if (!result.changed) {
       return res.status(409).json({ error: 'O evento mudou de situação e não pode ser reaberto agora.' });
     }
 
-    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.id });
+    const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.eventoId });
     res.json({ reopened: true, evento: updated });
   } catch (err) {
     console.error('❌ Erro ao reabrir evento:', err);
@@ -1098,7 +975,7 @@ router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (r
 // Deletar evento
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
 
     // Verificar que o evento pertence à empresa (ou user é master)
     const evento = await queryOne(
@@ -1110,7 +987,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
@@ -1125,25 +1002,25 @@ router.delete('/:id', verifyToken, async (req, res) => {
 });
 
 /**
- * ✅ POST /:evento_id/setup-active-game
+ * ✅ POST /:eventoId/setup-active-game
  * Configura uma brincadeira como ativa no evento
  * Se brincadeiraId não for fornecido, cria uma nova "Captura de Territórios"
  */
-router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
+router.post('/:eventoId/setup-active-game', verifyToken, requireRole('admin', 'game_master', 'master'), async (req, res) => {
   try {
-    const evento_id = req.params.evento_id;
+    const eventoId = req.params.eventoId;
     const { brincadeiraId } = req.body || {};
     
-    console.log(`🎮 [routes/events.js] Configurando jogo ativo para evento: ${evento_id}`);
+    console.log(`🎮 [routes/events.js] Configurando jogo ativo para evento: ${eventoId}`);
 
     // 1️⃣ Validar evento existe e pertence à empresa
     const evento = await queryOne(
       isMaster(req)
         ? 'SELECT eventoId, empresaId, nome, status FROM evento WHERE eventoId = @id'
-        : 'SELECT eventoId, empresaId, nome, status FROM evento WHERE eventoId = @id AND empresaId = @empresa_id',
+        : 'SELECT eventoId, empresaId, nome, status FROM evento WHERE eventoId = @id AND empresaId = @empresaId',
       isMaster(req)
-        ? { id: evento_id }
-        : { id: evento_id, empresa_id: req.user.empresa_id }
+        ? { id: eventoId }
+        : { id: eventoId, empresaId: req.user.empresaId }
     );
 
     if (!evento) {
@@ -1157,22 +1034,22 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
 
     // 2️⃣ Se não forneceu ID, criar nova brincadeira
     if (!finalBrincadeiraId) {
-      console.log(`   📝 Criando nova brincadeira para evento ${evento.name}`);
+      console.log(`   📝 Criando nova brincadeira para evento ${evento.nome}`);
       
       const newBrincadeiraId = require('uuid').v4().toString();
       
       await query(`
         INSERT INTO brincadeira (brincadeiraId, nome, descricao, tipo, tipoJogo, status, pontosPadrao, empresaId, duracao)
-        VALUES (@id, @name, @description, @type, @gameType, @status, @points, @empresa_id, @duration)
+        VALUES (@id, @nome, @description, @tipo, @gameTipo, @status, @points, @empresaId, @duration)
       `, {
         id: newBrincadeiraId,
-        name: 'Captura de Territórios',
-        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseiras em checkpoints',
-        type: 'team',
-        gameType: 'standard',
+        nome: 'Captura de Territórios',
+        description: 'Jogo de captura de territórios em tempo real - Avatares se movem quando crianças passam pulseira em pontoVerificacao',
+        tipo: 'team',
+        gameTipo: 'standard',
         status: 'active',
         points: 10,
-        empresa_id: evento.empresa_id,
+        empresaId: evento.empresaId,
         duration: 120
       });
       
@@ -1182,8 +1059,8 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
 
     // 3️⃣ Validar que a brincadeira existe e pertence à empresa
     const brincadeira = await queryOne(
-      'SELECT brincadeiraId, nome, tipoJogo FROM brincadeira WHERE brincadeiraId = @id AND empresaId = @empresa_id',
-      { id: finalBrincadeiraId, empresa_id: evento.empresa_id }
+      'SELECT brincadeiraId, nome, tipoJogo FROM brincadeira WHERE brincadeiraId = @id AND empresaId = @empresaId',
+      { id: finalBrincadeiraId, empresaId: evento.empresaId }
     );
 
     if (!brincadeira) {
@@ -1198,26 +1075,26 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
         tipoJogoAtivo = @gameType
       WHERE eventoId = @id
     `, {
-      id: evento_id,
+      id: eventoId,
       brincadeiraId: finalBrincadeiraId,
-      gameType: brincadeira.game_type || 'standard'
+      gameType: brincadeira.tipoJogo || 'standard'
     });
-    await ensureEventActive(evento_id);
+    await ensureEventActive(eventoId);
 
-    console.log(`   ✅ Evento atualizado com brincadeira: ${brincadeira.name}`);
+    console.log(`   ✅ Evento atualizado com brincadeira: ${brincadeira.nome}`);
 
     // 5️⃣ Retornar resultado
     res.json({
       success: true,
       message: 'Jogo ativo configurado com sucesso',
       evento: {
-        id: evento.id,
-        name: evento.name,
+        id: evento.eventoId,
+        name: evento.nome,
       },
       brincadeira: {
-        id: brincadeira.id,
-        name: brincadeira.name,
-        game_type: brincadeira.game_type,
+        id: brincadeira.brincadeiraId,
+        name: brincadeira.nome,
+        tipoJogo: brincadeira.tipoJogo,
       }
     });
   } catch (err) {
@@ -1227,87 +1104,3 @@ router.post('/:evento_id/setup-active-game', verifyToken, requireRole('admin', '
 });
 
 module.exports = router;
-
-// ==================== ZONAS DO MAPA ====================
-
-// Carregar zonas do evento
-router.get('/:id/zones', verifyToken, async (req, res) => {
-  try {
-    const evento_id = req.params.id;
-    
-    // Verificar que o evento existe
-    const evento = await queryOne(
-      'SELECT empresaId FROM evento WHERE eventoId = @id',
-      { id: evento_id }
-    );
-    
-    if (!evento) {
-      return res.status(404).json({ error: 'Evento não encontrado' });
-    }
-    
-    // Verificar permissão: master acessa tudo, outros precisam pertencer à empresa
-    if (!isMaster(req) && req.user.role !== 'family' && evento.empresa_id !== req.user.empresa_id) {
-      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
-    }
-    
-    // Carregar zonas do evento
-    const zonesData = await queryOne(
-      'SELECT dadosZonas FROM evento WHERE eventoId = @id',
-      { id: evento_id }
-    );
-    
-    if (!zonesData || !zonesData.zones_data) {
-      return res.json([]);
-    }
-    
-    try {
-      const zones = JSON.parse(zonesData.zones_data);
-      res.json(zones);
-    } catch (e) {
-      console.error('Erro ao parsear zonas:', e);
-      res.json([]);
-    }
-  } catch (err) {
-    console.error('❌ Erro ao carregar zonas:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Salvar zonas do evento
-router.post('/:id/zones', verifyToken, async (req, res) => {
-  try {
-    const evento_id = req.params.id;
-    const { zones } = req.body;
-    const empresa_id = req.user.empresa_id;
-    
-    // Verificar que o evento pertence à empresa (ou user é master)
-    const evento = await queryOne(
-      'SELECT empresaId FROM evento WHERE eventoId = @id',
-      { id: evento_id }
-    );
-    
-    if (!evento) {
-      return res.status(404).json({ error: 'Evento não encontrado' });
-    }
-    
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
-      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
-    }
-    
-    if (!Array.isArray(zones)) {
-      return res.status(400).json({ error: 'Zonas deve ser um array' });
-    }
-    
-    // Salvar zonas em JSON
-    const zonesJson = JSON.stringify(zones);
-    await query(
-      'UPDATE evento SET dadosZonas = @zones_data WHERE eventoId = @id',
-      { zones_data: zonesJson, id: evento_id }
-    );
-    
-    res.json({ success: true, message: 'Zonas salvas com sucesso', zones });
-  } catch (err) {
-    console.error('❌ Erro ao salvar zonas:', err);
-    res.status(500).json({ error: err.message });
-  }
-});

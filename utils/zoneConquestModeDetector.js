@@ -10,7 +10,7 @@ async function getActiveZoneConquestMode(eventoId) {
 
     // Buscar partida TEAM ativa
     const teamGame = await queryOne(
-      `SELECT id, game_type FROM zonaConquistaPartidaTime
+      `SELECT id FROM zonaConquistaPartidaTime
        WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
        LIMIT 1`,
@@ -23,7 +23,7 @@ async function getActiveZoneConquestMode(eventoId) {
 
     // Buscar partida INDIVIDUAL ativa
     const individualGame = await queryOne(
-      `SELECT id, game_type FROM zonaConquistaPartidaIndividual
+      `SELECT id FROM zonaConquistaPartidaIndividual
        WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
        LIMIT 1`,

@@ -1,7 +1,7 @@
 // migrations/braceletHistory.js - Guarda a pulseira que a criança usou
 //
-// Quando a pulseira é liberada (10 minutos depois do fim do evento ou ao desvincular), criancas.bracelet_code
-// volta a ficar vazio para a pulseira poder ser usada por outra criança. criancas.last_bracelet_code guarda
+// Quando a pulseira é liberada (10 minutos depois do fim do evento ou ao desvincular), crianca.codigoPulseira
+// volta a ficar vazio para a pulseira poder ser usada por outra criança. crianca.ultimaPulseira guarda
 // qual foi a pulseira, para os relatórios continuarem mostrando a que a criança estava vinculada.
 const { query, queryOne, DB_DRIVER } = require('../database');
 
@@ -13,7 +13,7 @@ async function ensureBraceletHistorySchema() {
   } else {
     const column = await queryOne(`
       SELECT 1 AS found FROM INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_NAME = 'criancas' AND COLUMN_NAME = 'last_bracelet_code'
+      WHERE TABLE_NAME = 'crianca' AND COLUMN_NAME = 'ultimaPulseira'
     `);
     if (!column) await query('ALTER TABLE crianca ADD ultimaPulseira NVARCHAR(50) NULL');
   }

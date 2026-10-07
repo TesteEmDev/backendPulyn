@@ -34,13 +34,13 @@ async function ensureFamilySchema() {
       )
     `);
     await query('ALTER TABLE login ADD COLUMN IF NOT EXISTS nomeFamilia varchar(255)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_family_invites_token_hash ON conviteFamilia (hashToken)');
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_family_child_link ON vinculoFamiliar (loginId, criancaId)');
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uqConviteFamiliaHashToken ON conviteFamilia (hashToken)');
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uqVinculoFamiliarLoginCrianca ON vinculoFamiliar (loginId, criancaId)');
     return;
   }
 
   await query(`
-    IF OBJECT_ID('dbo.family_invites', 'U') IS NULL
+    IF OBJECT_ID('dbo.conviteFamilia', 'U') IS NULL
     BEGIN
       CREATE TABLE conviteFamilia (
         conviteId NVARCHAR(36) NOT NULL PRIMARY KEY,
@@ -58,7 +58,7 @@ async function ensureFamilySchema() {
     END
   `);
   await query(`
-    IF OBJECT_ID('dbo.family_child_links', 'U') IS NULL
+    IF OBJECT_ID('dbo.vinculoFamiliar', 'U') IS NULL
     BEGIN
       CREATE TABLE vinculoFamiliar (
         vinculoId NVARCHAR(36) NOT NULL PRIMARY KEY,
@@ -74,20 +74,20 @@ async function ensureFamilySchema() {
       )
     END
   `);
-  const familyNameColumn = await queryOne(`
+  const nomeFamiliaColumn = await queryOne(`
     SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
-    WHERE TABLE_NAME = 'logins' AND COLUMN_NAME = 'family_name'
+    WHERE TABLE_NAME = 'login' AND COLUMN_NAME = 'nomeFamilia'
   `);
-  if (!familyNameColumn) {
+  if (!nomeFamiliaColumn) {
     await query('ALTER TABLE login ADD nomeFamilia NVARCHAR(255) NULL');
   }
   await query(`
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_family_invites_token_hash' AND object_id = OBJECT_ID('dbo.family_invites'))
-      CREATE UNIQUE INDEX uq_family_invites_token_hash ON conviteFamilia (hashToken)
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqConviteFamiliaHashToken' AND object_id = OBJECT_ID('dbo.conviteFamilia'))
+      CREATE UNIQUE INDEX uqConviteFamiliaHashToken ON conviteFamilia (hashToken)
   `);
   await query(`
-    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_family_child_link' AND object_id = OBJECT_ID('dbo.family_child_links'))
-      CREATE UNIQUE INDEX uq_family_child_link ON vinculoFamiliar (loginId, criancaId)
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqVinculoFamiliarLoginCrianca' AND object_id = OBJECT_ID('dbo.vinculoFamiliar'))
+      CREATE UNIQUE INDEX uqVinculoFamiliarLoginCrianca ON vinculoFamiliar (loginId, criancaId)
   `);
 }
 

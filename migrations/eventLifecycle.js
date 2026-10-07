@@ -15,14 +15,14 @@ async function ensureEventLifecycleSchema() {
     `);
   } else {
     await query(`
-      IF COL_LENGTH('dbo.eventos', 'responsible_name') IS NULL ALTER TABLE evento ADD nomeResponsavel varchar(150) NULL;
-      IF COL_LENGTH('dbo.eventos', 'started_at') IS NULL ALTER TABLE evento ADD iniciadoEm datetime2 NULL;
-      IF COL_LENGTH('dbo.eventos', 'ended_at') IS NULL ALTER TABLE evento ADD finalizadoEm datetime2 NULL;
-      IF COL_LENGTH('dbo.eventos', 'auto_start') IS NULL ALTER TABLE evento ADD autoInicio int NULL DEFAULT 0;
-      IF COL_LENGTH('dbo.eventos', 'auto_end') IS NULL ALTER TABLE evento ADD autoFim int NULL DEFAULT 0;
+      IF COL_LENGTH('dbo.evento', 'responsible_name') IS NULL ALTER TABLE evento ADD responsible_name varchar(150) NULL;
+      IF COL_LENGTH('dbo.evento', 'iniciadoEm') IS NULL ALTER TABLE evento ADD iniciadoEm datetime2 NULL;
+      IF COL_LENGTH('dbo.evento', 'ended_at') IS NULL ALTER TABLE evento ADD ended_at datetime2 NULL;
+      IF COL_LENGTH('dbo.evento', 'autoInicio') IS NULL ALTER TABLE evento ADD autoInicio int NULL DEFAULT 0;
+      IF COL_LENGTH('dbo.evento', 'autoFim') IS NULL ALTER TABLE evento ADD autoFim int NULL DEFAULT 0;
     `);
   }
-  // Eventos que já existiam ficam com auto_start/auto_end = 0 de propósito: o
+  // Eventos que já existiam ficam com autoInicio/autoFim = 0 de propósito: o
   // início/fim automático só vale para eventos criados (ou editados) depois
   // deste recurso, para não encerrar de surpresa eventos antigos parados em
   // "agendado".

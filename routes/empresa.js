@@ -1,7 +1,7 @@
 // routes/empresa.js - Dados do próprio buffet (empresa do usuário logado)
 //
 // O cadastro da unidade (nome, e-mail, telefone, endereço e frequência de backup) fica na
-// tabela `clientes`; o CNPJ fica em `empresas`. Ver utils/unitProfileStore.js.
+// tabela `cliente`; o CNPJ fica em `empresa`. Ver utils/unitProfileStore.js.
 const express = require('express');
 const router = express.Router();
 const database = require('../database');
@@ -15,7 +15,7 @@ router.use(verifyToken, requireRole('admin'));
 
 router.get('/me', async (req, res) => {
   try {
-    const profile = await loadUnitProfile(database, req.user.empresa_id);
+    const profile = await loadUnitProfile(database, req.user.empresaId);
     if (!profile) return res.status(404).json({ error: 'Empresa não encontrada' });
     res.json(profile);
   } catch (err) {
@@ -39,7 +39,7 @@ router.put('/me', async (req, res) => {
       if (digits) {
         const duplicate = await database.queryOne(
           'SELECT empresaId FROM empresa WHERE cnpj = @cnpj AND empresaId <> @id',
-          { cnpj: digits, id: req.user.empresa_id }
+          { cnpj: digits, id: req.user.empresaId }
         );
         if (duplicate) return res.status(409).json({ error: 'Este CNPJ já está cadastrado em outro buffet.' });
       }
@@ -51,7 +51,7 @@ router.put('/me', async (req, res) => {
     }
 
     const profile = await database.withTransaction(() =>
-      saveUnitProfile(database, req.user.empresa_id, parsed.values, { cnpj, fallbackEmail: req.user.email })
+      saveUnitProfile(database, req.user.empresaId, parsed.values, { cnpj, fallbackEmail: req.user.email })
     );
     if (!profile) return res.status(404).json({ error: 'Empresa não encontrada' });
 
@@ -65,7 +65,7 @@ router.put('/me', async (req, res) => {
 // Logo/foto da unidade (separada do perfil por ser pesada).
 router.get('/me/logo', async (req, res) => {
   try {
-    res.json({ logo: await loadLogo(database, req.user.empresa_id) });
+    res.json({ logo: await loadLogo(database, req.user.empresaId) });
   } catch (err) {
     console.error('❌ Erro ao buscar logo da unidade:', err);
     res.status(500).json({ error: err.message });
@@ -78,7 +78,7 @@ router.put('/me/logo', async (req, res) => {
     if (parsed.error) return res.status(400).json({ error: parsed.error });
 
     const saved = await database.withTransaction(() =>
-      saveLogo(database, req.user.empresa_id, parsed.value, { fallbackEmail: req.user.email })
+      saveLogo(database, req.user.empresaId, parsed.value, { fallbackEmail: req.user.email })
     );
     if (!saved) return res.status(404).json({ error: 'Empresa não encontrada' });
     res.json({ success: true, logo: parsed.value });
@@ -91,7 +91,7 @@ router.put('/me/logo', async (req, res) => {
 router.delete('/me/logo', async (req, res) => {
   try {
     const removed = await database.withTransaction(() =>
-      saveLogo(database, req.user.empresa_id, null, { fallbackEmail: req.user.email })
+      saveLogo(database, req.user.empresaId, null, { fallbackEmail: req.user.email })
     );
     if (!removed) return res.status(404).json({ error: 'Empresa não encontrada' });
     res.json({ success: true });

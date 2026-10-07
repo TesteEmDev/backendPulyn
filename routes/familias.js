@@ -27,8 +27,8 @@ async function getInvite(token) {
     WHERE i.hashToken = @tokenHash
   `, { tokenHash: hashToken(token) });
   if (!invite) return null;
-  if (invite.status === 'pending' && new Date(invite.expires_at) <= new Date()) {
-    await query(`UPDATE conviteFamilia SET status = 'expired' WHERE conviteId = @id AND status = 'pending'`, { id: invite.id });
+  if (invite.status === 'pending' && new Date(invite.expiramEm) <= new Date()) {
+    await query(`UPDATE conviteFamilia SET status = 'expired' WHERE conviteId = @id AND status = 'pending'`, { id: invite.conviteId });
     invite.status = 'expired';
   }
   return invite;
@@ -40,7 +40,7 @@ async function getEventForUser(eventoId, req) {
     { eventoId }
   );
   if (!evento) return { error: 'Evento não encontrado', status: 404 };
-  if (!isMaster(req) && String(evento.empresa_id) !== String(req.user.empresa_id)) {
+  if (!isMaster(req) && String(evento.empresaId) !== String(req.user.empresaId)) {
     return { error: 'Acesso negado: evento não pertence à sua empresa', status: 403 };
   }
   return { evento };
@@ -50,10 +50,10 @@ function publicInvite(invite) {
   return {
     valid: invite.status === 'pending',
     status: invite.status,
-    event: { id: invite.evento_id, name: invite.evento_nome, date: invite.evento_data },
+    event: { id: invite.eventoId, name: invite.evento_nome, date: invite.evento_data },
     child: invite.linked_child_id ? { id: invite.linked_child_id, name: invite.linked_child_name } : null,
     email: invite.email || null,
-    expiresAt: invite.expires_at,
+    expiresAt: invite.expiramEm,
   };
 }
 
@@ -85,7 +85,7 @@ router.post('/invites', verifyToken, async (req, res) => {
     if (criancaId) {
       const child = await queryOne(
         `SELECT criancaId FROM crianca WHERE criancaId = @criancaId AND eventoId = @eventoId AND empresaId = @empresaId`,
-        { criancaId, eventoId, empresaId: evento.empresa_id }
+        { criancaId, eventoId, empresaId: evento.empresaId }
       );
       if (!child) return res.status(404).json({ error: 'Criança não encontrada neste evento' });
     }
@@ -100,7 +100,7 @@ router.post('/invites', verifyToken, async (req, res) => {
       VALUES (@id, @empresaId, @eventoId, @criancaId, @email, @tokenHash, 'pending', @expiresAt, @createdBy)
     `, {
       id,
-      empresaId: evento.empresa_id,
+      empresaId: evento.empresaId,
       eventoId,
       criancaId: criancaId || null,
       email: email ? String(email).trim().toLowerCase() : null,
@@ -114,7 +114,7 @@ router.post('/invites', verifyToken, async (req, res) => {
       token: rawToken,
       inviteUrl: `${FRONTEND_URL}/family/invite/${rawToken}`,
       expiresAt: expiresAt.toISOString(),
-      event: { id: evento.id, name: evento.name, date: evento.date },
+      event: { id: evento.eventoId, name: evento.nome, date: evento.data },
     });
   } catch (err) {
     console.error('❌ Erro ao criar convite familiar:', err);
@@ -132,19 +132,19 @@ router.post('/invites/:token/register', async (req, res) => {
       return res.status(410).json({ error: invite.status === 'expired' ? 'Convite expirado' : 'Convite já utilizado', status: invite.status });
     }
 
-    const { name, parentName, email, password, relationship = 'responsável', child, children: requestedChildren } = req.body;
-    const familyName = String(parentName || name || '').trim();
+    const { nome, parentNome, email, senha, relacionamento = 'responsável', child, children: requestedChildren } = req.body;
+    const familyName = String(parentNome || nome || '').trim();
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const childrenPayload = Array.isArray(requestedChildren)
       ? requestedChildren
       : (child ? [child] : []);
-    if (!familyName || !normalizedEmail || !password) {
+    if (!familyName || !normalizedEmail || !senha) {
       return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios' });
     }
     if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
       return res.status(400).json({ error: 'E-mail inválido' });
     }
-    if (String(password).length < 6) {
+    if (String(senha).length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
     // O responsável pode se cadastrar sem crianças (vincula depois pelo QR Code no app)
@@ -157,13 +157,13 @@ router.post('/invites/:token/register', async (req, res) => {
       'SELECT loginId, perfil, empresaId, status, senha FROM login WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
-    if (existingLogin && (existingLogin.role !== 'family' || String(existingLogin.empresa_id) !== String(invite.empresa_id))) {
+    if (existingLogin && (existingLogin.perfil !== 'family' || String(existingLogin.empresaId) !== String(invite.empresaId))) {
       return res.status(409).json({ error: 'Este e-mail já pertence a outra conta. Use outro e-mail.' });
     }
     if (existingLogin && !['active', 'pending'].includes(existingLogin.status)) {
       return res.status(409).json({ error: 'Esta conta familiar não está disponível para novos vínculos.' });
     }
-    if (existingLogin && existingLogin.password !== Buffer.from(String(password)).toString('base64')) {
+    if (existingLogin && existingLogin.senha !== Buffer.from(String(senha)).toString('base64')) {
       return res.status(409).json({ error: 'A senha informada não confere com a conta familiar existente.' });
     }
 
@@ -176,17 +176,17 @@ router.post('/invites/:token/register', async (req, res) => {
     }
 
     try {
-      const loginId = existingLogin?.id || crypto.randomUUID();
+      const loginId = existingLogin?.loginId || crypto.randomUUID();
       if (!existingLogin) {
         await query(`
           INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
-          VALUES (@id, @empresaId, @email, @password, @familyName, 'family', @loginStatus, GETDATE())
+          VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', @loginStatus, GETDATE())
         `, {
           id: loginId,
-          empresaId: invite.empresa_id,
+          empresaId: invite.empresaId,
           email: normalizedEmail,
-          password: Buffer.from(String(password)).toString('base64'),
-          familyName,
+          senha: Buffer.from(String(senha)).toString('base64'),
+          familyNome: familyName,
           loginStatus: plan.loginStatus,
         });
       }
@@ -200,13 +200,13 @@ router.post('/invites/:token/register', async (req, res) => {
           await query(`
             INSERT INTO crianca
               (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, pontos, status)
-            VALUES (@id, @eventoId, @empresaId, NULL, @childName, @nickname, @age, '👤', 0, 'pending')
+            VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @apelido, @age, '👤', 0, 'pending')
           `, {
             id: childId,
-            eventoId: invite.evento_id,
-            empresaId: invite.empresa_id,
-            childName: String(childData.name).trim(),
-            nickname: String(childData.nickname || childData.name).trim(),
+            eventoId: invite.eventoId,
+            empresaId: invite.empresaId,
+            childNome: String(childData.name).trim(),
+            apelido: String(childData.nickname || childData.name).trim(),
             age: Number.isFinite(Number(childData.age)) ? Number(childData.age) : null,
           });
           childIds.push(childId);
@@ -218,13 +218,13 @@ router.post('/invites/:token/register', async (req, res) => {
         await query(`
           INSERT INTO vinculoFamiliar
             (vinculoId, loginId, criancaId, empresaId, relacionamento, status)
-          VALUES (@id, @loginId, @childId, @empresaId, @relationship, 'pending')
+          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'pending')
         `, {
           id: linkId,
           loginId,
           childId,
-          empresaId: invite.empresa_id,
-          relationship: String(relationship).trim().slice(0, 50) || 'responsável',
+          empresaId: invite.empresaId,
+          relacionamento: String(relacionamento).trim().slice(0, 50) || 'responsável',
         });
       }
 
@@ -260,16 +260,16 @@ router.post('/invites/:token/register', async (req, res) => {
 async function listFamilyLinks(status, eventoId, req) {
   return allQuery(`
     SELECT l.vinculoId as link_id, l.status as link_status, l.relacionamento, l.criadoEm as requested_at,
-           u.loginId as login_id, u.email, u.nomeFamilia,
-           c.criancaId as crianca_id, c.nome as crianca_name, c.apelido, c.idade, c.avatar,
+           u.loginId as loginId, u.email, u.nomeFamilia,
+           c.criancaId as criancaId, c.nome as crianca_nome, c.apelido, c.idade, c.avatar,
            c.codigoPulseira, c.pontos, c.status as crianca_status,
-           e.eventoId as evento_id, e.nome as evento_name, e.data as evento_date,
-           t.timeId as time_id, t.nome as time_name, t.cor as time_color
+           e.eventoId as eventoId, e.nome as evento_nome, e.data as evento_date,
+           t.timeId as timeId, t.nome as time_nome, t.cor as time_color
     FROM vinculoFamiliar l
     JOIN login u ON u.loginId = l.loginId
     JOIN crianca c ON c.criancaId = l.criancaId
     JOIN evento e ON e.eventoId = c.eventoId
-    LEFT JOIN time t ON t.timeId = c.timeId
+    LEFT JOIN "time" t ON t.timeId = c.timeId
     WHERE l.status = @status
       AND (CAST(@eventoId AS VARCHAR(36)) IS NULL OR e.eventoId = CAST(@eventoId AS VARCHAR(36)))
       AND (@isMaster = 1 OR l.empresaId = @empresaId)
@@ -277,7 +277,7 @@ async function listFamilyLinks(status, eventoId, req) {
   `, {
     status,
     eventoId,
-    empresaId: req.user.empresa_id,
+    empresaId: req.user.empresaId,
     isMaster: isMaster(req) ? 1 : 0,
   });
 }
@@ -285,7 +285,7 @@ async function listFamilyLinks(status, eventoId, req) {
 router.get('/pending', verifyToken, async (req, res) => {
   try {
     if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
-    const pending = await listFamilyLinks('pending', req.query.evento_id || null, req);
+    const pending = await listFamilyLinks('pending', req.query.eventoId || null, req);
     res.json(pending);
   } catch (err) {
     console.error('❌ Erro ao listar aprovações familiares:', err);
@@ -296,7 +296,7 @@ router.get('/pending', verifyToken, async (req, res) => {
 router.get('/approved', verifyToken, async (req, res) => {
   try {
     if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
-    const approved = await listFamilyLinks('approved', req.query.evento_id || null, req);
+    const approved = await listFamilyLinks('approved', req.query.eventoId || null, req);
     res.json(approved);
   } catch (err) {
     console.error('❌ Erro ao listar famílias aprovadas:', err);
@@ -306,14 +306,14 @@ router.get('/approved', verifyToken, async (req, res) => {
 
 async function getLinkForStaff(linkId, req) {
   const link = await queryOne(
-    `SELECT l.*, c.nome as crianca_name, c.status as crianca_status
+    `SELECT l.*, c.nome as crianca_nome, c.status as crianca_status
      FROM vinculoFamiliar l
      JOIN crianca c ON c.criancaId = l.criancaId
      WHERE l.vinculoId = @linkId`,
     { linkId }
   );
   if (!link) return { error: 'Solicitação não encontrada', status: 404 };
-  if (!isMaster(req) && String(link.empresa_id) !== String(req.user.empresa_id)) {
+  if (!isMaster(req) && String(link.empresaId) !== String(req.user.empresaId)) {
     return { error: 'Acesso negado', status: 403 };
   }
   return { link };
@@ -330,26 +330,26 @@ router.get('/links', verifyToken, async (req, res) => {
     if (status && !LINK_STATUSES.has(status)) return res.status(400).json({ error: 'Status inválido' });
 
     const links = await allQuery(`
-      SELECT l.vinculoId as link_id, l.status as link_status, l.relacionamento,
-             l.criadoEm as requested_at, l.aprovadoEm, l.rejeitadoEm,
-             u.loginId as login_id, u.email, u.nomeFamilia,
-             c.criancaId as crianca_id, c.nome as crianca_name, c.apelido, c.idade, c.avatar,
-             c.codigoPulseira, c.status as crianca_status,
-             e.eventoId as evento_id, e.nome as evento_name, e.data as evento_date,
-             t.nome as time_name, t.cor as time_color
+      SELECT l.vinculoId, l.status AS statusVinculo, l.relacionamento,
+             l.criadoEm AS solicitadoEm, l.aprovadoEm, l.rejeitadoEm,
+             u.loginId, u.email, u.nomeFamilia,
+             c.criancaId, c.nome AS nomeCrianca, c.apelido, c.idade, c.avatar,
+             COALESCE(c.codigoPulseira, c.ultimaPulseira) AS codigoPulseira, c.status AS statusCrianca,
+             e.eventoId, e.nome AS nomeEvento, e.data AS dataEvento,
+             t.nome AS nomeTime, t.cor AS corTime
       FROM vinculoFamiliar l
       JOIN login u ON u.loginId = l.loginId
       JOIN crianca c ON c.criancaId = l.criancaId
       JOIN evento e ON e.eventoId = c.eventoId
-      LEFT JOIN time t ON t.timeId = c.timeId
+      LEFT JOIN "time" t ON t.timeId = c.timeId
       WHERE (CAST(@status AS VARCHAR(20)) IS NULL OR l.status = CAST(@status AS VARCHAR(20)))
         AND (CAST(@eventoId AS VARCHAR(36)) IS NULL OR e.eventoId = CAST(@eventoId AS VARCHAR(36)))
         AND (@isMaster = 1 OR l.empresaId = @empresaId)
       ORDER BY e.data DESC, c.nome ASC, l.criadoEm ASC
     `, {
       status,
-      eventoId: req.query.evento_id ? String(req.query.evento_id) : null,
-      empresaId: req.user.empresa_id,
+      eventoId: req.query.eventoId ? String(req.query.eventoId) : null,
+      empresaId: req.user.empresaId,
       isMaster: isMaster(req) ? 1 : 0,
     });
     res.json(links);
@@ -374,7 +374,7 @@ router.post('/links/:linkId/unlink', verifyToken, async (req, res) => {
 
     await query(
       `UPDATE vinculoFamiliar SET status = 'inactive' WHERE vinculoId = @linkId AND status IN ('approved', 'pending')`,
-      { linkId: link.id }
+      { linkId: link.vinculoId }
     );
     res.json({ ok: true, status: 'inactive', message: 'Vínculo desfeito' });
   } catch (err) {
@@ -397,8 +397,8 @@ router.post('/links/:linkId/approve', verifyToken, async (req, res) => {
       SET status = 'approved', aprovadoPor = @approvedBy, aprovadoEm = GETDATE()
       WHERE vinculoId = @linkId AND status = 'pending'
     `, { linkId: link.id, approvedBy: req.user.id });
-    await query(`UPDATE login SET status = 'active', dataAtualizacao = GETDATE() WHERE loginId = @loginId`, { loginId: link.login_id });
-    await query(`UPDATE crianca SET status = 'active' WHERE criancaId = @childId AND status = 'pending'`, { childId: link.crianca_id });
+    await query(`UPDATE login SET status = 'active', dataAtualizacao = GETDATE() WHERE loginId = @loginId`, { loginId: link.loginId });
+    await query(`UPDATE crianca SET status = 'active' WHERE criancaId = @childId AND status = 'pending'`, { childId: link.criancaId });
 
     res.json({ ok: true, status: 'approved', message: 'Família aprovada com sucesso' });
   } catch (err) {
@@ -424,15 +424,15 @@ router.post('/links/:linkId/reject', verifyToken, async (req, res) => {
     const approvedLink = await queryOne(`
       SELECT vinculoId FROM vinculoFamiliar
       WHERE criancaId = @childId AND status = 'approved'
-    `, { childId: link.crianca_id });
+    `, { childId: link.criancaId });
     if (!approvedLink) {
-      await query(`UPDATE crianca SET status = 'inactive' WHERE criancaId = @childId AND status = 'pending'`, { childId: link.crianca_id });
+      await query(`UPDATE crianca SET status = 'inactive' WHERE criancaId = @childId AND status = 'pending'`, { childId: link.criancaId });
     }
     const approvedSibling = await queryOne(`
       SELECT vinculoId FROM vinculoFamiliar WHERE loginId = @loginId AND status = 'approved'
-    `, { loginId: link.login_id });
+    `, { loginId: link.loginId });
     if (!approvedSibling) {
-      await query(`UPDATE login SET status = 'inactive', dataAtualizacao = GETDATE() WHERE loginId = @loginId AND status = 'pending'`, { loginId: link.login_id });
+      await query(`UPDATE login SET status = 'inactive', dataAtualizacao = GETDATE() WHERE loginId = @loginId AND status = 'pending'`, { loginId: link.loginId });
     }
 
     res.json({ ok: true, status: 'rejected', message: 'Solicitação rejeitada' });
@@ -450,7 +450,7 @@ router.get('/me', verifyToken, async (req, res) => {
       FROM login WHERE loginId = @loginId AND perfil = 'family'
     `, { loginId: req.user.id });
     if (!family) return res.status(404).json({ error: 'Conta familiar não encontrada' });
-    res.json({ id: family.id, name: family.family_name || family.email, email: family.email, status: family.status, empresa_id: family.empresa_id });
+    res.json({ id: family.loginId, name: family.nomeFamilia || family.email, email: family.email, status: family.status, empresaId: family.empresaId });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -470,23 +470,23 @@ router.get('/children', verifyToken, async (req, res) => {
              t.timeId as "teamId", t.nome as "teamName", t.cor as "teamColor", t.pontos as team_points
       FROM vinculoFamiliar l
       JOIN crianca c ON c.criancaId = l.criancaId
-      LEFT JOIN time t ON t.timeId = c.timeId
+      LEFT JOIN "time" t ON t.timeId = c.timeId
       WHERE l.loginId = @loginId AND (l.status = 'approved' OR l.status = 'pending')
       ORDER BY c.nome ASC
     `, { loginId: req.user.id });
     
     console.log(`📊 [FAMILIAS] Crianças encontradas: ${children.length}`);
     children.forEach((c, idx) => {
-      console.log(`   [${idx}] ${c.nickname || c.name} → evento_id: ${c.evento_id} (${typeof c.evento_id})`);
+      console.log(`   [${idx}] ${c.apelido || c.nome} → eventoId: ${c.eventoId} (${typeof c.eventoId})`);
     });
     
     // Mapear para o formato esperado pela app
     const mappedChildren = children.map(child => ({
-      id: child.id,
-      evento_id: child.evento_id,  // ✅ ADICIONADO - importante para o app mobile!
-      name: child.name,
-      nickname: child.nickname,
-      age: child.age,
+      id: child.criancaId,
+      eventoId: child.eventoId,  // ✅ ADICIONADO - importante para o app mobile!
+      name: child.nome,
+      nickname: child.apelido,
+      age: child.idade,
       profileImage: child.profileImage,
       currentScore: child.currentScore || 0,
       totalScore: child.totalScore || 0,
@@ -497,9 +497,9 @@ router.get('/children', verifyToken, async (req, res) => {
       achievements: []
     }));
     
-    console.log(`✅ [FAMILIAS] Crianças mapeadas com evento_id:`);
+    console.log(`✅ [FAMILIAS] Crianças mapeadas com eventoId:`);
     mappedChildren.forEach((c, idx) => {
-      console.log(`   [${idx}] ${c.nickname || c.name} → evento_id: ${c.evento_id} (${c.evento_id ? '✓' : '❌'})`);
+      console.log(`   [${idx}] ${c.nickname || c.name} → eventoId: ${c.eventoId} (${c.eventoId ? '✓' : '❌'})`);
     });
     
     res.json({
@@ -526,13 +526,13 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
     if (!child) return res.status(404).json({ error: 'Criança não encontrada na sua família' });
 
     const scores = await allQuery(`
-      SELECT p.pontuacaoId, p.pontos, p.criadoEm, p.checkpointId, cp.nome as checkpoint_name,
+      SELECT p.pontuacaoId, p.pontos, p.criadoEm, p.checkpointId, cp.nome as checkpoint_nome,
              p.brincadeiraId
       FROM pontuacao p
       LEFT JOIN pontoVerificacao cp ON cp.checkpointId = p.checkpointId
       WHERE p.criancaId = @childId AND p.eventoId = @eventoId
       ORDER BY p.criadoEm DESC
-    `, { childId: child.id, eventoId: child.evento_id });
+    `, { childId: child.criancaId, eventoId: child.eventoId });
     res.json({ child, scores });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -542,7 +542,7 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
 /**
  * ✅ GET /api/familias/active-event
  * Retorna o evento/jogo ativo para a família
- * Baseado no evento_id da primeira criança vinculada
+ * Baseado no eventoId da primeira criança vinculada
  */
 router.get('/active-event', verifyToken, async (req, res) => {
   try {
@@ -562,8 +562,8 @@ router.get('/active-event', verifyToken, async (req, res) => {
       LIMIT 1
     `, { loginId: req.user.id });
 
-    if (!firstChild || !firstChild.evento_id) {
-      console.log(`⚠️ [FAMILIAS] Nenhuma criança com evento_id encontrada`);
+    if (!firstChild || !firstChild.eventoId) {
+      console.log(`⚠️ [FAMILIAS] Nenhuma criança com eventoId encontrada`);
       return res.status(404).json({ error: 'Nenhum evento associado' });
     }
 
@@ -571,49 +571,49 @@ router.get('/active-event', verifyToken, async (req, res) => {
     const activeEvent = await queryOne(`
       SELECT e.eventoId, e.nome, e.data, e.status, e.empresaId,
              e.tipoJogoAtivo, e.brincadeiraAtivaId,
-             b.nome as active_game_name, b.tipo as game_type, b.descricao as game_description,
+             b.nome as active_game_nome, b.tipo as tipoJogo, b.descricao as game_description,
              COUNT(DISTINCT c.criancaId) as child_count,
              COUNT(DISTINCT t.timeId) as team_count,
              COUNT(DISTINCT cp.checkpointId) as checkpoint_count
       FROM evento e
       LEFT JOIN brincadeira b ON b.brincadeiraId = e.brincadeiraAtivaId
       LEFT JOIN crianca c ON c.eventoId = e.eventoId
-      LEFT JOIN time t ON t.eventoId = e.eventoId
+      LEFT JOIN "time" t ON t.eventoId = e.eventoId
       LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.eventoId AND cp.proposito != 'reception'
       WHERE e.eventoId = @eventoId
       GROUP BY e.eventoId, e.nome, e.data, e.status, e.empresaId,
                e.tipoJogoAtivo, e.brincadeiraAtivaId,
                b.nome, b.tipo, b.descricao
-    `, { eventoId: firstChild.evento_id });
+    `, { eventoId: firstChild.eventoId });
 
     if (!activeEvent) {
-      console.log(`⚠️ [FAMILIAS] Evento não encontrado: ${firstChild.evento_id}`);
+      console.log(`⚠️ [FAMILIAS] Evento não encontrado: ${firstChild.eventoId}`);
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    console.log(`✅ [FAMILIAS] Evento ativo encontrado: ${activeEvent.name}`);
-    console.log(`   🎮 Jogo ativo: ${activeEvent.active_game_name || 'Nenhum jogo ativo'}`);
+    console.log(`✅ [FAMILIAS] Evento ativo encontrado: ${activeEvent.nome}`);
+    console.log(`   🎮 Jogo ativo: ${activeEvent.active_game_nome || 'Nenhum jogo ativo'}`);
 
     // Montar resposta com info do jogo ativo
     res.json({
       success: true,
       activeGame: {
-        id: activeEvent.id,
-        name: activeEvent.name,
-        date: activeEvent.date,
+        id: activeEvent.eventoId,
+        name: activeEvent.nome,
+        date: activeEvent.data,
         status: activeEvent.status,
         // 🎮 Info do jogo ativo
-        gameId: activeEvent.active_brincadeira_id || null,
-        gameName: activeEvent.active_game_name || 'Nenhum jogo em andamento',
-        gameType: activeEvent.active_game_type || 'none',
-        gameTypeDetail: activeEvent.game_type || null,
+        gameId: activeEvent.brincadeiraAtivaId || null,
+        gameName: activeEvent.active_game_nome || 'Nenhum jogo em andamento',
+        gameType: activeEvent.tipoJogoAtivo || 'none',
+        gameTypeDetail: activeEvent.tipoJogo || null,
         gameDescription: activeEvent.game_description || null,
         // 📊 Contadores
         childCount: activeEvent.child_count || 0,
         teamCount: activeEvent.team_count || 0,
         checkpointCount: activeEvent.checkpoint_count || 0,
         isActive: activeEvent.status === 'active',
-        hasActiveGame: !!activeEvent.active_brincadeira_id
+        hasActiveGame: !!activeEvent.brincadeiraAtivaId
       }
     });
   } catch (error) {
@@ -635,7 +635,7 @@ router.get('/notifications', verifyToken, async (req, res) => {
     }
 
     // ✅ Por enquanto retorna lista vazia
-    // TODO: Implementar tabela de notificações com eventos de criança
+    // TODO: Implementar tabela de notificações com evento de criança
     res.json({
       success: true,
       notifications: []
@@ -648,7 +648,7 @@ router.get('/notifications', verifyToken, async (req, res) => {
 
 /**
  * ✅ GET /api/familias/children/:id/achievements
- * Lista conquistas de uma criança
+ * Lista conquista de uma criança
  * Implementação básica: por enquanto retorna lista vazia
  * TODO: Implementar sistema de achievements/badges completo
  */
@@ -663,8 +663,8 @@ router.get('/children/:id/achievements', verifyToken, async (req, res) => {
     // Verificar se pais tem acesso a essa criança
     const hasAccess = await queryOne(
       `SELECT 1 FROM vinculoFamiliar
-       WHERE loginId = @family_id AND criancaId = @crianca_id AND status = 'active'`,
-      { family_id: req.user.id, crianca_id: id }
+       WHERE loginId = @family_id AND criancaId = @criancaId AND status = 'active'`,
+      { family_id: req.user.id, criancaId: id }
     );
 
     if (!hasAccess) {
@@ -672,14 +672,14 @@ router.get('/children/:id/achievements', verifyToken, async (req, res) => {
     }
 
     // ✅ Por enquanto retorna lista vazia
-    // TODO: Implementar tabela de conquistas/badges com eventos
+    // TODO: Implementar tabela de conquista/badges com evento
     res.json({
       success: true,
       achievements: []
     });
   } catch (error) {
-    console.error('❌ Erro ao buscar conquistas:', error);
-    res.status(500).json({ error: 'Erro ao buscar conquistas', details: error.message });
+    console.error('❌ Erro ao buscar conquista:', error);
+    res.status(500).json({ error: 'Erro ao buscar conquista', details: error.message });
   }
 });
 

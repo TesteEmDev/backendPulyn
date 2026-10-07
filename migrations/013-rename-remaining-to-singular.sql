@@ -1,0 +1,19 @@
+-- Migration: Rename remaining plural tables to singular
+
+ALTER TABLE IF EXISTS cacaTesourPartidas RENAME TO cacaTesourPartida;
+ALTER TABLE IF EXISTS cacaTesourScans RENAME TO cacaTesourScan;
+ALTER TABLE IF EXISTS chamadosSuport RENAME TO chamadoSuport;
+ALTER TABLE IF EXISTS codigosVinculoFamiliar RENAME TO codigoVinculoFamiliar;
+ALTER TABLE IF EXISTS criancaConquistas RENAME TO criancaConquista;
+ALTER TABLE IF EXISTS empresas RENAME TO empresa;
+ALTER TABLE IF EXISTS etiquetasCheckpoint RENAME TO etiquetaCheckpoint;
+ALTER TABLE IF EXISTS eventoBrincadeiras RENAME TO eventoBrincadeira;
+ALTER TABLE IF EXISTS mensagensDisplay RENAME TO mensagemDisplay;
+ALTER TABLE IF EXISTS monsterCacaLeituras RENAME TO monsterCacaLeitura;
+ALTER TABLE IF EXISTS monsterCacaPartidas RENAME TO monsterCacaPartida;
+ALTER TABLE IF EXISTS zonasConquistaLeituraIndividual RENAME TO zonaConquistaLeituraIndividual;
+ALTER TABLE IF EXISTS zonasConquistaLeituraTime RENAME TO zonaConquistaLeituraTime;
+ALTER TABLE IF EXISTS zonasConquistaPartidaIndividual RENAME TO zonaConquistaPartidaIndividual;
+ALTER TABLE IF EXISTS zonasConquistaPartidaTime RENAME TO zonaConquistaPartidaTime;
+ALTER TABLE IF EXISTS zonasConquistaProtecaoCheckpointIndividual RENAME TO zonaConquistaProtecaoCheckpointIndividual;
+ALTER TABLE IF EXISTS zonasConquistaTempoTime RENAME TO zonaConquistaTempoTime;

@@ -23,7 +23,7 @@ async function getCheckpointCooldownSeconds(brincadeiraId, checkpointId) {
   if (!brincadeiraId) return 15;
 
   const game = await queryOne(
-    'SELECT checkpoints FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@brincadeiraId)',
+    'SELECT checkpoints FROM "brincadeira" WHERE LOWER(brincadeiraId) = LOWER(@brincadeiraId)',
     { brincadeiraId }
   );
   const configuredCheckpoint = parseJson(game?.checkpoints, []).find((item) =>
@@ -48,13 +48,13 @@ function monsterConflict() {
 async function getGameForEvent(eventoId, brincadeiraId) {
   return queryOne(`
     SELECT b.brincadeiraId, b.nome, b.tipo, b.checkpoints, b.eventoId, b.empresaId, e.empresaId AS evento_empresa_id
-    FROM brincadeira b
+    FROM "brincadeira" b
     INNER JOIN evento e ON LOWER(e.eventoId) = LOWER(@eventoId)
     WHERE LOWER(b.brincadeiraId) = LOWER(@brincadeiraId)
       AND LOWER(COALESCE(b.status, 'active')) <> 'archived'
       AND LOWER(b.empresaId) = LOWER(e.empresaId)
       AND (LOWER(b.eventoId) = LOWER(@eventoId) OR EXISTS (
-        SELECT 1 FROM eventoBrincadeira eb
+        SELECT 1 FROM "eventoBrincadeira" eb
         WHERE LOWER(eb.brincadeiraId) = LOWER(b.brincadeiraId) AND LOWER(eb.eventoId) = LOWER(@eventoId)
       ))`, { brincadeiraId, eventoId });
 }
@@ -75,7 +75,7 @@ async function getLatestMonsterGame(eventoId) {
 
 async function getMonsterCheckpoints(eventoId) {
   return allQuery(`
-    SELECT checkpointId, empresaId, status FROM pontoVerificacao
+    SELECT checkpointId, empresaId, status FROM "pontoVerificacao"
     WHERE LOWER(eventoId) = LOWER(@eventoId)
       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`, { eventoId });
 }
@@ -88,25 +88,25 @@ async function getMonsterProgress(eventoId, partidaId) {
       COALESCE(ms.vidaMaxima, p.vidaMaxima) AS monster_max_hp,
       COALESCE(ms.status, CASE WHEN p.status = 'completed' THEN 'defeated' ELSE p.status END) AS monster_status,
       COALESCE(ms.versao, p.versao) AS monster_version,
-      (SELECT COUNT(*) FROM crianca c
+      (SELECT COUNT(*) FROM "crianca" c
        WHERE LOWER(c.eventoId) = LOWER(@eventoId) AND LOWER(c.timeId) = LOWER(t.timeId)) AS total,
       (SELECT COUNT(DISTINCT s.criancaId) FROM monsterCacaLeitura s
        WHERE LOWER(s.partidaId) = LOWER(@partidaId) AND LOWER(s.timeId) = LOWER(t.timeId)) AS scanned
-    FROM time t
+    FROM "time" t
     INNER JOIN monsterCacaPartida p
       ON p.id = @partidaId AND LOWER(p.eventoId) = LOWER(@eventoId)
     LEFT JOIN monsterCacaEstadoTime ms
       ON LOWER(ms.partidaId) = LOWER(p.id) AND LOWER(ms.timeId) = LOWER(t.timeId)
     WHERE LOWER(t.eventoId) = LOWER(@eventoId)
-      AND EXISTS (SELECT 1 FROM crianca c
+      AND EXISTS (SELECT 1 FROM "crianca" c
                   WHERE LOWER(c.eventoId) = LOWER(@eventoId)
                     AND LOWER(c.timeId) = LOWER(t.timeId))
     ORDER BY t.nome`, { eventoId, partidaId });
 
   return teams.map(team => ({
-    teamId: team.id,
-    teamName: team.name,
-    teamColor: team.color,
+    teamId: team.timeId,
+    teamName: team.nome,
+    teamColor: team.cor,
     teamStateId: team.monster_state_id || null,
     monsterHp: Number(team.monster_hp || 0),
     monsterMaxHp: Number(team.monster_max_hp || MONSTER_DEFAULTS.maxHp),
@@ -122,7 +122,7 @@ async function getMonsterProgress(eventoId, partidaId) {
 
 async function startMonsterGame(eventoId, brincadeiraId) {
   const game = await getGameForEvent(eventoId, brincadeiraId);
-  if (!game || game.type !== MONSTER_GAME_TYPE) {
+  if (!game || game.tipo !== MONSTER_GAME_TYPE) {
     throw new Error('Jogo Caça ao Monstro não encontrado para este evento');
   }
   const checkpoints = await getMonsterCheckpoints(eventoId);
@@ -134,19 +134,19 @@ async function startMonsterGame(eventoId, brincadeiraId) {
     .filter(Boolean);
   const configuredSet = new Set(configured.map(id => id.toLowerCase()));
   const candidates = configured.length
-    ? checkpoints.filter(checkpoint => configuredSet.has(String(checkpoint.id).toLowerCase()))
+    ? checkpoints.filter(checkpoint => configuredSet.has(String(checkpoint.checkpointId).toLowerCase()))
     : checkpoints;
   const explicitlySpecial = configuredItems.find(item => item && typeof item === 'object' && item.special);
   const explicitlySpecialId = explicitlySpecial?.id ? String(explicitlySpecial.id).trim().toLowerCase() : '';
   const specialCheckpoint = explicitlySpecialId
-    ? candidates.find(checkpoint => String(checkpoint.id).trim().toLowerCase() === explicitlySpecialId) || candidates[0]
+    ? candidates.find(checkpoint => String(checkpoint.checkpointId).trim().toLowerCase() === explicitlySpecialId) || candidates[0]
     : candidates[Math.floor(Math.random() * candidates.length)] || checkpoints[0];
   const participatingTeams = await allQuery(`
     SELECT t.timeId, t.nome, t.cor
-    FROM time t
+    FROM "time" t
     WHERE LOWER(t.eventoId) = LOWER(@eventoId)
       AND EXISTS (
-        SELECT 1 FROM crianca c
+        SELECT 1 FROM "crianca" c
         WHERE LOWER(c.eventoId) = LOWER(@eventoId)
           AND LOWER(c.timeId) = LOWER(t.timeId)
       )
@@ -162,10 +162,10 @@ async function startMonsterGame(eventoId, brincadeiraId) {
   // a partida só fica visível depois que todos os monstros foram criados.
   await withTransaction(async (tx) => {
     await tx.query(
-      `UPDATE evento SET status = status
+      `UPDATE "evento" SET status = status
        WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND LOWER(empresaId) = LOWER(@empresaId)`,
-      { eventoId, empresaId: game.empresa_id }
+      { eventoId, empresaId: game.empresaId }
     );
 
     await tx.query(`
@@ -186,7 +186,7 @@ async function startMonsterGame(eventoId, brincadeiraId) {
          @normalDamage, @specialCheckpointDamage, @specialAttackDamage,
          @specialCheckpointId, 0, @startedAt)`, {
       id: partidaId,
-      empresaId: game.empresa_id,
+      empresaId: game.empresaId,
       eventoId,
       brincadeiraId,
       maxHp: MONSTER_DEFAULTS.maxHp,
@@ -204,9 +204,9 @@ async function startMonsterGame(eventoId, brincadeiraId) {
         VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, @maxHp, @maxHp, 'active', 0)`, {
         id: uuidv4(),
         partidaId,
-        empresaId: game.empresa_id,
+        empresaId: game.empresaId,
         eventoId,
-        timeId: team.id,
+        timeId: team.timeId,
         maxHp: MONSTER_DEFAULTS.maxHp,
       });
     }
@@ -237,14 +237,14 @@ async function getMonsterWinnerTeamId(session) {
     SELECT TOP 1 timeId FROM monsterCacaEstadoTime
     WHERE LOWER(partidaId) = LOWER(@partidaId) AND derrotadoEm IS NOT NULL
     ORDER BY derrotadoEm ASC, vitoriaEm ASC`, { partidaId: session.id });
-  return first?.time_id || session.winner_time_id || null;
+  return first?.timeId || session.timeVencedorId || null;
 }
 
 async function awardMonsterWinnerBonus(session) {
   const teamId = await getMonsterWinnerTeamId(session);
   if (!teamId) return null;
   return awardWinnerBonus({
-    eventoId: session.evento_id,
+    eventoId: session.eventoId,
     partidaId: session.id,
     gameType: MONSTER_GAME_TYPE,
     teamId,
@@ -279,11 +279,11 @@ function getMonsterTotals(progress) {
 
 async function getCheckpointMonsterStatus(checkpointId) {
   const checkpoint = await queryOne(`
-    SELECT checkpointId, eventoId, proposito FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)`, { checkpointId });
-  if (!checkpoint || String(checkpoint.checkpoint_purpose || 'game').toLowerCase() === 'reception') {
+    SELECT checkpointId, eventoId, proposito FROM "pontoVerificacao" WHERE LOWER(checkpointId) = LOWER(@checkpointId)`, { checkpointId });
+  if (!checkpoint || String(checkpoint.proposito || 'game').toLowerCase() === 'reception') {
     return { monsterActive: false };
   }
-  const status = await getMonsterEventStatus(checkpoint.evento_id);
+  const status = await getMonsterEventStatus(checkpoint.eventoId);
   return {
     // Só anuncia o tipo de jogo quando o Caça ao Monstro está realmente ativo.
     // Caso contrário este campo sobrescreve o gameType de outras brincadeiras
@@ -305,8 +305,8 @@ async function getMonsterEventStatus(eventoId) {
 
   const monsters = await getMonsterProgress(eventoId, session.id);
   const totals = getMonsterTotals(monsters);
-  const legacyWinner = session.winner_time_id
-    ? await queryOne('SELECT timeId, nome, cor FROM time WHERE timeId = @timeId', { timeId: session.winner_time_id })
+  const legacyWinner = session.timeVencedorId
+    ? await queryOne('SELECT timeId, nome, cor FROM "time" WHERE timeId = @timeId', { timeId: session.timeVencedorId })
     : null;
   const completed = session.status === 'completed' || (!active && totals.monsterDefeated);
   return {
@@ -323,24 +323,24 @@ async function getMonsterEventStatus(eventoId) {
     winnerTeamId: legacyWinner?.id || null,
     winnerTeamName: legacyWinner?.name || null,
     winnerTeamColor: legacyWinner?.color || null,
-    monsterSpecialCheckpoint: session.special_checkpoint_id || null,
-    monsterSpecialCheckpointId: session.special_checkpoint_id || null,
+    monsterSpecialCheckpoint: session.checkpointEspecialId || null,
+    monsterSpecialCheckpointId: session.checkpointEspecialId || null,
     version: Number(session.version || 0),
-    startedAt: session.started_at,
-    finishedAt: session.finished_at,
+    startedAt: session.iniciadoEm,
+    finishedAt: session.finalizadoEm,
   };
 }
 
 async function getMonsterScanResult(session, scan, progress, currentTeam) {
-  const teamMonsterHp = Number(currentTeam?.monsterHp ?? scan?.monster_hp_after ?? session.hp);
-  const teamMonsterMaxHp = Number(currentTeam?.monsterMaxHp ?? session.max_hp);
-  const teamMonsterDefeated = Boolean(currentTeam?.monsterDefeated ?? scan?.monster_defeated);
+  const teamMonsterHp = Number(currentTeam?.monsterHp ?? scan?.vidaMonstroApos ?? session.hp);
+  const teamMonsterMaxHp = Number(currentTeam?.monsterMaxHp ?? session.vidaMaxima);
+  const teamMonsterDefeated = Boolean(currentTeam?.monsterDefeated ?? scan?.monstroDerrotado);
   return {
     handled: true,
     accepted: false,
     alreadyScanned: true,
     monsterAccepted: false,
-    attackType: scan?.attack_type || null,
+    attackType: scan?.tipoAtaque || null,
     damage: Number(scan?.damage || 0),
     monsterHp: teamMonsterHp,
     monsterMaxHp: teamMonsterMaxHp,
@@ -363,19 +363,19 @@ async function getMonsterScanResult(session, scan, progress, currentTeam) {
 async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeiraId, uid, leituraId, now }) {
   const session = await getActiveMonsterGame(eventoId);
   if (!session) return null;
-  if (String(session.empresa_id).toLowerCase() !== String(crianca.empresa_id).toLowerCase()) {
+  if (String(session.empresaId).toLowerCase() !== String(crianca.empresaId).toLowerCase()) {
     return { handled: true, accepted: false, error: 'Partida do monstro não pertence à empresa da criança' };
   }
-  if (!crianca.time_id) return { handled: true, accepted: false, error: 'Criança não pertence a uma equipe' };
+  if (!crianca.timeId) return { handled: true, accepted: false, error: 'Criança não pertence a uma equipe' };
 
   const team = await queryOne(
-    'SELECT timeId, nome, cor FROM time WHERE timeId = @timeId AND eventoId = @eventoId',
-    { timeId: crianca.time_id, eventoId }
+    'SELECT timeId, nome, cor FROM "time" WHERE timeId = @timeId AND eventoId = @eventoId',
+    { timeId: crianca.timeId, eventoId }
   );
   if (!team) return { handled: true, accepted: false, error: 'Equipe não pertence ao evento' };
 
   const progressBefore = await getMonsterProgress(eventoId, session.id);
-  const currentBefore = progressBefore.find(item => sameId(item.teamId, crianca.time_id));
+  const currentBefore = progressBefore.find(item => sameId(item.teamId, crianca.timeId));
   if (!currentBefore) {
     return { handled: true, accepted: false, error: 'Equipe sem monstro nesta partida' };
   }
@@ -394,10 +394,10 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
       monsters: progressBefore,
       progress: progressBefore,
       teamsProgress: progressBefore,
-      teamId: team.id,
-      teamName: team.name,
-      teamColor: team.color || '',
-      message: `O monstro da equipe ${team.name} já foi derrotado`,
+      teamId: team.timeId,
+      teamName: team.nome,
+      teamColor: team.cor || '',
+      message: `O monstro da equipe ${team.nome} já foi derrotado`,
     };
   }
 
@@ -410,13 +410,13 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     ORDER BY lidoEm DESC`, {
     partidaId: session.id,
     checkpointId,
-    timeId: crianca.time_id,
+    timeId: crianca.timeId,
   });
   const checkpointCooldownSeconds = await getCheckpointCooldownSeconds(
-    session.brincadeira_id || brincadeiraId,
+    session.brincadeiraId || brincadeiraId,
     checkpointId
   );
-  const lastScanAt = lastCheckpointScan?.scanned_at ? new Date(lastCheckpointScan.scanned_at).getTime() : 0;
+  const lastScanAt = lastCheckpointScan?.lidoEm ? new Date(lastCheckpointScan.lidoEm).getTime() : 0;
   const remainingSeconds = lastScanAt
     ? Math.max(0, checkpointCooldownSeconds - Math.floor((Date.now() - lastScanAt) / 1000))
     : 0;
@@ -440,9 +440,9 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
       progress: progressBefore,
       monsters: progressBefore,
       teamsProgress: progressBefore,
-      teamId: team.id,
-      teamName: team.name,
-      teamColor: team.color || '',
+      teamId: team.timeId,
+      teamName: team.nome,
+      teamColor: team.cor || '',
       message: `Checkpoint bloqueado. Aguarde ${remainingSeconds}s`,
     };
   }
@@ -453,24 +453,24 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     WHERE LOWER(partidaId) = LOWER(@partidaId)
       AND LOWER(criancaId) = LOWER(@criancaId)`, {
     partidaId: session.id,
-    criancaId: crianca.id,
+    criancaId: crianca.criancaId,
   });
   const childAlreadyAttacked = Boolean(childTeamScan);
   const members = await allQuery(`
-    SELECT criancaId FROM crianca
+    SELECT criancaId FROM "crianca"
     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(timeId) = LOWER(@timeId)`, {
     eventoId,
-    timeId: crianca.time_id,
+    timeId: crianca.timeId,
   });
   const teamScannedBefore = Number(currentBefore.scanned || 0);
   const isSpecialAttack = !childAlreadyAttacked
     && teamScannedBefore + 1 >= members.length
     && members.length > 0;
-  const isSpecialCheckpoint = sameId(session.special_checkpoint_id, checkpointId);
+  const isSpecialCheckpoint = sameId(session.checkpointEspecialId, checkpointId);
   const attackType = isSpecialAttack ? 'special_attack' : isSpecialCheckpoint ? 'special_checkpoint' : 'normal';
   const damage = isSpecialAttack
-    ? Number(session.special_attack_damage)
-    : isSpecialCheckpoint ? Number(session.special_checkpoint_damage) : Number(session.normal_damage);
+    ? Number(session.danoAtaqueEspecial)
+    : isSpecialCheckpoint ? Number(session.danoCheckpointEspecial) : Number(session.danoNormal);
   const monsterHp = Math.max(0, Number(currentBefore.monsterHp) - damage);
   const monsterDefeated = monsterHp <= 0;
   const nextVersion = Number(currentBefore.version || 0) + 1;
@@ -486,12 +486,12 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
          @monsterHp, @monsterDefeated, @version, @scannedAt)`, {
       id: uuidv4(),
       partidaId: session.id,
-      empresaId: session.empresa_id,
+      empresaId: session.empresaId,
       eventoId,
       brincadeiraId,
       checkpointId,
-      criancaId: crianca.id,
-      timeId: crianca.time_id,
+      criancaId: crianca.criancaId,
+      timeId: crianca.timeId,
       uid,
       leituraId,
       attackType,
@@ -534,7 +534,7 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
         WHERE id = @partidaId AND status = 'active' AND versao = @version`, {
         monsterHp,
         status: monsterDefeated ? 'completed' : 'active',
-        winnerTimeId: monsterDefeated ? crianca.time_id : null,
+        winnerTimeId: monsterDefeated ? crianca.timeId : null,
         finishedAt: monsterDefeated ? now : null,
         monsterDefeated,
         nextVersion,
@@ -586,7 +586,7 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
   // Quando o jogo termina, o evento continua ativo (o status é só o ciclo de
   // vida do evento); o estado do jogo é encerrado por global.finishMonsterGameState.
 
-  const teamMonster = progress.find(item => sameId(item.teamId, team.id)) || currentBefore;
+  const teamMonster = progress.find(item => sameId(item.teamId, team.timeId)) || currentBefore;
   return {
     handled: true,
     accepted: true,
@@ -606,16 +606,16 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     monsters: progress,
     progress,
     teamsProgress: progress,
-    teamId: team.id,
-    teamName: team.name,
-    teamColor: team.color || '',
+    teamId: team.timeId,
+    teamName: team.nome,
+    teamColor: team.cor || '',
     checkpointLocked: false,
     remainingSeconds: 0,
     checkpointCooldownSeconds,
     message: gameCompleted
       ? 'Todos os monstros foram derrotados!'
       : monsterDefeated
-        ? `O monstro da equipe ${team.name} foi derrotado!`
+        ? `O monstro da equipe ${team.nome} foi derrotado!`
         : `Ataque confirmado: -${damage} HP`,
   };
 }
@@ -629,7 +629,7 @@ async function refreshMonsterSpecialAfterListChange(eventoId) {
 
   const game = await queryOne(
     'SELECT checkpoints FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id)',
-    { id: session.brincadeira_id }
+    { id: session.brincadeiraId }
   );
   const items = parseJson(game?.checkpoints, []);
   const configured = items.map(item => String(item?.id || item || '').trim()).filter(Boolean);
@@ -637,31 +637,31 @@ async function refreshMonsterSpecialAfterListChange(eventoId) {
 
   const checkpoints = await getMonsterCheckpoints(eventoId);
   const candidates = configured.length
-    ? checkpoints.filter(checkpoint => configuredSet.has(String(checkpoint.id).toLowerCase()))
+    ? checkpoints.filter(checkpoint => configuredSet.has(String(checkpoint.checkpointId).toLowerCase()))
     : checkpoints;
   if (!candidates.length) return null;
 
   const explicit = items.find(item => item && typeof item === 'object' && item.special);
   const explicitId = explicit?.id ? String(explicit.id).trim().toLowerCase() : '';
-  const chosen = (explicitId && candidates.find(checkpoint => String(checkpoint.id).toLowerCase() === explicitId))
-    || candidates.find(checkpoint => sameId(checkpoint.id, session.special_checkpoint_id))
+  const chosen = (explicitId && candidates.find(checkpoint => String(checkpoint.checkpointId).toLowerCase() === explicitId))
+    || candidates.find(checkpoint => sameId(checkpoint.checkpointId, session.checkpointEspecialId))
     || candidates[Math.floor(Math.random() * candidates.length)];
 
-  if (sameId(chosen.id, session.special_checkpoint_id)) {
-    return { changed: false, specialCheckpointId: String(chosen.id) };
+  if (sameId(chosen.checkpointId, session.checkpointEspecialId)) {
+    return { changed: false, specialCheckpointId: String(chosen.checkpointId) };
   }
   await query(
     `UPDATE monsterCacaPartida SET checkpointEspecialId = @specialId
      WHERE id = @partidaId AND status = 'active'`,
-    { specialId: chosen.id, partidaId: session.id }
+    { specialId: chosen.checkpointId, partidaId: session.id }
   );
-  return { changed: true, specialCheckpointId: String(chosen.id) };
+  return { changed: true, specialCheckpointId: String(chosen.checkpointId) };
 }
 
 module.exports = {
+  refreshMonsterSpecialAfterListChange,
   MONSTER_GAME_TYPE,
   MONSTER_DEFAULTS,
-  refreshMonsterSpecialAfterListChange,
   getActiveMonsterGame,
   getLatestMonsterGame,
   getCheckpointMonsterStatus,

@@ -1,4 +1,4 @@
-// routes/planos.js - Visão de planos e clientes para o dashboard master
+// routes/planos.js - Visão de planos e cliente para o dashboard master
 const express = require('express');
 const router = express.Router();
 const { allQuery } = require('../database');
@@ -25,13 +25,13 @@ function formatSince(value) {
   return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
 }
 
-// Empresas + cadastro legado `clientes`; o plano 'family' das contas de família continua contado.
+// Empresas + cadastro legado `cliente`; o plano 'family' das contas de família continua contado.
 async function loadCompanies() {
   const list = await listPlatformClients({ includeFamily: true });
   return list
     .map((c) => ({
-      id: c.id, nome: c.name, cidade: c.city, estado: c.state,
-      plano: c.plan, status: c.status, data_criacao: c.createdAt,
+      id: c.id, nome: c.nome, cidade: c.cidade, estado: c.estado,
+      plano: c.plan, status: c.status, dataCriacao: c.createdAt,
     }))
     .sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
 }
@@ -71,16 +71,16 @@ router.get('/:plano/clients', verifyToken, requireMaster, async (req, res) => {
       .map(company => ({
         id: company.id,
         name: company.nome,
-        city: company.cidade,
-        state: company.estado,
+        cidade: company.cidade,
+        estado: company.estado,
         plan,
         status: company.status,
-        since: formatSince(company.data_criacao),
+        since: formatSince(company.dataCriacao),
       }));
 
     return res.json(clients);
   } catch (err) {
-    console.error('❌ Erro ao consultar clientes por plano:', err);
+    console.error('❌ Erro ao consultar cliente por plano:', err);
     return res.status(500).json({ error: err.message });
   }
 });

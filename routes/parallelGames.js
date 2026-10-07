@@ -15,7 +15,7 @@ async function loadEvent(req, res) {
     res.status(404).json({ error: 'Evento não encontrado' });
     return null;
   }
-  if (!isMaster(req) && String(evento.empresa_id).toLowerCase() !== String(req.user.empresa_id).toLowerCase()) {
+  if (!isMaster(req) && String(evento.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
     res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     return null;
   }
@@ -31,7 +31,7 @@ const sendError = (res, err, label) => {
 // ---- Lista de objetos da brincadeira "Ache o objeto" (por empresa) ----
 router.get('/objects', async (req, res) => {
   try {
-    res.json(await listObjects(req.user.empresa_id));
+    res.json(await listObjects(req.user.empresaId));
   } catch (err) {
     sendError(res, err, 'Erro ao listar os objetos');
   }
@@ -39,7 +39,7 @@ router.get('/objects', async (req, res) => {
 
 router.post('/objects', async (req, res) => {
   try {
-    res.status(201).json(await addObject(req.user.empresa_id, req.body?.name));
+    res.status(201).json(await addObject(req.user.empresaId, req.body?.name));
   } catch (err) {
     sendError(res, err, 'Erro ao adicionar o objeto');
   }
@@ -47,7 +47,7 @@ router.post('/objects', async (req, res) => {
 
 router.put('/objects/:id', async (req, res) => {
   try {
-    res.json(await renameObject(req.user.empresa_id, req.params.id, req.body?.name));
+    res.json(await renameObject(req.user.empresaId, req.params.id, req.body?.name));
   } catch (err) {
     sendError(res, err, 'Erro ao editar o objeto');
   }
@@ -55,7 +55,7 @@ router.put('/objects/:id', async (req, res) => {
 
 router.delete('/objects/:id', async (req, res) => {
   try {
-    await removeObject(req.user.empresa_id, req.params.id);
+    await removeObject(req.user.empresaId, req.params.id);
     res.json({ ok: true });
   } catch (err) {
     sendError(res, err, 'Erro ao remover o objeto');
@@ -66,7 +66,7 @@ router.get('/eventos/:eventoId', async (req, res) => {
   try {
     const evento = await loadEvent(req, res);
     if (!evento) return;
-    res.json(await getParallelGameOverview(evento.id));
+    res.json(await getParallelGameOverview(evento.eventoId));
   } catch (err) {
     sendError(res, err, 'Erro ao consultar a brincadeira paralela');
   }
@@ -77,8 +77,8 @@ router.post('/eventos/:eventoId/start', async (req, res) => {
     const evento = await loadEvent(req, res);
     if (!evento) return;
     const game = await startParallelGame({
-      eventoId: evento.id,
-      empresaId: evento.empresa_id,
+      eventoId: evento.eventoId,
+      empresaId: evento.empresaId,
       checkpointId: String(req.body?.checkpointId || '').trim(),
       userId: req.user.id,
     });
@@ -92,7 +92,7 @@ router.post('/eventos/:eventoId/stop', async (req, res) => {
   try {
     const evento = await loadEvent(req, res);
     if (!evento) return;
-    const stoppedId = await stopParallelGame(evento.id, 'manual');
+    const stoppedId = await stopParallelGame(evento.eventoId, 'manual');
     if (!stoppedId) return res.status(404).json({ error: 'Nenhuma brincadeira paralela em andamento' });
     res.json({ ok: true, id: stoppedId });
   } catch (err) {

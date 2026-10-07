@@ -1,4 +1,4 @@
-// routes/reports.js - Relatório geral do buffet (todos os eventos)
+// routes/reports.js - Relatório geral do buffet (todos os evento)
 const express = require('express');
 const router = express.Router();
 const { allQuery } = require('../database');
@@ -7,10 +7,10 @@ const { summarizeEvents } = require('../utils/reportOverview');
 
 router.use(verifyToken, requireRole('admin', 'master'));
 
-// Master pode consultar outra empresa com ?empresa_id=; o admin vê sempre a própria.
+// Master pode consultar outra empresa com ?empresaId=; o admin vê sempre a própria.
 function resolveEmpresaId(req) {
-  const requested = req.query?.empresa_id;
-  return isMaster(req) && requested ? String(requested) : req.user.empresa_id;
+  const requested = req.query?.empresaId;
+  return isMaster(req) && requested ? String(requested) : req.user.empresaId;
 }
 
 router.get('/overview', async (req, res) => {
@@ -23,8 +23,8 @@ router.get('/overview', async (req, res) => {
       allQuery(`
         SELECT e.eventoId, e.nome, CAST(e.data AS VARCHAR(10)) AS date, e.status,
           (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS participants,
-          (SELECT COALESCE(SUM(c.pontos), 0) FROM crianca c WHERE c.eventoId = e.eventoId) AS total_points,
-          (SELECT COUNT(*) FROM time t WHERE t.eventoId = e.eventoId) AS teams,
+          (SELECT COALESCE(SUM(c.pontos), 0) FROM crianca c WHERE c.eventoId = e.eventoId) AS pontosTotais,
+          (SELECT COUNT(*) FROM "time" t WHERE t.eventoId = e.eventoId) AS teams,
           (SELECT COUNT(*) FROM pontuacao p WHERE p.eventoId = e.eventoId) AS scorings
         FROM evento e
         WHERE e.empresaId = @empresaId
@@ -33,22 +33,22 @@ router.get('/overview', async (req, res) => {
       allQuery(`
         SELECT TOP 10 c.criancaId, c.nome, c.apelido, c.idade, c.pontos,
           COALESCE(c.codigoPulseira, c.ultimaPulseira) AS bracelet_code,
-          e.nome AS event_name, t.nome AS team_name, t.cor AS team_color
+          e.nome AS event_nome, t.nome AS team_nome, t.cor AS team_color
         FROM crianca c
         JOIN evento e ON e.eventoId = c.eventoId
-        LEFT JOIN time t ON t.timeId = c.timeId
+        LEFT JOIN "time" t ON t.timeId = c.timeId
         WHERE e.empresaId = @empresaId AND c.status = 'active'
         ORDER BY c.pontos DESC
       `, params),
       allQuery(`
         SELECT TOP 5 t.timeId, t.nome, t.cor, t.pontos, e.nome AS event_name
-        FROM time t
+        FROM "time" t
         JOIN evento e ON e.eventoId = t.eventoId
         WHERE e.empresaId = @empresaId
         ORDER BY t.pontos DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 cp.checkpointId, cp.nome, cp.zona, e.nome AS event_name, COUNT(p.pontuacaoId) AS readings
+        SELECT TOP 5 cp.checkpointId, cp.nome, cp.zona, e.nome AS event_nome, COUNT(p.pontuacaoId) AS readings
         FROM pontuacao p
         JOIN pontoVerificacao cp ON cp.checkpointId = p.checkpointId
         JOIN evento e ON e.eventoId = p.eventoId
@@ -71,16 +71,16 @@ router.get('/overview', async (req, res) => {
     res.json({
       ...summary,
       topParticipants: topParticipants.map((c) => ({
-        id: c.id, name: c.name, nickname: c.nickname || '', age: c.age,
-        scores: Number(c.scores) || 0, braceletCode: c.bracelet_code || '', eventName: c.event_name, teamName: c.team_name || '', teamColor: c.team_color || '',
+        id: c.criancaId, name: c.nome, nickname: c.apelido || '', age: c.idade,
+        scores: Number(c.pontos) || 0, braceletCode: c.bracelet_code || '', eventName: c.event_nome, teamName: c.team_nome || '', teamColor: c.team_color || '',
       })),
       topTeams: topTeams.map((t) => ({
-        id: t.id, name: t.name, color: t.color, points: Number(t.points) || 0, eventName: t.event_name,
+        id: t.timeId, name: t.nome, color: t.cor, points: Number(t.pontos) || 0, eventName: t.event_name,
       })),
       topCheckpoints: topCheckpoints.map((c) => ({
-        id: c.id, name: c.name, zone: c.zone || '', eventName: c.event_name, readings: Number(c.readings) || 0,
+        id: c.checkpointId, name: c.nome, zone: c.zona || '', eventName: c.event_nome, readings: Number(c.readings) || 0,
       })),
-      topGames: topGames.map((g) => ({ id: g.id, name: g.name, plays: Number(g.plays) || 0 })),
+      topGames: topGames.map((g) => ({ id: g.brincadeiraId, name: g.nome, plays: Number(g.plays) || 0 })),
     });
   } catch (err) {
     console.error('❌ Erro ao gerar relatório geral:', err);

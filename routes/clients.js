@@ -7,7 +7,7 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
 const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
 
-// O mesmo cliente pode existir em `empresas` e em `clientes` com ids diferentes
+// O mesmo cliente pode existir em `empresa` e em `cliente` com ids diferentes
 // (o cadastro cria os dois). Devolve os ids do registro legado que corresponde
 // (nome + cidade) à empresa, para editar/excluir os dois lados juntos.
 async function legacyClienteIdsFor(empresaId) {
@@ -15,28 +15,28 @@ async function legacyClienteIdsFor(empresaId) {
   if (!empresa) return [];
   const rows = await allQuery('SELECT clienteId, nome, cidade FROM cliente');
   return rows
-    .filter((c) => normalizeClientText(c.name) === normalizeClientText(empresa.nome) &&
-      normalizeClientText(c.city) === normalizeClientText(empresa.cidade))
-    .map((c) => c.id);
+    .filter((c) => normalizeClientText(c.nome) === normalizeClientText(empresa.nome) &&
+      normalizeClientText(c.cidade) === normalizeClientText(empresa.cidade))
+    .map((c) => c.clienteId);
 }
 
-// ✅ APENAS MASTER pode listar clientes
+// ✅ APENAS MASTER pode listar cliente
 router.get('/', verifyToken, async (req, res) => {
   try {
     // ✅ Adicionar validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar cliente' });
     }
 
-    // Une `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
-    const clientes = await listPlatformClients();
+    // Une `empresa` e o cadastro legado `cliente` (ver utils/platformClients.js).
+    const cliente = await listPlatformClients();
 
-    const formatted = clientes.map((c) => ({
+    const formatted = cliente.map((c) => ({
       id: c.id,
-      name: c.name,
-      city: c.city,
-      state: c.state,
-      phone: c.phone,
+      name: c.nome,
+      cidade: c.cidade,
+      estado: c.estado,
+      telefone: c.telefone,
       plan: c.plan,
       status: c.status,
       email: c.email,
@@ -47,10 +47,10 @@ router.get('/', verifyToken, async (req, res) => {
       createdAt: c.createdAt ? new Date(c.createdAt).toLocaleDateString('pt-BR') : '—',
     }));
 
-    console.log(`✅ Listar clientes: ${formatted.length} empresas encontradas`);
+    console.log(`✅ Listar cliente: ${formatted.length} empresa encontradas`);
     res.json(formatted);
   } catch (err) {
-    console.error('❌ Erro ao listar clientes:', err);
+    console.error('❌ Erro ao listar cliente:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -67,37 +67,37 @@ const EVENT_STATUS_GROUPS = {
 };
 
 // ✅ APENAS MASTER: detalhes completos de um cliente (cadastro, plano e uso, usuários de
-// acesso, eventos e suporte). Cliente do cadastro legado (`clientes`) não tem empresa, então
+// acesso, evento e suporte). Cliente do cadastro legado (`cliente`) não tem empresa, então
 // só traz os dados do cadastro.
 router.get('/:id/detalhes', verifyToken, async (req, res) => {
   try {
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode ver detalhes de clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode ver detalhes de cliente' });
     }
 
     const platformClients = await listPlatformClients({ includeFamily: true });
-    const client = platformClients.find((c) => String(c.id) === String(req.params.id));
-    if (!client) {
+    const cliente = platformClients.find((c) => String(c.id) === String(req.params.id));
+    if (!cliente) {
       return res.status(404).json({ error: 'Cliente não encontrado' });
     }
 
-    const planId = String(client.plan || 'starter').trim().toLowerCase();
+    const planId = String(cliente.plan || 'starter').trim().toLowerCase();
     const planDefinition = PLAN_DEFINITIONS[planId] || null;
 
     const details = {
-      id: client.id,
-      origin: client.origin,
-      name: client.name,
+      id: cliente.clienteId,
+      origin: cliente.origin,
+      name: cliente.nome,
       cnpj: null,
-      city: client.city,
-      state: client.state,
-      email: client.email,
-      phone: client.phone,
+      cidade: cliente.cidade,
+      estado: cliente.estado,
+      email: cliente.email,
+      telefone: cliente.telefone,
       plan: planId,
-      status: client.status,
-      createdAt: toIso(client.createdAt),
+      status: cliente.status,
+      createdAt: toIso(cliente.createdAt),
       updatedAt: null,
-      lastAccess: toIso(client.lastAccess),
+      lastAccess: toIso(cliente.lastAccess),
       planInfo: planDefinition ? { id: planId, ...planDefinition } : null,
       usage: {
         eventsTotal: 0, eventsActive: 0, eventsScheduled: 0, eventsFinished: 0, eventsThisMonth: 0,
@@ -108,8 +108,8 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       support: { open: 0, total: 0 },
     };
 
-    if (client.empresaId) {
-      const empresaId = client.empresaId;
+    if (cliente.empresaId) {
+      const empresaId = cliente.empresaId;
       const [empresa, users, events, tickets] = await Promise.all([
         queryOne('SELECT cnpj, dataAtualizacao FROM empresa WHERE empresaId = @id', { id: empresaId }),
         allQuery(
@@ -123,7 +123,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
                   (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS children_count,
                   (SELECT COUNT(*) FROM pontoVerificacao k
                     WHERE k.eventoId = e.eventoId
-                      AND LOWER(COALESCE(k.proposito, 'game')) <> 'reception') AS checkpoints_count
+                      AND LOWER(COALESCE(k.proposito, 'game')) <> 'reception') AS totalCheckpoints
            FROM evento e
            WHERE e.empresaId = @id
            ORDER BY e.data DESC, e.hora DESC`,
@@ -136,29 +136,29 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       ]);
 
       details.cnpj = empresa?.cnpj || null;
-      details.updatedAt = toIso(empresa?.data_atualizacao);
+      details.updatedAt = toIso(empresa?.dataAtualizacao);
 
       details.users = users.map((u) => ({
         id: u.id,
         email: u.email,
-        role: u.role,
+        role: u.perfil,
         status: u.status,
-        lastAccess: toIso(u.ultimo_acesso),
-        createdAt: toIso(u.data_criacao),
+        lastAccess: toIso(u.ultimoAcesso),
+        createdAt: toIso(u.dataCriacao),
       }));
 
       details.events = events.map((e) => ({
         id: e.id,
-        name: e.name,
-        date: e.date_str,
-        time: e.time ? String(e.time).slice(0, 5) : null,
-        duration: e.duration,
+        name: e.nome,
+        date: e.data_str,
+        time: e.hora ? String(e.hora).slice(0, 5) : null,
+        duration: e.duracao,
         status: String(e.status || '').toLowerCase(),
-        responsibleName: e.responsible_name || null,
-        startedAt: toIso(e.started_at),
-        endedAt: toIso(e.ended_at),
+        responsibleName: e.nomeResponsavel || null,
+        startedAt: toIso(e.iniciadoEm),
+        endedAt: toIso(e.finalizadoEm),
         childrenCount: Number(e.children_count) || 0,
-        checkpointsCount: Number(e.checkpoints_count) || 0,
+        checkpointsCount: Number(e.totalCheckpoints) || 0,
       }));
 
       const countByGroup = (group) => details.events.filter((e) => EVENT_STATUS_GROUPS[group].includes(e.status)).length;
@@ -169,7 +169,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
         eventsActive: countByGroup('active'),
         eventsScheduled: countByGroup('scheduled'),
         eventsFinished: countByGroup('finished'),
-        eventsThisMonth: details.events.filter((e) => String(e.date || '').startsWith(monthPrefix)).length,
+        eventsThisMonth: details.events.filter((e) => String(e.data || '').startsWith(monthPrefix)).length,
         childrenTotal: details.events.reduce((sum, e) => sum + e.childrenCount, 0),
         maxCheckpointsPerEvent: details.events.reduce((max, e) => Math.max(max, e.checkpointsCount), 0),
         usersTotal: details.users.length,
@@ -197,16 +197,16 @@ router.post('/', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode criar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode criar cliente' });
     }
 
-    const { name, city, state, email, password, phone, plan } = req.body;
+    const { nome, cidade, estado, email, senha, telefone, plan } = req.body;
     
-    if (!email || !password) {
+    if (!email || !senha) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     }
 
-    if (password.length < 6) {
+    if (senha.length < 6) {
       return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
     }
 
@@ -215,7 +215,7 @@ router.post('/', verifyToken, async (req, res) => {
     const loginId = uuidv4();
     
     // Hash simples da senha (em produção, usar bcrypt)
-    const hashedPassword = Buffer.from(password).toString('base64');
+    const hashedPassword = Buffer.from(senha).toString('base64');
     
     try {
       // 1️⃣ Criar EMPRESA
@@ -224,25 +224,25 @@ router.post('/', verifyToken, async (req, res) => {
          VALUES (@id, @nome, @cidade, @estado, @telefone, @plano, @status)`,
         {
           id: empresaId,
-          nome: name,
-          cidade: city,
-          estado: state,
-          telefone: phone,
+          nome: nome,
+          cidade: cidade,
+          estado: estado,
+          telefone: telefone,
           plano: plan || 'starter',
           status: 'active'
         }
       );
-      console.log(`✅ Empresa criada: ${name} (ID: ${empresaId})`);
+      console.log(`✅ Empresa criada: ${nome} (ID: ${empresaId})`);
 
       // 2️⃣ Criar LOGIN
       await query(
         `INSERT INTO login (loginId, empresaId, email, senha, status) 
-         VALUES (@id, @empresa_id, @email, @password, @status)`,
+         VALUES (@id, @empresaId, @email, @senha, @status)`,
         {
           id: loginId,
-          empresa_id: empresaId,
+          empresaId: empresaId,
           email: email,
-          password: hashedPassword,
+          senha: hashedPassword,
           status: 'active'
         }
       );
@@ -251,33 +251,33 @@ router.post('/', verifyToken, async (req, res) => {
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
         `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId) 
-         VALUES (@id, @name, @city, @state, @email, @phone, @plano, @status, @empresa_id)`,
+         VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId)`,
         {
           id: clienteId,
-          empresa_id: empresaId,
-          name: name,
-          city: city,
-          state: state,
+          empresaId: empresaId,
+          nome: nome,
+          cidade: cidade,
+          estado: estado,
           email: email,
-          phone: phone,
+          telefone: telefone,
           plano: plan || 'starter',
           status: 'active'
         }
       );
-      console.log(`✅ Cliente criado: ${name} (ID: ${clienteId})`);
+      console.log(`✅ Cliente criado: ${nome} (ID: ${clienteId})`);
 
       res.json({
         id: clienteId,
-        empresa_id: empresaId,
-        login_id: loginId,
-        name,
-        city,
-        state,
+        empresaId: empresaId,
+        loginId: loginId,
+        nome,
+        cidade,
+        estado,
         email,
-        phone,
+        telefone,
         plan: plan || 'starter',
         status: 'active',
-        message: `Cliente ${name} criado com sucesso! Email: ${email}`
+        message: `Cliente ${nome} criado com sucesso! Email: ${email}`
       });
 
     } catch (error) {
@@ -296,13 +296,13 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar cliente' });
     }
 
-    const { name, city, state, email, phone, plan, status } = req.body;
+    const { nome, cidade, estado, email, telefone, plan, status } = req.body;
     
     try {
-      // Registro legado em `clientes`: o próprio id (cliente sem empresa) e/ou o
+      // Registro legado em `cliente`: o próprio id (cliente sem empresa) e/ou o
       // espelho da empresa. Resolvido antes do UPDATE, pois casa por nome+cidade antigos.
       const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
 
@@ -312,38 +312,38 @@ router.put('/:id', verifyToken, async (req, res) => {
          telefone = @telefone, plano = @plano, status = @status, dataAtualizacao = GETDATE()
          WHERE empresaId = @id`,
         {
-          nome: name,
-          cidade: city,
-          estado: state,
-          telefone: phone,
+          nome: nome,
+          cidade: cidade,
+          estado: estado,
+          telefone: telefone,
           plano: plan,
           status: status,
           id: req.params.id
         }
       );
 
-      // Atualizar EMAIL do LOGIN admin se foi fornecido (sem o filtro de role, o
+      // Atualizar EMAIL do LOGIN admin se foi fornecido (sem o filtro de perfil, o
       // e-mail era gravado em todos os logins da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
           `UPDATE login SET email = @email, dataAtualizacao = GETDATE()
-           WHERE empresaId = @empresa_id AND perfil = 'admin'`,
+           WHERE empresaId = @empresaId AND perfil = 'admin'`,
           {
             email: email,
-            empresa_id: req.params.id
+            empresaId: req.params.id
           }
         );
       }
 
       for (const legacyId of legacyIds) {
         await query(
-          `UPDATE cliente SET nome = COALESCE(@name, nome), cidade = COALESCE(@city, cidade),
-           estado = COALESCE(@state, estado), email = COALESCE(@email, email),
-           telefone = COALESCE(@phone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
+          `UPDATE cliente SET nome = COALESCE(@nome, nome), cidade = COALESCE(@cidade, cidade),
+           estado = COALESCE(@estado, estado), email = COALESCE(@email, email),
+           telefone = COALESCE(@telefone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
            WHERE clienteId = @id`,
           {
-            name: name ?? null, city: city ?? null, state: state ?? null, email: email || null,
-            phone: phone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
+            nome: nome ?? null, cidade: cidade ?? null, estado: estado ?? null, email: email || null,
+            telefone: telefone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
           }
         );
       }
@@ -364,7 +364,7 @@ router.put('/:id/status', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar status de clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar status de cliente' });
     }
 
     const { status } = req.body;
@@ -398,7 +398,7 @@ router.delete('/:id', verifyToken, async (req, res) => {
   try {
     // ✅ Validação de master
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode deletar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode deletar cliente' });
     }
 
     try {

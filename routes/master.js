@@ -15,10 +15,10 @@ router.get('/dashboard', verifyToken, async (req, res) => {
 
     console.log('📊 [MASTER] Buscando dados do dashboard...');
     
-    // Clientes = empresas + cadastro legado `clientes` (sem contas de família)
+    // Clientes = empresa + cadastro legado `cliente` (sem contas de família)
     const platformClients = await listPlatformClients();
     
-    // Eventos em andamento (com empresa_id e não da Master)
+    // Eventos em andamento (com empresaId e não da Master)
     const activeEvents = await queryOne(`
       SELECT COUNT(*) as count FROM evento e
       LEFT JOIN empresa emp ON e.empresaId = emp.empresaId
@@ -72,44 +72,44 @@ router.get('/dashboard', verifyToken, async (req, res) => {
   }
 });
 
-// ✅ Listar clientes para o mapa - APENAS master
+// ✅ Listar cliente para o mapa - APENAS master
 router.get('/clients', verifyToken, async (req, res) => {
   try {
-    // ✅ Apenas master pode listar todos os clientes
+    // ✅ Apenas master pode listar todos os cliente
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar clientes' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar cliente' });
     }
 
-    console.log('📍 [MASTER] Buscando clientes...');
+    console.log('📍 [MASTER] Buscando cliente...');
 
     // Sem coordenadas no cadastro: o mapa posiciona pelo estado/cidade. Une
-    // `empresas` e o cadastro legado `clientes` (ver utils/platformClients.js).
+    // `empresa` e o cadastro legado `cliente` (ver utils/platformClients.js).
     const clients = (await listPlatformClients()).map((c) => ({
       id: c.id,
-      name: c.name,
-      city: c.city,
-      state: c.state,
+      name: c.nome,
+      cidade: c.cidade,
+      estado: c.estado,
       status: c.status,
       plan: c.plan,
     }));
 
-    console.log(`✅ ${clients?.length || 0} clientes carregados`);
+    console.log(`✅ ${clients?.length || 0} cliente carregados`);
     res.json(clients || []);
   } catch (err) {
-    console.error('❌ Erro ao buscar clientes:', err.message);
+    console.error('❌ Erro ao buscar cliente:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ✅ Listar eventos em andamento - APENAS master
+// ✅ Listar evento em andamento - APENAS master
 router.get('/active-events', verifyToken, async (req, res) => {
   try {
-    // ✅ Apenas master pode listar todos os eventos
+    // ✅ Apenas master pode listar todos os evento
     if (!isMaster(req)) {
-      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar todos os eventos' });
+      return res.status(403).json({ error: 'Acesso negado: apenas master pode listar todos os evento' });
     }
 
-    console.log('⚡ [MASTER] Buscando eventos ativos...');
+    console.log('⚡ [MASTER] Buscando evento ativos...');
     
     // O DATEDIFF com ISNULL aninhado vira SQL inválido no Postgres (o regex de
     // tradução corta os argumentos na vírgula do ISNULL), o que derrubava a
@@ -121,7 +121,7 @@ router.get('/active-events', verifyToken, async (req, res) => {
         e.eventoId,
         e.nome,
         e.empresaId,
-        e2.nome as client,
+        e2.nome as cliente,
         (SELECT COUNT(*) FROM crianca WHERE eventoId = e.eventoId) as children_count,
         e.status,
         e.data as event_date,
@@ -136,12 +136,12 @@ router.get('/active-events', verifyToken, async (req, res) => {
 
     const now = Date.now();
     const events = rows.map((e) => {
-      const startedAt = new Date(e.created_at || e.event_date).getTime();
+      const startedAt = new Date(e.criadoEm || e.event_date).getTime();
       return {
-        id: e.id,
-        name: e.name,
-        clientId: e.empresa_id,
-        client: e.client,
+        id: e.eventoId,
+        name: e.nome,
+        clientId: e.empresaId,
+        cliente: e.cliente,
         childrenCount: Number(e.children_count) || 0,
         status: e.status,
         date: e.event_date,
@@ -149,10 +149,10 @@ router.get('/active-events', verifyToken, async (req, res) => {
       };
     });
 
-    console.log(`✅ ${events.length} eventos carregados`);
+    console.log(`✅ ${events.length} evento carregados`);
     res.json(events);
   } catch (err) {
-    console.error('❌ Erro ao buscar eventos ativos:', err.message);
+    console.error('❌ Erro ao buscar evento ativos:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -187,12 +187,12 @@ router.get('/alerts', verifyToken, async (req, res) => {
     `);
 
     const alerts = offlineCheckpoints.map((cp) => ({
-      id: cp.id,
+      id: cp.checkpointId,
       type: 'offline',
-      message: `Checkpoint "${cp.name || cp.id}" offline${cp.zone ? ` (${cp.zone})` : ''}`,
-      client: cp.empresa_nome || 'Sem empresa',
-      time: cp.last_seen
-        ? new Date(cp.last_seen).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      message: `Checkpoint "${cp.nome || cp.checkpointId}" offline${cp.zona ? ` (${cp.zona})` : ''}`,
+      cliente: cp.empresa_nome || 'Sem empresa',
+      time: cp.ultimoVisto
+        ? new Date(cp.ultimoVisto).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
         : '—',
     }));
 

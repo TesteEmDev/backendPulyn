@@ -27,13 +27,13 @@ router.use(verifyToken, requireRole('kiosk', 'score_kiosk'));
 // A recepção continua sendo a única fonte que seleciona o evento operacional.
 router.post('/readings', async (req, res) => {
   try {
-    const code = normalizeUid(req.body?.uid);
+    const codigo = normalizeUid(req.body?.uid);
     const eventId = String(req.body?.eventId || '').trim();
-    if (!code || !eventId) {
+    if (!codigo || !eventId) {
       return res.status(400).json({ error: 'eventId e uid são obrigatórios' });
     }
 
-    const controlledEvent = await getActiveEvent(req.user.empresa_id);
+    const controlledEvent = await getActiveEvent(req.user.empresaId);
     if (!controlledEvent || String(controlledEvent.id).toLowerCase() !== eventId.toLowerCase()) {
       return res.status(409).json({ error: 'A recepção ainda não selecionou este evento' });
     }
@@ -42,25 +42,25 @@ router.post('/readings', async (req, res) => {
       `SELECT eventoId, empresaId, status
        FROM evento
        WHERE eventoId = @eventId AND empresaId = @empresaId`,
-      { eventId, empresaId: req.user.empresa_id }
+      { eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const reading = {
       readingId: uuidv4(),
-      braceletCode: code,
+      braceletCode: codigo,
       timestamp: new Date().toISOString(),
       receivedAt: Date.now(),
-      eventoId: event.id,
+      eventoId: event.eventoId,
       source: 'score-kiosk',
     };
     rememberScoreKioskReading(reading);
     if (global.broadcastToEvent) {
-      global.broadcastToEvent(event.id, { type: 'NFC_READING_DETECTED', payload: reading });
+      global.broadcastToEvent(event.eventoId, { type: 'NFC_READING_DETECTED', payload: reading });
     }
 
-    res.json({ ok: true, readingId: reading.readingId, eventId: event.id });
+    res.json({ ok: true, readingId: reading.readingId, eventId: event.eventoId });
   } catch (error) {
     console.error('❌ Score kiosk: erro ao receber leitura do Arduino:', error.message);
     res.status(500).json({ error: 'Não foi possível receber a leitura da pulseira' });
@@ -72,13 +72,13 @@ router.get('/events/:eventId/score-readings', async (req, res) => {
     const event = await queryOne(
       `SELECT eventoId, status FROM evento
        WHERE eventoId = @eventId AND empresaId = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const since = Number(req.query.since || 0);
-    const eventKey = String(event.id).trim().toLowerCase();
+    const eventKey = String(event.eventoId).trim().toLowerCase();
     const queue = global.scoreKioskReadingQueues?.get(eventKey) || [];
     res.json({ readings: queue.filter(reading => Number(reading.receivedAt || 0) > since) });
   } catch (error) {
@@ -95,12 +95,12 @@ router.get('/events', async (req, res) => {
        WHERE empresaId = @empresaId
          AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')
        ORDER BY data DESC`,
-      { empresaId: req.user.empresa_id }
+      { empresaId: req.user.empresaId }
     );
     res.json(events || []);
   } catch (error) {
-    console.error('❌ Score kiosk: erro ao carregar eventos:', error.message);
-    res.status(500).json({ error: 'Não foi possível carregar os eventos' });
+    console.error('❌ Score kiosk: erro ao carregar evento:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os evento' });
   }
 });
 
@@ -109,13 +109,13 @@ router.get('/events/:eventId/reception-readings', async (req, res) => {
     const event = await queryOne(
       `SELECT eventoId, status FROM evento
        WHERE eventoId = @eventId AND empresaId = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const since = Number(req.query.since || 0);
-    const eventKey = String(event.id).trim().toLowerCase();
+    const eventKey = String(event.eventoId).trim().toLowerCase();
     const queue = global.receptionReadingQueues?.get(eventKey) || [];
     res.json({ readings: queue.filter(reading => Number(reading.receivedAt || 0) > since) });
   } catch (error) {
@@ -124,36 +124,36 @@ router.get('/events/:eventId/reception-readings', async (req, res) => {
   }
 });
 
-router.get('/events/:eventId/bracelets/:code/score', async (req, res) => {
+router.get('/events/:eventId/bracelets/:codigo/score', async (req, res) => {
   try {
-    const code = normalizeUid(req.params.code);
-    if (!code) return res.status(400).json({ error: 'Código da pulseira inválido' });
+    const codigo = normalizeUid(req.params.codigo);
+    if (!codigo) return res.status(400).json({ error: 'Código da pulseira inválido' });
 
     const event = await queryOne(
       `SELECT eventoId, empresaId, nome, status
        FROM evento
        WHERE eventoId = @eventId AND empresaId = @empresaId`,
-      { eventId: req.params.eventId, empresaId: req.user.empresa_id }
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const child = await queryOne(
       `SELECT c.criancaId, c.nome, c.apelido, c.avatar, c.pontos, c.eventoId,
-              t.nome AS team_name, t.cor AS team_color
+              t.nome AS team_nome, t.cor AS team_color
        FROM pulseira p
        JOIN crianca c ON c.criancaId = p.criancaId
          AND c.empresaId = p.empresaId
          AND c.eventoId = @eventId
-         AND ${uidSqlExpression('c.codigoPulseira')} = @code
-       LEFT JOIN time t ON t.timeId = c.timeId
+         AND ${uidSqlExpression('c.codigoPulseira')} = @codigo
+       LEFT JOIN "time" t ON t.timeId = c.timeId
          AND t.eventoId = c.eventoId
          AND t.empresaId = c.empresaId
-       WHERE ${uidSqlExpression('p.codigo')} = @code
+       WHERE ${uidSqlExpression('p.codigo')} = @codigo
          AND p.empresaId = @empresaId
          AND LOWER(COALESCE(p.status, '')) = 'em_uso'
          AND p.criancaId IS NOT NULL`,
-      { code, eventId: event.id, empresaId: event.empresa_id }
+      { codigo, eventId: event.eventoId, empresaId: event.empresaId }
     );
     if (!child) return res.status(404).json({ error: 'Pulseira não vinculada a uma criança deste evento' });
 
@@ -166,23 +166,23 @@ router.get('/events/:eventId/bracelets/:code/score', async (req, res) => {
          AND p.eventoId = @eventId
          AND p.empresaId = @empresaId
        ORDER BY p.criadoEm DESC`,
-      { childId: child.id, eventId: event.id, empresaId: event.empresa_id }
+      { childId: child.criancaId, eventId: event.eventoId, empresaId: event.empresaId }
     );
 
     res.json({
       child: {
-        name: child.nickname || child.name,
-        fullName: child.name,
+        name: child.apelido || child.nome,
+        fullName: child.nome,
         avatar: child.avatar || '👤',
-        scores: Number(child.scores || 0),
+        scores: Number(child.pontos || 0),
         teamName: child.team_name || null,
         teamColor: child.team_color || '#8b5cf6',
       },
       scores: (scores || []).map(score => ({
-        id: score.id,
-        points: Number(score.points || 0),
+        id: score.pontuacaoId,
+        points: Number(score.pontos || 0),
         checkpointName: score.checkpoint_name || 'Conquista',
-        createdAt: score.created_at,
+        createdAt: score.criadoEm,
       })),
     });
   } catch (error) {

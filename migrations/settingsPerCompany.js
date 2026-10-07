@@ -2,7 +2,7 @@
 //
 // A tabela settings nasceu com UNIQUE(setting_key) global: só podia existir uma linha
 // por chave no sistema inteiro. Como cada buffet tem suas próprias configurações, a
-// unicidade passa a ser por (empresa_id, setting_key). As linhas antigas, sem empresa,
+// unicidade passa a ser por (empresaId, setting_key). As linhas antigas, sem empresa,
 // ficam como estão (são o seed original e deixam de ser lidas/alteradas pelas rotas).
 const { query, allQuery, DB_DRIVER } = require('../database');
 

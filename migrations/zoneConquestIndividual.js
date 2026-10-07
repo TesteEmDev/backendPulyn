@@ -70,7 +70,7 @@ async function ensureZoneConquestIndividualSchema() {
     try {
       await query(`
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='zone_conquest_individual_partidas' AND xtype='U')
-        CREATE TABLE [zonaConquistaPartidaIndividual] (
+        CREATE TABLE [zone_conquest_individual_partidas] (
           [id] VARCHAR(36) PRIMARY KEY,
           [eventoId] VARCHAR(36) NOT NULL,
           [empresaId] VARCHAR(36) NOT NULL,
@@ -78,19 +78,19 @@ async function ensureZoneConquestIndividualSchema() {
           [status] VARCHAR(20) NOT NULL DEFAULT 'active',
           [iniciadoEm] DATETIME2,
           [finalizadoEm] DATETIME2,
-          [criadoEm] DATETIME2 NOT NULL DEFAULT GETDATE(),
-          [atualizadoEm] DATETIME2 NOT NULL DEFAULT GETDATE()
+          [created_at] DATETIME2 NOT NULL DEFAULT GETDATE(),
+          [updated_at] DATETIME2 NOT NULL DEFAULT GETDATE()
         );
 
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_zcip_evento')
-          CREATE INDEX idx_zcip_evento ON [zonaConquistaPartidaIndividual]([eventoId]);
+          CREATE INDEX idx_zcip_evento ON [zone_conquest_individual_partidas]([eventoId]);
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_zcip_status')
-          CREATE INDEX idx_zcip_status ON [zonaConquistaPartidaIndividual]([status]);
+          CREATE INDEX idx_zcip_status ON [zone_conquest_individual_partidas]([status]);
 
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='zone_conquest_individual_participant_states' AND xtype='U')
-        CREATE TABLE [zonaConquistaEstadoParticipanteIndividual] (
+        CREATE TABLE [zone_conquest_individual_participant_states] (
           [id] VARCHAR(36) PRIMARY KEY,
-          [partidaId] VARCHAR(36) NOT NULL FOREIGN KEY REFERENCES [zonaConquistaPartidaIndividual]([id]),
+          [partidaId] VARCHAR(36) NOT NULL FOREIGN KEY REFERENCES [zone_conquest_individual_partidas]([id]),
           [empresaId] VARCHAR(36) NOT NULL,
           [eventoId] VARCHAR(36) NOT NULL,
           [criancaId] VARCHAR(36) NOT NULL,
@@ -98,41 +98,41 @@ async function ensureZoneConquestIndividualSchema() {
           [checkpointsLidos] INT DEFAULT 0,
           [pontosTotais] DECIMAL(10, 2) DEFAULT 0,
           [ranking] INT,
-          [versao] INT DEFAULT 0,
+          [version] INT DEFAULT 0,
           [iniciadoEm] DATETIME2,
           [finalizadoEm] DATETIME2,
-          [criadoEm] DATETIME2 NOT NULL DEFAULT GETDATE(),
-          [atualizadoEm] DATETIME2 NOT NULL DEFAULT GETDATE()
+          [created_at] DATETIME2 NOT NULL DEFAULT GETDATE(),
+          [updated_at] DATETIME2 NOT NULL DEFAULT GETDATE()
         );
 
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_zcips_partida')
-          CREATE INDEX idx_zcips_partida ON [zonaConquistaEstadoParticipanteIndividual]([partidaId]);
+          CREATE INDEX idx_zcips_partida ON [zone_conquest_individual_participant_states]([partidaId]);
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_zcips_crianca')
-          CREATE INDEX idx_zcips_crianca ON [zonaConquistaEstadoParticipanteIndividual]([criancaId]);
+          CREATE INDEX idx_zcips_crianca ON [zone_conquest_individual_participant_states]([criancaId]);
 
         IF NOT EXISTS (SELECT * FROM sysobjects WHERE name='zone_conquest_individual_scans' AND xtype='U')
-        CREATE TABLE [zonaConquistaLeituraIndividual] (
+        CREATE TABLE [zone_conquest_individual_scans] (
           [id] VARCHAR(36) PRIMARY KEY,
-          [partidaId] VARCHAR(36) NOT NULL FOREIGN KEY REFERENCES [zonaConquistaPartidaIndividual]([id]),
+          [partidaId] VARCHAR(36) NOT NULL FOREIGN KEY REFERENCES [zone_conquest_individual_partidas]([id]),
           [empresaId] VARCHAR(36) NOT NULL,
           [eventoId] VARCHAR(36) NOT NULL,
           [brincadeiraId] VARCHAR(36) NOT NULL,
           [checkpointId] VARCHAR(36) NOT NULL,
           [criancaId] VARCHAR(36) NOT NULL,
           [uid] VARCHAR(50) NOT NULL,
-          [leituraId] VARCHAR(36) NOT NULL UNIQUE,
-          [pontosAtribuidos] DECIMAL(10, 2),
-          [versao] INT DEFAULT 0,
-          [lidoEm] DATETIME2,
-          [criadoEm] DATETIME2 NOT NULL DEFAULT GETDATE()
+          [leitura_id] VARCHAR(36) NOT NULL UNIQUE,
+          [points_awarded] DECIMAL(10, 2),
+          [version] INT DEFAULT 0,
+          [scanned_at] DATETIME2,
+          [created_at] DATETIME2 NOT NULL DEFAULT GETDATE()
         );
 
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_zcis_partida')
-          CREATE INDEX idx_zcis_partida ON [zonaConquistaLeituraIndividual]([partidaId]);
+          CREATE INDEX idx_zcis_partida ON [zone_conquest_individual_scans]([partidaId]);
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_zcis_crianca')
-          CREATE INDEX idx_zcis_crianca ON [zonaConquistaLeituraIndividual]([criancaId]);
+          CREATE INDEX idx_zcis_crianca ON [zone_conquest_individual_scans]([criancaId]);
         IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name='idx_zcis_leitura')
-          CREATE INDEX idx_zcis_leitura ON [zonaConquistaLeituraIndividual]([leituraId]);
+          CREATE INDEX idx_zcis_leitura ON [zone_conquest_individual_scans]([leitura_id]);
       `);
       
       console.log('✅ Schema de zone_conquest_individual verificado (SQL Server)');

@@ -8,7 +8,7 @@ const {
 } = require('../utils/treasure');
 
 // Endpoint público usado pelo ESP32 para saber se este checkpoint é o alvo.
-router.get('/checkpoints/:checkpointId/status', async (req, res) => {
+router.get('/pontoVerificacao/:checkpointId/status', async (req, res) => {
   try {
     const status = await getCheckpointTreasureStatus(req.params.checkpointId);
     res.json(status);
@@ -19,7 +19,7 @@ router.get('/checkpoints/:checkpointId/status', async (req, res) => {
 });
 
 // Status completo para o Game Master.
-router.get('/eventos/:eventoId/status', verifyToken, async (req, res) => {
+router.get('/evento/:eventoId/status', verifyToken, async (req, res) => {
   try {
     const evento = await queryOne(
       'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
@@ -27,7 +27,7 @@ router.get('/eventos/:eventoId/status', verifyToken, async (req, res) => {
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isMaster(req)
-      && String(evento.empresa_id).trim().toLowerCase() !== String(req.user.empresa_id).trim().toLowerCase()) {
+      && String(evento.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 

@@ -17,10 +17,10 @@ async function ensureEventControlSchema() {
   await query(`
     IF OBJECT_ID('dbo.empresa_event_control', 'U') IS NULL
     BEGIN
-      CREATE TABLE controleEventoEmpresa (
+      CREATE TABLE empresa_event_control (
         empresaId NVARCHAR(36) NOT NULL PRIMARY KEY,
         eventoId NVARCHAR(36) NULL,
-        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
+        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);

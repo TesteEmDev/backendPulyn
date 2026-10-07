@@ -19,14 +19,14 @@ function asDate(value) {
 
 function formatEvent(event) {
   if (!event) return 'Nenhum evento registrado';
-  const date = asDate(event.event_date || event.created_at);
+  const date = asDate(event.event_date || event.criadoEm);
   const dateLabel = date ? date.toLocaleDateString('pt-BR') : '';
   const timeLabel = event.event_time ? String(event.event_time).slice(0, 5) : '';
-  return [event.name, dateLabel, timeLabel].filter(Boolean).join(' - ');
+  return [event.nome, dateLabel, timeLabel].filter(Boolean).join(' - ');
 }
 
 async function loadMonitoringData() {
-  const [companies, checkpoints, events] = await Promise.all([
+  const [companies, pontoVerificacao, events] = await Promise.all([
     allQuery(`
       SELECT empresaId, nome, cidade, estado, status
       FROM empresa
@@ -45,11 +45,11 @@ async function loadMonitoringData() {
     `),
   ]);
 
-  const eventById = new Map(events.map(event => [String(event.id), event]));
+  const eventById = new Map(events.map(event => [String(event.eventoId), event]));
   const checkpointsByCompany = new Map();
-  checkpoints.forEach(checkpoint => {
-    const event = eventById.get(String(checkpoint.evento_id));
-    const companyId = checkpoint.empresa_id || event?.empresa_id;
+  pontoVerificacao.forEach(checkpoint => {
+    const event = eventById.get(String(checkpoint.eventoId));
+    const companyId = checkpoint.empresaId || event?.empresaId;
     if (!companyId) return;
     const key = String(companyId);
     if (!checkpointsByCompany.has(key)) checkpointsByCompany.set(key, []);
@@ -58,10 +58,10 @@ async function loadMonitoringData() {
 
   const eventsByCompany = new Map();
   events.forEach(event => {
-    const key = String(event.empresa_id);
+    const key = String(event.empresaId);
     const current = eventsByCompany.get(key);
-    const currentDate = asDate(current?.event_date || current?.created_at);
-    const eventDate = asDate(event.event_date || event.created_at);
+    const currentDate = asDate(current?.event_date || current?.criadoEm);
+    const eventDate = asDate(event.event_date || event.criadoEm);
     if (!current || (eventDate && (!currentDate || eventDate > currentDate))) {
       eventsByCompany.set(key, event);
     }
@@ -69,41 +69,41 @@ async function loadMonitoringData() {
 
   const staleLimit = Date.now() - (5 * 60 * 1000);
   const units = companies.map(company => {
-    const companyCheckpoints = checkpointsByCompany.get(String(company.id)) || [];
+    const companyCheckpoints = checkpointsByCompany.get(String(company.empresaId)) || [];
     const checkpointItems = companyCheckpoints.map(checkpoint => {
-      const lastSeen = asDate(checkpoint.last_seen);
+      const lastSeen = asDate(checkpoint.ultimoVisto);
       const statusValue = String(checkpoint.status || '').toLowerCase();
       const online = statusValue === 'online' && (!lastSeen || lastSeen.getTime() >= staleLimit);
       return {
-        id: checkpoint.id,
-        name: checkpoint.name,
+        id: checkpoint.checkpointId,
+        name: checkpoint.nome,
         status: online ? 'online' : 'offline',
-        lastSeen: checkpoint.last_seen || null,
+        lastSeen: checkpoint.ultimoVisto || null,
         ip: checkpoint.ip || null,
-        zone: checkpoint.zone || null,
-        points: checkpoint.points,
+        zone: checkpoint.zona || null,
+        points: checkpoint.pontos,
       };
     });
     const onlineCount = checkpointItems.filter(checkpoint => checkpoint.status === 'online').length;
     const alerts = checkpointItems
       .filter(checkpoint => checkpoint.status !== 'online')
-      .map(checkpoint => `${checkpoint.name || checkpoint.id} offline`);
+      .map(checkpoint => `${checkpoint.nome || checkpoint.checkpointId} offline`);
     if (checkpointItems.length === 0) alerts.push('Nenhum checkpoint cadastrado');
     if (String(company.status || '').toLowerCase() !== 'active') alerts.push(`Empresa ${company.status || 'inativa'}`);
 
     return {
-      id: company.id,
+      id: company.empresaId,
       name: company.nome,
-      city: company.cidade,
-      state: company.estado,
+      cidade: company.cidade,
+      estado: company.estado,
       status: onlineCount > 0 ? 'online' : 'offline',
       checkpointsActive: onlineCount,
       checkpointsTotal: checkpointItems.length,
-      lastEvent: formatEvent(eventsByCompany.get(String(company.id))),
+      lastEvent: formatEvent(eventsByCompany.get(String(company.empresaId))),
       latency: null,
       uptime: null,
       alerts,
-      checkpoints: checkpointItems,
+      pontoVerificacao: checkpointItems,
     };
   });
 

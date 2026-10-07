@@ -48,7 +48,7 @@ function durationMsOf(row) {
 //  - 'start': agendado, com início automático, dentro da janela [início, início + duração).
 //    Se a janela inteira já passou sem o evento começar, ele NÃO inicia sozinho.
 //  - 'finish': ativo, com encerramento automático, e já passou (início real + duração).
-//    O início real (started_at) vale mesmo quando o admin iniciou manualmente,
+//    O início real (iniciadoEm) vale mesmo quando o admin iniciou manualmente,
 //    então a duração conta a partir de quando o evento realmente começou.
 function evaluateLifecycle(row, now = new Date(), timeZone = EVENT_TIMEZONE) {
   const status = normalizeStatus(row.status);
@@ -56,13 +56,13 @@ function evaluateLifecycle(row, now = new Date(), timeZone = EVENT_TIMEZONE) {
   const durationMs = durationMsOf(row);
   const scheduledStart = wallClockOf(row.date_str, row.time_str);
 
-  if (status === 'scheduled' && Number(row.auto_start) === 1) {
+  if (status === 'scheduled' && Number(row.autoInicio) === 1) {
     if (scheduledStart === null) return null;
     return nowWall >= scheduledStart && nowWall < scheduledStart + durationMs ? 'start' : null;
   }
 
-  if (status === 'active' && Number(row.auto_end) === 1) {
-    const base = row.started_at ? wallClockNow(new Date(row.started_at), timeZone) : scheduledStart;
+  if (status === 'active' && Number(row.autoFim) === 1) {
+    const base = row.iniciadoEm ? wallClockNow(new Date(row.iniciadoEm), timeZone) : scheduledStart;
     if (base === null || Number.isNaN(base)) return null;
     return nowWall >= base + durationMs ? 'finish' : null;
   }
@@ -79,22 +79,22 @@ function broadcastCompany(empresaId, message) {
 // agendado -> ativo. Retorna true se realmente mudou (false se já não estava agendado).
 async function startEvent(eventoId, { source = 'manual' } = {}) {
   const result = await query(
-    `UPDATE evento
+    `UPDATE "evento"
      SET status = 'active',
          iniciadoEm = COALESCE(iniciadoEm, CURRENT_TIMESTAMP),
          finalizadoEm = NULL
-     WHERE LOWER(eventoId) = LOWER(@eventoId)
+     WHERE LOWER("eventoId") = LOWER(@eventoId)
        AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
     { eventoId }
   );
   const changed = Number(result?.rowsAffected?.[0] || 0) > 0;
   if (!changed) return false;
 
-  const evento = await queryOne('SELECT eventoId, empresaId, iniciadoEm FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)', { eventoId });
+  const evento = await queryOne('SELECT "eventoId", empresaId, iniciadoEm FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)', { eventoId });
   console.log(`▶️ [EVENTO] ${eventoId} iniciado (${source})`);
-  broadcastCompany(evento?.empresa_id, {
+  broadcastCompany(evento?.empresaId, {
     type: 'EVENT_STATUS_CHANGED',
-    payload: { eventoId, status: 'active', startedAt: evento?.started_at || null, source },
+    payload: { eventoId, status: 'active', startedAt: evento?.iniciadoEm || null, source },
   });
   return true;
 }
@@ -108,7 +108,7 @@ async function ensureEventActive(eventoId) {
 // ativo/agendado -> encerrado. `stopGame(eventoId)` para o jogo em andamento antes.
 async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
   const evento = await queryOne(
-    'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+    'SELECT "eventoId", empresaId, status FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return { changed: false, reason: 'not_found' };
@@ -116,42 +116,44 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
 
   if (typeof stopGame === 'function') {
     try {
-      await stopGame(evento.id);
+      await stopGame(evento.eventoId);
     } catch (err) {
-      console.warn(`⚠️ [EVENTO] Não foi possível parar o jogo ao encerrar ${evento.id}: ${err.message}`);
+      console.warn(`⚠️ [EVENTO] Não foi possível parar o jogo ao encerrar ${evento.eventoId}: ${err.message}`);
     }
   }
 
   const result = await query(
-    `UPDATE evento
+    `UPDATE "evento"
      SET status = 'finished',
          finalizadoEm = CURRENT_TIMESTAMP,
          brincadeiraAtivaId = NULL,
          tipoJogoAtivo = 'none'
      WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('finished', 'completed', 'cancelled', 'canceled')`,
-    { eventoId: evento.id }
+    { eventoId: evento.eventoId }
   );
   if (!(Number(result?.rowsAffected?.[0] || 0) > 0)) return { changed: false, reason: 'already_finished' };
 
   // Recepção/kiosk deixam de ter este evento selecionado (getActiveEvent já ignora
   // eventos encerrados; aqui os telas abertas são avisadas na hora).
-  const unselected = await query(
-    `UPDATE controleEventoEmpresa SET eventoId = NULL, atualizadoEm = CURRENT_TIMESTAMP
-     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
-    { eventoId: evento.id }
-  );
+  // Skip - Table não existe no novo schema em português
+  // const unselected = await query(
+  //   `UPDATE "empresaEventoControle" SET eventoId = NULL, updated_at = CURRENT_TIMESTAMP
+  //    WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+  //   { eventoId: evento.id }
+  // );
+  const unselected = { rowsAffected: [0] };
   if (Number(unselected?.rowsAffected?.[0] || 0) > 0) {
-    broadcastCompany(evento.empresa_id, {
+    broadcastCompany(evento.empresaId, {
       type: 'EVENT_SELECTED',
       payload: { eventoId: null, eventName: null, eventStatus: null, updatedAt: new Date().toISOString() },
     });
   }
 
-  console.log(`⏹️ [EVENTO] ${evento.id} encerrado (${source})`);
-  broadcastCompany(evento.empresa_id, {
+  console.log(`⏹️ [EVENTO] ${evento.eventoId} encerrado (${source})`);
+  broadcastCompany(evento.empresaId, {
     type: 'EVENT_STATUS_CHANGED',
-    payload: { eventoId: evento.id, status: 'finished', source },
+    payload: { eventoId: evento.eventoId, status: 'finished', source },
   });
   return { changed: true };
 }
@@ -161,14 +163,14 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
 // O início/encerramento automáticos seguem as opções que o evento já tinha.
 async function reopenEvent(eventoId, { date, time, duration } = {}) {
   const evento = await queryOne(
-    'SELECT eventoId, empresaId, status FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+    'SELECT "eventoId", empresaId, status FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)',
     { eventoId }
   );
   if (!evento) return { changed: false, reason: 'not_found' };
   if (!isClosedStatus(evento.status)) return { changed: false, reason: 'not_finished' };
 
   const result = await query(
-    `UPDATE evento
+    `UPDATE "evento"
      SET status = 'scheduled',
          data = @date,
          hora = @time,
@@ -179,14 +181,14 @@ async function reopenEvent(eventoId, { date, time, duration } = {}) {
          tipoJogoAtivo = 'none'
      WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND LOWER(COALESCE(status, 'scheduled')) IN ('finished', 'completed', 'cancelled', 'canceled')`,
-    { eventoId: evento.id, date, time, duration: duration ?? null }
+    { eventoId: evento.eventoId, date, time, duration: duration ?? null }
   );
   if (!(Number(result?.rowsAffected?.[0] || 0) > 0)) return { changed: false, reason: 'not_finished' };
 
-  console.log(`🔓 [EVENTO] ${evento.id} reaberto para ${date} ${time}`);
-  broadcastCompany(evento.empresa_id, {
+  console.log(`🔓 [EVENTO] ${evento.eventoId} reaberto para ${date} ${time}`);
+  broadcastCompany(evento.empresaId, {
     type: 'EVENT_STATUS_CHANGED',
-    payload: { eventoId: evento.id, status: 'scheduled', source: 'reopen' },
+    payload: { eventoId: evento.eventoId, status: 'scheduled', source: 'reopen' },
   });
   return { changed: true };
 }
@@ -197,7 +199,7 @@ async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
     SELECT eventoId, empresaId, status, duracao, iniciadoEm, autoInicio, autoFim,
            CAST([data] AS VARCHAR(10)) AS date_str,
            CAST([hora] AS VARCHAR(5)) AS time_str
-    FROM evento
+    FROM "evento"
     WHERE (autoInicio = 1 AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled')
        OR (autoFim = 1 AND LOWER(COALESCE(status, '')) = 'active')
   `);

@@ -5,7 +5,7 @@ async function ensureCheckpointMapPositionSchema() {
 
   if (isPostgres) {
     await query(`
-      ALTER TABLE pontoVerificacao
+      ALTER TABLE "pontoVerificacao"
       ADD COLUMN IF NOT EXISTS mapaX integer,
       ADD COLUMN IF NOT EXISTS mapaY integer
     `);
@@ -13,13 +13,13 @@ async function ensureCheckpointMapPositionSchema() {
   }
 
   await query(`
-    IF COL_LENGTH('dbo.checkpoints', 'map_x') IS NULL
+    IF COL_LENGTH('dbo.pontoVerificacao', 'map_x') IS NULL
     BEGIN
-      ALTER TABLE pontoVerificacao ADD mapaX INT NULL
+      ALTER TABLE pontoVerificacao ADD map_x INT NULL
     END
-    IF COL_LENGTH('dbo.checkpoints', 'map_y') IS NULL
+    IF COL_LENGTH('dbo.pontoVerificacao', 'map_y') IS NULL
     BEGIN
-      ALTER TABLE pontoVerificacao ADD mapaY INT NULL
+      ALTER TABLE pontoVerificacao ADD map_y INT NULL
     END
   `);
 }

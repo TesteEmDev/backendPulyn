@@ -23,7 +23,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
 
     // 1. Validar brincadeira
     const brincadeira = await queryOne(
-      `SELECT brincadeiraId, nome, tipo, empresaId FROM brincadeira WHERE brincadeiraId = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
+      `SELECT brincadeiraId, nome, tipo, empresaId FROM "brincadeira" WHERE brincadeiraId = @id AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { id: brincadeiraId }
     );
 
@@ -33,7 +33,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
 
     // 2. Buscar checkpoints do evento
     const checkpoints = await allQuery(
-      `SELECT checkpointId, nome, eventoId FROM pontoVerificacao 
+      `SELECT checkpointId, nome, eventoId FROM "pontoVerificacao" 
        WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND (proposito IS NULL OR proposito = 'game')
          AND status = 'online'`,
@@ -49,7 +49,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
     // 3. Buscar equipes participantes
     const times = await allQuery(
       `SELECT DISTINCT t.timeId, t.nome, t.cor 
-       FROM time t
+       FROM "time" t
        INNER JOIN crianca c ON c.timeId = t.timeId
        WHERE c.eventoId = @eventoId AND c.status = 'ativo'
        GROUP BY t.timeId, t.nome, t.cor`,
@@ -64,7 +64,7 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
 
     // 4. Buscar evento para validação
     const evento = await queryOne(
-      `SELECT eventoId, empresaId FROM evento WHERE eventoId = @id`,
+      `SELECT eventoId, empresaId FROM "evento" WHERE eventoId = @id`,
       { id: eventoId }
     );
 
@@ -84,10 +84,10 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
          VALUES (@id, @empresaId, @eventoId, @brincadeiraId, 'active', 1, @currentTeamId, @startedAt)`,
         {
           id: partidaId,
-          empresaId: evento.empresa_id,
+          empresaId: evento.empresaId,
           eventoId,
           brincadeiraId,
-          currentTeamId: times[0].id, // Primeira equipe começa
+          currentTeamId: times[0].timeId, // Primeira equipe começa
           startedAt: agora,
         }
       );
@@ -101,24 +101,24 @@ async function startZoneConquestTeam(eventoId, brincadeiraId) {
           {
             id: uuidv4(),
             partidaId,
-            empresaId: evento.empresa_id,
+            empresaId: evento.empresaId,
             eventoId,
-            timeId: time.id,
+            timeId: time.timeId,
             startedAt: agora,
           }
         );
       }
 
-      return { id: partidaId, started_at: agora };
+      return { id: partidaId, iniciadoEm: agora };
     });
 
     console.log(`   ✅ Partida criada: ${partida.id}`);
     return {
-      partida_id: partida.id,
-      started_at: partida.started_at,
+      partidaId: partida.id,
+      iniciadoEm: partida.iniciadoEm,
       checkpoints: checkpoints.length,
       teams: times.length,
-      current_team_id: times[0].id,
+      timeAtualId: times[0].timeId,
     };
   } catch (err) {
     console.error('❌ [ZONE-TEAM] Erro ao iniciar jogo:', err);
@@ -150,7 +150,7 @@ async function processZoneConquestTeamScan({
   }
 
   try {
-    console.log(`\n📖 [ZONE-TEAM] Processando scan: ${crianca.name} em checkpoint ${checkpointId}`);
+    console.log(`\n📖 [ZONE-TEAM] Processando scan: ${crianca.nome} em checkpoint ${checkpointId}`);
 
     // 1. Obter partida ativa
     const partida = await queryOne(
@@ -169,7 +169,7 @@ async function processZoneConquestTeamScan({
       };
     }
 
-    console.log(`   📋 Partida: ${partida.id}, Round: ${partida.round_number}`);
+    console.log(`   📋 Partida: ${partida.id}, Round: ${partida.numeroRonda}`);
 
     // Sem turno/fila: qualquer equipe pode ler qualquer checkpoint disponível
     // a qualquer momento — checkpoints são disputados em tempo real, não em
@@ -183,19 +183,19 @@ async function processZoneConquestTeamScan({
     // checkStaleTeamCheckpoints no index.js, que zera o domínio sozinho
     // depois desse tempo de inatividade).
     const checkpointState = await queryOne(
-      `SELECT territorioDonosCriancaId, ultimoConquistadoEm FROM pontoVerificacao WHERE checkpointId = @checkpointId`,
+      `SELECT territorioDonosCriancaId, ultimoConquistadoEm FROM "pontoVerificacao" WHERE checkpointId = @checkpointId`,
       { checkpointId }
     );
-    const lastConqueredAt = checkpointState?.last_conquered_at
-      ? new Date(checkpointState.last_conquered_at).getTime()
+    const lastConqueredAt = checkpointState?.ultimoConquistadoEm
+      ? new Date(checkpointState.ultimoConquistadoEm).getTime()
       : null;
     const stillActive = lastConqueredAt !== null && (now.getTime() - lastConqueredAt) < TEAM_CHECKPOINT_RESET_MS;
     const dominatedBySameChild = stillActive
-      && checkpointState.territory_owner_crianca_id
-      && String(checkpointState.territory_owner_crianca_id).toLowerCase() === String(crianca.id).toLowerCase();
+      && checkpointState.territorioDonosCriancaId
+      && String(checkpointState.territorioDonosCriancaId).toLowerCase() === String(crianca.criancaId).toLowerCase();
 
     if (dominatedBySameChild) {
-      console.log(`   ⚠️ ${crianca.name} já domina este checkpoint — aguarde outra equipe conquistar ou 1m30s sem leituras`);
+      console.log(`   ⚠️ ${crianca.nome} já domina este checkpoint — aguarde outra equipe conquistar ou 1m30s sem leituras`);
       return {
         accepted: false,
         error: 'Você já dominou este checkpoint. Aguarde outra equipe conquistar ou 1m30s sem leituras para liberar.',
@@ -216,13 +216,13 @@ async function processZoneConquestTeamScan({
         {
           id: uuidv4(),
           partidaId: partida.id,
-          empresaId: crianca.empresa_id,
+          empresaId: crianca.empresaId,
           eventoId,
           brincadeiraId,
-          roundNumber: partida.round_number,
+          roundNumber: partida.numeroRonda,
           checkpointId,
-          criancaId: crianca.id,
-          timeId: crianca.time_id,
+          criancaId: crianca.criancaId,
+          timeId: crianca.timeId,
           uid,
           leituraId,
           pontos,
@@ -240,18 +240,18 @@ async function processZoneConquestTeamScan({
         {
           id: leituraId,
           checkpointId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           uid,
           brincadeiraId: brincadeiraId || null,
           points: pontos,
           signal: -45,
-          empresaId: crianca.empresa_id,
+          empresaId: crianca.empresaId,
           sessionId: sessionId || null,
         }
       );
       console.log(`   📝 [LEITURA] Inserida em leituras com session_id=${sessionId || 'NULL'}`);
 
-      // UPDATE tempo: incrementar checkpoints_read e pontos
+      // UPDATE tempo: incrementar checkpointsLidos e pontos
       await tx.query(
         `UPDATE zonaConquistaTempoTime SET
            checkpointsLidos = checkpointsLidos + 1,
@@ -260,7 +260,7 @@ async function processZoneConquestTeamScan({
          WHERE partidaId = @partidaId AND timeId = @timeId`,
         {
           partidaId: partida.id,
-          timeId: crianca.time_id,
+          timeId: crianca.timeId,
           pontos,
           agora: now,
         }
@@ -271,16 +271,16 @@ async function processZoneConquestTeamScan({
       // o card de Pontuação e o app da família leem.
       await tx.query(
         'UPDATE crianca SET pontos = pontos + @points WHERE criancaId = @criancaId',
-        { points: pontos, criancaId: crianca.id }
+        { points: pontos, criancaId: crianca.criancaId }
       );
       await tx.query(
-        `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
+        `UPDATE "time" SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM "crianca" WHERE timeId = @timeId)
          WHERE timeId = @timeId`,
-        { timeId: crianca.time_id }
+        { timeId: crianca.timeId }
       );
 
       // UPDATE checkpoint: marcar como dominado por esta equipe. Também
-      // grava qual criança fez a leitura (territory_owner_crianca_id) —
+      // grava qual criança fez a leitura (territorioDonosCriancaId) —
       // usado só para a regra de "não pode reconquistar o que já domina",
       // sem relação com o modo individual (que usa a mesma coluna, mas
       // nunca roda ao mesmo tempo que o modo equipe).
@@ -292,12 +292,12 @@ async function processZoneConquestTeamScan({
          WHERE checkpointId = @checkpointId`,
         {
           checkpointId,
-          timeId: crianca.time_id,
-          criancaId: crianca.id,
+          timeId: crianca.timeId,
+          criancaId: crianca.criancaId,
           agora: now,
         }
       );
-      console.log(`   🎨 [ZONE-TEAM] Checkpoint ${checkpointId} marcado para equipe ${crianca.time_id}`);
+      console.log(`   🎨 [ZONE-TEAM] Checkpoint ${checkpointId} marcado para equipe ${crianca.timeId}`);
 
       return { points: pontos, accepted: true };
     });
@@ -355,7 +355,7 @@ async function getZoneConquestTeamStatus(eventoId) {
     const tempos = await allQuery(
       `SELECT t.*, tm.nome, tm.cor
        FROM zonaConquistaTempoTime t
-       INNER JOIN time tm ON tm.timeId = t.timeId
+       INNER JOIN "time" tm ON tm.timeId = t.timeId
        WHERE t.partidaId = @partidaId
        ORDER BY t.pontosTotais DESC`,
       { partidaId: partida.id }
@@ -364,8 +364,8 @@ async function getZoneConquestTeamStatus(eventoId) {
     // 3. Obter checkpoints dominados
     const dominatedCheckpoints = await allQuery(
       `SELECT c.*, t.nome AS team_name, t.cor AS team_color
-       FROM pontoVerificacao c
-       INNER JOIN time t ON t.timeId = c.territorioDonoTimeId
+       FROM "pontoVerificacao" c
+       INNER JOIN "time" t ON t.timeId = c.territorioDonoTimeId
        WHERE c.eventoId = @eventoId
          AND c.territorioDonoTimeId IS NOT NULL`,
       { eventoId }
@@ -374,21 +374,21 @@ async function getZoneConquestTeamStatus(eventoId) {
     return {
       gameRunning: true,
       mode: 'team',
-      partida_id: partida.id,
-      round_number: partida.round_number,
-      current_team_id: partida.current_team_id,
+      partidaId: partida.id,
+      numeroRonda: partida.numeroRonda,
+      timeAtualId: partida.timeAtualId,
       status: partida.status,
       teams: tempos.map(t => ({
-        team_id: t.time_id,
-        team_name: t.name,
-        team_color: t.color,
-        checkpoints_read: t.checkpoints_read,
-        total_points: t.total_points,
-        zones_dominated: t.zones_dominated,
+        team_id: t.timeId,
+        team_name: t.nome,
+        team_color: t.cor,
+        checkpointsLidos: t.checkpointsLidos,
+        pontosTotais: t.pontosTotais,
+        zonasDominadas: t.zonasDominadas,
         status: t.status,
       })),
       dominated_checkpoints: dominatedCheckpoints.length,
-      created_at: partida.started_at,
+      created_at: partida.iniciadoEm,
     };
   } catch (err) {
     console.error('❌ Erro ao obter status:', err);
@@ -421,8 +421,8 @@ async function stopZoneConquestTeam(eventoId) {
         }
       );
 
-      // UPDATE tempos — a coluna nesta tabela se chama completed_at, não
-      // finished_at (diferente de zone_conquest_team_partidas). Usar o nome
+      // UPDATE tempos — a coluna nesta tabela se chama concluidoEm, não
+      // finalizadoEm (diferente de zone_conquest_team_partidas). Usar o nome
       // errado aqui derrubava toda a transação com "column does not exist",
       // e como esse método é chamado ANTES de criar a partida nova no
       // start-game, a criação da partida TEAM nunca chegava a rodar.

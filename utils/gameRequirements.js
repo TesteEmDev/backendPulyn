@@ -24,7 +24,7 @@ const GAME_LABELS = {
 
 // Mesma leitura do tipo que as rotas de início usam: brincadeiras.type é a fonte da verdade.
 function resolveGameKind(game) {
-  const type = String(game?.type || game?.game_type || '').trim().toLowerCase();
+  const type = String(game?.tipo || game?.tipoJogo || '').trim().toLowerCase();
   if (type === 'monster_hunt') return 'monster_hunt';
   if (type === 'treasure_hunt') return 'treasure_hunt';
   if (type === 'individual' || type === 'zone_conquest_individual') return 'zone_individual';
@@ -51,25 +51,25 @@ function parseConfiguredIds(rawCheckpoints) {
  * @returns {Promise<{ ok: boolean, kind: string, required: number, available: number, message: string|null }>}
  */
 async function checkGameStartRequirements(eventoId, game) {
-  const row = game && typeof game === 'object' && 'type' in game && 'checkpoints' in game
+  const row = game && typeof game === 'object' && 'tipo' in game && 'checkpoints' in game
     ? game
     : await queryOne(
-      'SELECT brincadeiraId, nome, tipo, tipoJogo, checkpoints FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id)',
-      { id: typeof game === 'object' ? game?.id : game }
+      'SELECT brincadeiraId, nome, tipo, tipoJogo, checkpoints FROM "brincadeira" WHERE LOWER(brincadeiraId) = LOWER(@id)',
+      { id: typeof game === 'object' ? game?.brincadeiraId : game }
     );
 
   const kind = resolveGameKind(row);
   const required = MIN_CHECKPOINTS[kind];
 
   const online = await allQuery(
-    `SELECT checkpointId FROM pontoVerificacao
+    `SELECT checkpointId FROM "pontoVerificacao"
      WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
        AND LOWER(COALESCE(status, 'offline')) = 'online'`,
     { eventoId }
   );
 
-  let ids = online.map((checkpoint) => String(checkpoint.id).trim().toLowerCase());
+  let ids = online.map((checkpoint) => String(checkpoint.checkpointId).trim().toLowerCase());
   const configured = kind === 'treasure_hunt' ? parseConfiguredIds(row?.checkpoints) : [];
   const scopedToGame = configured.length > 0;
   if (scopedToGame) {
@@ -80,7 +80,7 @@ async function checkGameStartRequirements(eventoId, game) {
   const available = ids.length;
   if (available >= required) return { ok: true, kind, required, available, message: null };
 
-  const name = row?.name ? `"${row.name}"` : GAME_LABELS[kind];
+  const name = row?.nome ? `"${row.nome}"` : GAME_LABELS[kind];
   const plural = (n) => (n === 1 ? 'checkpoint' : 'checkpoints');
   const where = scopedToGame ? 'configurados neste jogo e online neste evento' : 'online neste evento';
   return {

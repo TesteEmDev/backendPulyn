@@ -1,9 +1,9 @@
-// migrations/addTerritoryOwnerCriancaId.js - Add territory_owner_crianca_id for INDIVIDUAL mode
+// migrations/addTerritoryOwnerCriancaId.js - Add territorioDonosCriancaId for INDIVIDUAL mode
 const { query } = require('../database');
 
 async function addTerritoryOwnerCriancaIdColumn() {
   try {
-    console.log('🔄 [MIGRATION] Adicionando coluna territory_owner_crianca_id...');
+    console.log('🔄 [MIGRATION] Adicionando coluna territorioDonosCriancaId...');
 
     // PostgreSQL - Adicionar coluna se não existir
     await query(`
@@ -11,16 +11,16 @@ async function addTerritoryOwnerCriancaIdColumn() {
       ADD COLUMN IF NOT EXISTS "territorioDonosCriancaId" varchar(36)
     `);
 
-    console.log('✅ Coluna territory_owner_crianca_id adicionada (ou já existe)');
+    console.log('✅ Coluna territorioDonosCriancaId adicionada (ou já existe)');
 
     // Adicionar foreign key constraint se não existir
     await query(`
-      DO $$ BEGIN 
-        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__checkpoin__owner_crianca') THEN
-          ALTER TABLE "pontoVerificacao" 
-          ADD CONSTRAINT "FK__checkpoin__owner_crianca" 
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'FK__pontoverif__owner_crianca') THEN
+          ALTER TABLE "pontoVerificacao"
+          ADD CONSTRAINT "FK__pontoverif__owner_crianca"
           FOREIGN KEY ("territorioDonosCriancaId") REFERENCES "crianca" ("criancaId");
-        END IF; 
+        END IF;
       END $$
     `);
 

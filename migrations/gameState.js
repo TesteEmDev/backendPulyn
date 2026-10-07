@@ -24,16 +24,16 @@ async function ensureGameStateSchema() {
   await query(`
     IF OBJECT_ID('dbo.event_game_state', 'U') IS NULL
     BEGIN
-      CREATE TABLE estadoJogoEvento (
+      CREATE TABLE event_game_state (
         eventoId NVARCHAR(36) NOT NULL PRIMARY KEY,
         empresaId NVARCHAR(36) NOT NULL,
-        modo NVARCHAR(20) NOT NULL DEFAULT 'idle',
+        mode NVARCHAR(20) NOT NULL DEFAULT 'idle',
         tipoJogo NVARCHAR(50) NOT NULL DEFAULT 'none',
         brincadeiraId NVARCHAR(36) NULL,
         nomeBrincadeira NVARCHAR(255) NULL,
         iniciadoEm DATETIME2 NULL,
         paradoEm DATETIME2 NULL,
-        atualizadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
+        updated_at DATETIME2 NOT NULL DEFAULT GETDATE()
       )
     END
   `);

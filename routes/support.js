@@ -28,7 +28,7 @@ async function ensureSupportTable() {
           assunto varchar(255) NOT NULL,
           status varchar(20) NOT NULL DEFAULT 'aberto',
           prioridade varchar(20) NOT NULL DEFAULT 'media',
-          descricao text,
+          descricao texto,
           atribuidoPara varchar(255),
           criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
           atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -36,16 +36,16 @@ async function ensureSupportTable() {
       `);
     } else {
       await query(`
-        IF OBJECT_ID('dbo.support_tickets', 'U') IS NULL
+        IF OBJECT_ID('dbo.chamadoSuport', 'U') IS NULL
         BEGIN
           CREATE TABLE chamadoSuport (
-            ticketId varchar(36) NOT NULL PRIMARY KEY,
+            id varchar(36) NOT NULL PRIMARY KEY,
             empresaId varchar(36) NULL,
             cliente varchar(255) NOT NULL,
-            assunto varchar(255) NOT NULL,
+            subject varchar(255) NOT NULL,
             status varchar(20) NOT NULL DEFAULT 'aberto',
-            prioridade varchar(20) NOT NULL DEFAULT 'media',
-            descricao nvarchar(max) NULL,
+            priority varchar(20) NOT NULL DEFAULT 'media',
+            description nvarchar(max) NULL,
             atribuidoPara varchar(255) NULL,
             criadoEm datetime2 NOT NULL DEFAULT GETDATE(),
             atualizadoEm datetime2 NOT NULL DEFAULT GETDATE()
@@ -64,16 +64,16 @@ function serializeTicket(ticket) {
   if (!ticket) return null;
   return {
     id: ticket.id,
-    empresa_id: ticket.empresa_id || null,
-    client: ticket.client,
+    empresaId: ticket.empresaId || null,
+    cliente: ticket.cliente,
     subject: ticket.subject,
     status: ticket.status,
     priority: ticket.priority,
     description: ticket.description || '',
-    assignee: ticket.assignee || 'Atribuir',
-    date: ticket.created_at,
-    createdAt: ticket.created_at,
-    updatedAt: ticket.updated_at,
+    atribuidoPara: ticket.atribuidoPara || 'Atribuir',
+    date: ticket.criadoEm,
+    createdAt: ticket.criadoEm,
+    updatedAt: ticket.atualizadoEm,
   };
 }
 
@@ -132,9 +132,9 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
 router.post('/', verifyToken, requireMaster, async (req, res) => {
   try {
     await ensureSupportTable();
-    const { client, subject, priority, description, assignee, empresa_id } = req.body || {};
-    if (!String(client || '').trim() || !String(subject || '').trim()) {
-      return res.status(400).json({ error: 'client e subject são obrigatórios' });
+    const { cliente, subject, priority, description, atribuidoPara, empresaId } = req.body || {};
+    if (!String(cliente || '').trim() || !String(subject || '').trim()) {
+      return res.status(400).json({ error: 'cliente e subject são obrigatórios' });
     }
     const normalizedPriority = String(priority || 'media').toLowerCase();
     if (!VALID_PRIORITIES.has(normalizedPriority)) {
@@ -146,16 +146,16 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
       INSERT INTO chamadoSuport
         (ticketId, empresaId, cliente, assunto, status, prioridade, descricao, atribuidoPara)
       VALUES
-        (@id, @empresa_id, @client, @subject, @status, @priority, @description, @assignee)
+        (@id, @empresaId, @cliente, @subject, @status, @priority, @description, @atribuidoPara)
     `, {
       id,
-      empresa_id: empresa_id || null,
-      client: String(client).trim(),
+      empresaId: empresaId || null,
+      cliente: String(cliente).trim(),
       subject: String(subject).trim(),
       status: 'aberto',
       priority: normalizedPriority,
       description: description ? String(description) : null,
-      assignee: assignee ? String(assignee) : 'Atribuir',
+      atribuidoPara: atribuidoPara ? String(atribuidoPara) : 'Atribuir',
     });
 
     const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE ticketId = @id', { id });

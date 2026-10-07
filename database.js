@@ -4,7 +4,6 @@ const { AsyncLocalStorage } = require('async_hooks');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 
 const sql = require('mssql');
-const { citarIdentificadoresCamelCase, converterLinhasParaApi } = require('./utils/sqlNomenclatura');
 
 const DB_DRIVER = String(process.env.DB_DRIVER || 'sqlserver').toLowerCase();
 const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
@@ -97,6 +96,62 @@ function bindNamedParameters(sqlQuery, params = {}) {
   return { text, values };
 }
 
+// O Postgres rebaixa para minúsculas os identificadores sem aspas. As tabelas e
+// colunas do schema são camelCase (eventoId, pontoVerificacao...), então toda
+// palavra com maiúsculas e minúsculas misturadas, fora de strings, comentários
+// e parâmetros, vira um identificador entre aspas. Palavras-chave SQL são sempre
+// tudo maiúsculo ou tudo minúsculo e passam intactas.
+function quoteMixedCaseIdentifiers(sqlQuery) {
+  let text = '';
+  let index = 0;
+  const length = sqlQuery.length;
+  while (index < length) {
+    const character = sqlQuery[index];
+    const next = sqlQuery[index + 1];
+
+    if (character === "'" || character === '"') {
+      let end = index + 1;
+      while (end < length) {
+        if (sqlQuery[end] === character && sqlQuery[end + 1] === character) end += 2;
+        else if (sqlQuery[end] === character) break;
+        else end += 1;
+      }
+      text += sqlQuery.slice(index, end + 1);
+      index = end + 1;
+      continue;
+    }
+
+    if (character === '-' && next === '-') {
+      let end = sqlQuery.indexOf('\n', index);
+      if (end === -1) end = length;
+      text += sqlQuery.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (character === '@' || character === '$' || /[0-9]/.test(character)) {
+      let end = index + 1;
+      while (end < length && /[A-Za-z0-9_]/.test(sqlQuery[end])) end += 1;
+      text += sqlQuery.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (/[A-Za-z_]/.test(character)) {
+      let end = index + 1;
+      while (end < length && /[A-Za-z0-9_]/.test(sqlQuery[end])) end += 1;
+      const word = sqlQuery.slice(index, end);
+      text += /[a-z]/.test(word) && /[A-Z]/.test(word) ? `"${word}"` : word;
+      index = end;
+      continue;
+    }
+
+    text += character;
+    index += 1;
+  }
+  return text;
+}
+
 function adaptPostgresSql(sqlQuery) {
   let text = sqlQuery
     .replace(/\[([^\]]+)\]/g, '"$1"')
@@ -114,9 +169,6 @@ function adaptPostgresSql(sqlQuery) {
   text = text.replace(/DATEDIFF\s*\(\s*MINUTE\s*,\s*([^,]+),\s*([^\)]+)\)/gi,
     'EXTRACT(EPOCH FROM ($2 - $1)) / 60');
 
-  // O banco usa nomes camelCase (criancaId, criadoEm...), que no PostgreSQL exigem aspas.
-  text = citarIdentificadoresCamelCase(text);
-
   const topMatch = text.match(/(SELECT\s+)(DISTINCT\s+)?TOP\s+(\([^)]*\)|\d+)\s+/i);
   if (topMatch) {
     text = text.replace(topMatch[0], `${topMatch[1]}${topMatch[2] || ''}`);
@@ -125,7 +177,7 @@ function adaptPostgresSql(sqlQuery) {
     text = text.replace(/;\s*$/, '').trimEnd() + ` LIMIT ${limit}${semicolon}`;
   }
 
-  return text;
+  return quoteMixedCaseIdentifiers(text);
 }
 
 async function connectDB() {
@@ -147,7 +199,6 @@ async function connectDB() {
       pool = new Pool(config);
       await pool.query('SELECT 1');
       console.log('✅ Conectado ao PostgreSQL/Supabase com sucesso!');
-      await carregarCatalogo().catch(err => console.warn('⚠️ Não foi possível ler o catálogo de tabelas:', err.message));
       return pool;
     }
 
@@ -165,52 +216,32 @@ async function connectDB() {
   }
 }
 
-// Catálogo das tabelas (oid -> nome e colunas), usado para devolver cada linha com as chaves da API.
-let catalogoTabelas = new Map();
-let catalogoCarregadoEm = 0;
-const mapasPorTabela = new Map();
+// Proteção de desenvolvimento (ROW_GUARD=1): avisa no log quando o código lê de uma
+// linha do banco uma propriedade que a query não devolveu. Serve para achar nomes
+// de coluna antigos que sobraram no JavaScript. Desligada por padrão.
+const ROW_GUARD = String(process.env.ROW_GUARD || '').toLowerCase() === '1';
+const rowGuardAvisados = new Set();
+const ROW_GUARD_IGNORAR = new Set(['then', 'toJSON', 'inspect', 'constructor', 'length', 'asymmetricMatch', '$typeof', 'nodeType', 'tagName']);
 
-async function carregarCatalogo() {
-  const resultado = await pool.query(`
-    SELECT c.oid::bigint AS oid, c.relname AS tabela, a.attnum::int AS posicao, a.attname AS coluna
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_attribute a ON a.attrelid = c.oid
-    WHERE n.nspname = current_schema() AND c.relkind = 'r' AND a.attnum > 0 AND NOT a.attisdropped
-  `);
-  const novo = new Map();
-  for (const linha of resultado.rows) {
-    const oid = Number(linha.oid);
-    if (!novo.has(oid)) novo.set(oid, { tabela: linha.tabela, colunas: new Map() });
-    novo.get(oid).colunas.set(linha.posicao, linha.coluna);
-  }
-  catalogoTabelas = novo;
-  catalogoCarregadoEm = Date.now();
-}
-
-// Chamado depois de migrações que renomeiam tabelas/colunas.
-async function recarregarCatalogo() {
-  if (!pool) await connectDB();
-  if (isPostgres) await carregarCatalogo();
-}
-
-function catalogoConhece(fields) {
-  return fields.every(campo => {
-    if (!campo.tableID) return true;
-    const tabela = catalogoTabelas.get(campo.tableID);
-    return Boolean(tabela && tabela.colunas.has(campo.columnID));
+function protegerLinha(row) {
+  if (!ROW_GUARD || !row || typeof row !== 'object') return row;
+  return new Proxy(row, {
+    get(alvo, propriedade, receptor) {
+      if (typeof propriedade === 'string' && !(propriedade in alvo) && !ROW_GUARD_IGNORAR.has(propriedade)) {
+        const local = (new Error().stack.split(String.fromCharCode(10)).slice(2).find((linha) => linha.includes('backendPulyn') && !linha.includes('node_modules') && !linha.includes('database.js')) || '').trim();
+        const chave = propriedade + '@' + local;
+        if (!rowGuardAvisados.has(chave)) {
+          rowGuardAvisados.add(chave);
+          console.warn(`⚠️ [ROW_GUARD] propriedade inexistente '${propriedade}' (colunas: ${Object.keys(alvo).slice(0, 12).join(', ')}) em ${local}`);
+        }
+      }
+      return Reflect.get(alvo, propriedade, receptor);
+    }
   });
 }
 
-async function normalizePostgresResult(result, { dentroDeTransacao = false } = {}) {
-  let rows = result.rows;
-  if (result.fields && result.fields.length && rows.length) {
-    // Uma recarga a cada 5s no máximo, para colunas novas criadas por migrações.
-    if (!catalogoConhece(result.fields) && !dentroDeTransacao && Date.now() - catalogoCarregadoEm > 5000) {
-      await carregarCatalogo();
-    }
-    rows = converterLinhasParaApi(result.fields, rows, catalogoTabelas, mapasPorTabela);
-  }
+function normalizePostgresResult(result) {
+  const rows = ROW_GUARD && Array.isArray(result.rows) ? result.rows.map(protegerLinha) : result.rows;
   return {
     ...result,
     rows,
@@ -248,7 +279,7 @@ function createPostgresExecutor(client) {
   return {
     async query(sqlQuery, params = {}) {
       const bound = bindNamedParameters(adaptPostgresSql(sqlQuery), params);
-      return normalizePostgresResult(await client.query(bound.text, bound.values), { dentroDeTransacao: true });
+      return normalizePostgresResult(await client.query(bound.text, bound.values));
     },
     async queryOne(sqlQuery, params = {}) {
       const result = await this.query(sqlQuery, params);
@@ -339,7 +370,4 @@ async function closeDB() {
   pool = null;
 }
 
-module.exports = {
-  connectDB, closeDB, query, queryOne, allQuery, withTransaction, recarregarCatalogo, sql, DB_DRIVER,
-  adaptPostgresSql, bindNamedParameters
-};
+module.exports = { connectDB, closeDB, query, queryOne, allQuery, withTransaction, sql, DB_DRIVER };

@@ -22,14 +22,14 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
   if (already) return { awarded: false, reason: 'already-awarded' };
 
   const team = await queryOne(
-    'SELECT timeId, nome, cor, empresaId FROM time WHERE LOWER(timeId) = LOWER(@teamId) AND LOWER(eventoId) = LOWER(@eventoId)',
+    'SELECT timeId, nome, cor, empresaId FROM "time" WHERE LOWER(timeId) = LOWER(@teamId) AND LOWER(eventoId) = LOWER(@eventoId)',
     { teamId, eventoId }
   );
   if (!team) return { awarded: false, reason: 'team-not-found' };
 
   const members = await allQuery(
-    'SELECT criancaId FROM crianca WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(timeId) = LOWER(@teamId)',
-    { eventoId, teamId: team.id }
+    'SELECT criancaId FROM "crianca" WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(timeId) = LOWER(@teamId)',
+    { eventoId, teamId: team.timeId }
   );
 
   await query(
@@ -38,11 +38,11 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
      VALUES (@id, @empresaId, @eventoId, @partidaId, @gameType, @teamId, @points, @members)`,
     {
       id: uuidv4(),
-      empresaId: team.empresa_id || null,
+      empresaId: team.empresaId || null,
       eventoId,
       partidaId,
       gameType,
-      teamId: team.id,
+      teamId: team.timeId,
       points,
       members: members.length,
     }
@@ -52,12 +52,12 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
     await query(
       `UPDATE crianca SET pontos = COALESCE(pontos, 0) + @points
        WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(timeId) = LOWER(@teamId)`,
-      { points, eventoId, teamId: team.id }
+      { points, eventoId, teamId: team.timeId }
     );
     await query(
-      `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @teamId)
+      `UPDATE "time" SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM "crianca" WHERE timeId = @teamId)
        WHERE timeId = @teamId`,
-      { teamId: team.id }
+      { teamId: team.timeId }
     );
   }
 
@@ -68,9 +68,9 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
         eventoId,
         gameType,
         partidaId,
-        teamId: team.id,
-        teamName: team.name,
-        teamColor: team.color || '',
+        teamId: team.timeId,
+        teamName: team.nome,
+        teamColor: team.cor || '',
         pointsPerMember: points,
         membersAwarded: members.length,
       },
@@ -79,8 +79,8 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
 
   return {
     awarded: true,
-    teamId: team.id,
-    teamName: team.name,
+    teamId: team.timeId,
+    teamName: team.nome,
     pointsPerMember: points,
     membersAwarded: members.length,
   };

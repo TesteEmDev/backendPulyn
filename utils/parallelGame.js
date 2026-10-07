@@ -35,7 +35,7 @@ async function announceOnDisplay(eventoId, text) {
     const sentAt = new Date().toISOString();
     broadcastEvent(eventoId, {
       type: 'DISPLAY_MESSAGE',
-      payload: { id, evento_id: eventoId, text, type: 'custom', sender: 'brincadeira-paralela', timestamp: sentAt, sent_at: sentAt },
+      payload: { id, eventoId, texto: text, type: 'custom', remetente: 'brincadeira-paralela', timestamp: sentAt, enviadoEm: sentAt },
       timestamp: sentAt,
     });
   } catch (err) {
@@ -59,11 +59,11 @@ async function loadWinners(parallelId) {
 }
 
 const serializeWinner = (row) => ({
-  position: Number(row.position),
-  points: Number(row.points),
-  wonAt: row.won_at,
-  criancaId: row.crianca_id,
-  criancaName: row.nickname || row.crianca_name,
+  position: Number(row.posicao),
+  points: Number(row.pontos),
+  wonAt: row.venceuEm,
+  criancaId: row.criancaId,
+  criancaName: row.apelido || row.crianca_name,
   avatar: row.avatar || null,
   teamName: row.time_name || '',
   teamColor: row.time_color || '',
@@ -73,15 +73,15 @@ async function serializeGame(row) {
   const winners = await loadWinners(row.id);
   return {
     id: row.id,
-    eventoId: row.evento_id,
-    checkpointId: row.checkpoint_id,
+    eventoId: row.eventoId,
+    checkpointId: row.checkpointId,
     checkpointName: row.checkpoint_name || '',
-    objectName: row.object_name || '',
+    objectName: row.nomeObjeto || '',
     status: row.status,
-    prizes: String(row.prizes || '').split(',').map(Number),
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
-    finishReason: row.finish_reason || null,
+    prizes: String(row.premios || '').split(',').map(Number),
+    startedAt: row.iniciadoEm,
+    finishedAt: row.finalizadoEm,
+    finishReason: row.motivoFim || null,
     winners: winners.map(serializeWinner),
   };
 }
@@ -123,7 +123,7 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
     { eventoId }
   );
   if (!evento) throw httpError('Evento não encontrado', 404);
-  if (String(evento.empresa_id).toLowerCase() !== String(empresaId).toLowerCase()) {
+  if (String(evento.empresaId).toLowerCase() !== String(empresaId).toLowerCase()) {
     throw httpError('Acesso negado: evento não pertence à sua empresa', 403);
   }
   if (CLOSED_EVENT_STATUSES.has(String(evento.status || '').toLowerCase())) {
@@ -136,17 +136,17 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
     { checkpointId, eventoId }
   );
   if (!checkpoint) throw httpError('Checkpoint não pertence a este evento', 400);
-  if (String(checkpoint.checkpoint_purpose || 'game').toLowerCase() === 'reception') {
+  if (String(checkpoint.proposito || 'game').toLowerCase() === 'reception') {
     throw httpError('O checkpoint da recepção não pode ser usado na brincadeira paralela', 400);
   }
 
-  if (await getActiveParallelGame(evento.id)) {
+  if (await getActiveParallelGame(evento.eventoId)) {
     throw httpError('Já existe uma brincadeira paralela em andamento neste evento', 409);
   }
 
   // A roleta: o objeto é sorteado aqui no servidor (todas as telas veem o mesmo resultado) e a
   // animação só mostra o sorteio já feito.
-  const objects = await listObjects(evento.empresa_id);
+  const objects = await listObjects(evento.empresaId);
   if (objects.length === 0) throw httpError('Cadastre pelo menos um objeto na lista antes de iniciar', 409);
   const chosen = objects[crypto.randomInt(objects.length)];
   const wheel = buildWheel(objects, chosen.id);
@@ -156,7 +156,7 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
     await query(
       `INSERT INTO brincadeiraParalela (id, empresaId, eventoId, checkpointId, status, premios, iniciadoPor, nomeObjeto)
        VALUES (@id, @empresaId, @eventoId, @checkpointId, 'active', @prizes, @userId, @objectName)`,
-      { id, empresaId: evento.empresa_id, eventoId: evento.id, checkpointId: checkpoint.id, prizes: PARALLEL_PRIZES.join(','), userId: userId || null, objectName: chosen.name }
+      { id, empresaId: evento.empresaId, eventoId: evento.eventoId, checkpointId: checkpoint.checkpointId, prizes: PARALLEL_PRIZES.join(','), userId: userId || null, objectName: chosen.name }
     );
   } catch (err) {
     // O índice único (um ativo por evento) protege duas partidas começando ao mesmo tempo.
@@ -165,24 +165,24 @@ async function startParallelGame({ eventoId, empresaId, checkpointId, userId }) 
   }
 
   const [first, second, third] = PARALLEL_PRIZES;
-  broadcastEvent(evento.id, {
+  broadcastEvent(evento.eventoId, {
     type: 'PARALLEL_GAME_STARTED',
     payload: {
-      eventoId: evento.id,
+      eventoId: evento.eventoId,
       parallelId: id,
-      checkpointId: checkpoint.id,
-      checkpointName: checkpoint.name,
+      checkpointId: checkpoint.checkpointId,
+      checkpointName: checkpoint.nome,
       objectName: chosen.name,
       // O telão também gira a roleta e para no mesmo objeto.
       roulette: { segments: wheel.segments, winnerIndex: wheel.winnerIndex },
     },
   });
   await announceOnDisplay(
-    evento.id,
-    `Brincadeira paralela! Achem: ${chosen.name}. Os 3 primeiros a levar até "${checkpoint.name}" e ler a pulseira ganham ${first}, ${second} e ${third} pontos`
+    evento.eventoId,
+    `Brincadeira paralela! Achem: ${chosen.name}. Os 3 primeiros a levar até "${checkpoint.nome}" e ler a pulseira ganham ${first}, ${second} e ${third} pontos`
   );
 
-  const game = await serializeGame({ ...(await getActiveParallelGame(evento.id)) });
+  const game = await serializeGame({ ...(await getActiveParallelGame(evento.eventoId)) });
   return { ...game, roulette: { segments: wheel.segments, winnerIndex: wheel.winnerIndex, objectName: chosen.name } };
 }
 
@@ -195,7 +195,7 @@ async function stopParallelGame(eventoId, reason = 'manual') {
      WHERE id = @id AND status = 'active'`,
     { id: active.id, reason }
   );
-  broadcastEvent(active.evento_id, { type: 'PARALLEL_GAME_FINISHED', payload: { eventoId: active.evento_id, parallelId: active.id, reason } });
+  broadcastEvent(active.eventoId, { type: 'PARALLEL_GAME_FINISHED', payload: { eventoId: active.eventoId, parallelId: active.id, reason } });
   return active.id;
 }
 
@@ -203,7 +203,7 @@ async function stopParallelGame(eventoId, reason = 'manual') {
 // (a leitura segue o fluxo normal do jogo); senão, o resultado para responder ao leitor.
 async function processParallelScan({ eventoId, checkpointId, crianca, uid, leituraId, now = new Date() }) {
   const active = await getActiveParallelGame(eventoId);
-  if (!active || String(active.checkpoint_id).toLowerCase() !== String(checkpointId).toLowerCase()) return null;
+  if (!active || String(active.checkpointId).toLowerCase() !== String(checkpointId).toLowerCase()) return null;
 
   const outcome = await withTransaction(async (tx) => {
     // Trava a linha da disputa: duas leituras ao mesmo tempo entram uma por vez e ninguém fura a fila.
@@ -214,11 +214,11 @@ async function processParallelScan({ eventoId, checkpointId, crianca, uid, leitu
     if (!game || game.status !== 'active') return { status: 'closed' };
 
     const winners = await tx.allQuery(
-      'SELECT criancaId, posicao FROM vencedorBrincadeiraParalela WHERE paralelaId = @id ORDER BY posicao',
+      'SELECT criancaId AS crianca_id, posicao AS position FROM vencedorBrincadeiraParalela WHERE paralelaId = @id ORDER BY posicao',
       { id: game.id }
     );
-    const prizes = String(game.prizes || '').split(',').map(Number).filter(Number.isFinite);
-    const plan = planParallelAward(winners, crianca.id, prizes.length ? prizes : PARALLEL_PRIZES);
+    const prizes = String(game.premios || '').split(',').map(Number).filter(Number.isFinite);
+    const plan = planParallelAward(winners, crianca.criancaId, prizes.length ? prizes : PARALLEL_PRIZES);
     if (plan.status !== 'won') return plan;
 
     await tx.query(
@@ -226,15 +226,15 @@ async function processParallelScan({ eventoId, checkpointId, crianca, uid, leitu
          (id, paralelaId, empresaId, eventoId, criancaId, timeId, posicao, pontos, leituraId, venceuEm)
        VALUES (@id, @parallelId, @empresaId, @eventoId, @criancaId, @timeId, @position, @points, @leituraId, @wonAt)`,
       {
-        id: uuidv4(), parallelId: game.id, empresaId: crianca.empresa_id, eventoId, criancaId: crianca.id,
-        timeId: crianca.time_id || null, position: plan.position, points: plan.points, leituraId, wonAt: now,
+        id: uuidv4(), parallelId: game.id, empresaId: crianca.empresaId, eventoId, criancaId: crianca.criancaId,
+        timeId: crianca.timeId || null, position: plan.position, points: plan.points, leituraId, wonAt: now,
       }
     );
-    await tx.query('UPDATE crianca SET pontos = COALESCE(pontos, 0) + @points WHERE criancaId = @criancaId', { points: plan.points, criancaId: crianca.id });
-    if (crianca.time_id) {
+    await tx.query('UPDATE crianca SET pontos = COALESCE(pontos, 0) + @points WHERE criancaId = @criancaId', { points: plan.points, criancaId: crianca.criancaId });
+    if (crianca.timeId) {
       await tx.query(
         `UPDATE time SET pontos = (SELECT COALESCE(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId) WHERE timeId = @timeId`,
-        { timeId: crianca.time_id }
+        { timeId: crianca.timeId }
       );
     }
     // Histórico de leituras (alimenta o placar e os relatórios, como nos outros jogos).
@@ -242,7 +242,7 @@ async function processParallelScan({ eventoId, checkpointId, crianca, uid, leitu
       `INSERT INTO leitura
         (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado, pontosAtribuidos, forcaSinal, empresaId, sessaoId)
        VALUES (@id, @checkpointId, @criancaId, @uid, NULL, 1, @points, -45, @empresaId, @sessionId)`,
-      { id: leituraId, checkpointId, criancaId: crianca.id, uid, points: plan.points, empresaId: crianca.empresa_id, sessionId: global.currentSessionId || null }
+      { id: leituraId, checkpointId, criancaId: crianca.criancaId, uid, points: plan.points, empresaId: crianca.empresaId, sessionId: global.currentSessionId || null }
     );
 
     const finished = plan.position >= (prizes.length || PARALLEL_PRIZES.length);
@@ -258,19 +258,19 @@ async function processParallelScan({ eventoId, checkpointId, crianca, uid, leitu
   const result = { handled: true, status: outcome.status, position: outcome.position || null, points: outcome.points || 0, finished: Boolean(outcome.finished) };
 
   if (outcome.status === 'won') {
-    const team = crianca.time_id ? await queryOne('SELECT nome, cor FROM time WHERE timeId = @id', { id: crianca.time_id }) : null;
-    const name = crianca.nickname || crianca.name;
+    const team = crianca.timeId ? await queryOne('SELECT nome, cor FROM time WHERE timeId = @id', { id: crianca.timeId }) : null;
+    const name = crianca.apelido || crianca.nome;
     broadcastEvent(eventoId, {
       type: 'PARALLEL_GAME_WINNER',
       payload: {
         eventoId, parallelId: active.id, position: outcome.position, points: outcome.points,
-        criancaId: crianca.id, criancaName: name, teamName: team?.name || '', teamColor: team?.color || '',
+        criancaId: crianca.criancaId, criancaName: name, teamName: team?.nome || '', teamColor: team?.cor || '',
       },
     });
     if (outcome.finished) {
       broadcastEvent(eventoId, { type: 'PARALLEL_GAME_FINISHED', payload: { eventoId, parallelId: active.id, reason: 'completed' } });
     }
-    await announceOnDisplay(eventoId, `${positionLabel(outcome.position)} lugar: ${name}${team?.name ? ` (${team.name})` : ''} +${outcome.points} pontos`);
+    await announceOnDisplay(eventoId, `${positionLabel(outcome.position)} lugar: ${name}${team?.nome ? ` (${team.nome})` : ''} +${outcome.points} pontos`);
   }
 
   return result;

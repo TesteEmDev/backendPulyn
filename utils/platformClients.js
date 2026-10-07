@@ -32,7 +32,7 @@ async function listPlatformClients({ includeFamily = false } = {}) {
         e.status,
         e.dataCriacao,
         COALESCE(MIN(CASE WHEN l.perfil = 'admin' THEN l.email END), MIN(l.email)) AS email,
-        MAX(l.ultimoAcesso) AS last_access
+        MAX(l.ultimoAcesso) AS ultimoAcesso
       FROM empresa e
       LEFT JOIN login l ON e.empresaId = l.empresaId
       WHERE e.nome <> 'Master Admin'
@@ -41,7 +41,7 @@ async function listPlatformClients({ includeFamily = false } = {}) {
     `),
     allQuery(`
       SELECT empresaId, COUNT(*) AS total
-      FROM evento
+      FROM "evento"
       WHERE LOWER(COALESCE(status, '')) IN ('finished', 'completed')
       GROUP BY empresaId
     `),
@@ -51,11 +51,11 @@ async function listPlatformClients({ includeFamily = false } = {}) {
     `),
   ]);
 
-  const finishedByEmpresa = new Map(finishedEvents.map((row) => [String(row.empresa_id), Number(row.total) || 0]));
+  const finishedByEmpresa = new Map(finishedEvents.map((row) => [String(row.empresaId), Number(row.total) || 0]));
 
   const result = empresas.map((e) => ({
-    id: e.id,
-    empresaId: e.id,
+    id: e.empresaId,
+    empresaId: e.empresaId,
     origin: 'empresa',
     name: e.nome,
     city: e.cidade || '',
@@ -64,9 +64,9 @@ async function listPlatformClients({ includeFamily = false } = {}) {
     plan: e.plano || 'starter',
     status: e.status || 'active',
     email: e.email || '',
-    lastAccess: e.last_access || null,
-    eventsDone: finishedByEmpresa.get(String(e.id)) || 0,
-    createdAt: e.data_criacao || null,
+    lastAccess: e.ultimoAcesso || null,
+    eventsDone: finishedByEmpresa.get(String(e.empresaId)) || 0,
+    createdAt: e.dataCriacao || null,
   }));
 
   const seenByNameCity = new Set(result.map((r) => `${normalize(r.name)}|${normalize(r.city)}`));
@@ -74,23 +74,23 @@ async function listPlatformClients({ includeFamily = false } = {}) {
   const seenByNameOnly = new Set(result.filter((r) => !normalize(r.city)).map((r) => normalize(r.name)));
 
   clientes.forEach((c) => {
-    if (seenByNameCity.has(`${normalize(c.name)}|${normalize(c.city)}`)) return;
-    if (seenByNameOnly.has(normalize(c.name))) return;
+    if (seenByNameCity.has(`${normalize(c.nome)}|${normalize(c.cidade)}`)) return;
+    if (seenByNameOnly.has(normalize(c.nome))) return;
     result.push({
-      id: c.id,
+      id: c.clienteId,
       empresaId: null,
       origin: 'cliente',
-      name: c.name,
-      city: c.city || '',
-      state: c.state || '',
-      phone: c.phone || '',
+      name: c.nome,
+      city: c.cidade || '',
+      state: c.estado || '',
+      phone: c.telefone || '',
       plan: c.plano || 'starter',
       status: c.status || 'active',
       email: c.email || '',
-      lastAccess: c.last_access || null,
-      // events_done no legado tem valores negativos de teste
-      eventsDone: Math.max(0, Number(c.events_done) || 0),
-      createdAt: c.created_at || null,
+      lastAccess: c.ultimoAcesso || null,
+      // eventosRealizados no legado tem valores negativos de teste
+      eventsDone: Math.max(0, Number(c.eventosRealizados) || 0),
+      createdAt: c.criadoEm || null,
     });
   });
 

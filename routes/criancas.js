@@ -12,65 +12,65 @@ router.use(verifyToken, (req, res, next) => {
   next();
 });
 
-// Listar as crianças de TODOS os eventos do buffet (com nome do evento e do time).
+// Listar as crianças de TODOS os evento do buffet (com nome do evento e do time).
 // Escopo sempre pela empresa do token.
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const criancas = await allQuery(`
+    const crianca = await allQuery(`
       SELECT TOP 5000
         c.*,
-        t.nome AS time_name,
+        t.nome AS time_nome,
         t.cor AS time_color,
-        e.nome AS evento_name,
+        e.nome AS evento_nome,
         e.status AS evento_status,
         e.data AS evento_date
       FROM crianca c
-      LEFT JOIN time t ON c.timeId = t.timeId
+      LEFT JOIN "time" t ON c.timeId = t.timeId
       LEFT JOIN evento e ON c.eventoId = e.eventoId
-      WHERE c.empresaId = @empresa_id
+      WHERE c.empresaId = @empresaId
       ORDER BY e.data DESC, c.pontos DESC
-    `, { empresa_id: req.user?.empresa_id });
-    res.json(criancas);
+    `, { empresaId: req.user?.empresaId });
+    res.json(crianca);
   } catch (err) {
-    console.error('❌ Erro ao listar crianças de todos os eventos:', err);
+    console.error('❌ Erro ao listar crianças de todos os evento:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
 // Listar crianças de um evento
-router.get('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
+router.get('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
-    // ✅ NOVO: Extrair empresa_id do token para validação
-    const empresaId = req.user?.empresa_id;
+    // ✅ NOVO: Extrair empresaId do token para validação
+    const empresaId = req.user?.empresaId;
     
-    const criancas = await allQuery(`
-      SELECT c.*, t.nome as time_name, t.cor as time_color 
+    const crianca = await allQuery(`
+      SELECT c.*, t.nome as time_nome, t.cor as time_color 
       FROM crianca c
-      LEFT JOIN time t ON c.timeId = t.timeId
-      WHERE c.eventoId = @evento_id
-      AND c.empresaId = @empresa_id
+      LEFT JOIN "time" t ON c.timeId = t.timeId
+      WHERE c.eventoId = @eventoId
+      AND c.empresaId = @empresaId
       ORDER BY c.pontos DESC
-    `, { evento_id: req.params.evento_id, empresa_id: empresaId });
-    res.json(criancas);
+    `, { eventoId: req.params.eventoId, empresaId: empresaId });
+    res.json(crianca);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // Criar criança
-router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
+router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
-    const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, apelido, age, avatar, braceletCode, timeId } = req.body;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     const avatarValue = getAvatarForCreate(avatar);
-    const { evento_id } = req.params;
+    const { eventoId } = req.params;
     const id = uuidv4();
 
     if (!avatarValue) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
 
-    if (!name || !String(name).trim()) {
+    if (!nome || !String(nome).trim()) {
       return res.status(400).json({ error: 'Nome da criança é obrigatório' });
     }
 
@@ -78,23 +78,23 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Código da pulseira inválido' });
     }
     
-    // ✅ NOVO: Obter empresa_id do evento
-    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @evento_id', { evento_id });
+    // ✅ NOVO: Obter empresaId do evento
+    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @eventoId', { eventoId });
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
-    const empresaId = evento.empresa_id;
+    const empresaId = evento.empresaId;
 
-    if (!isMaster(req) && String(req.user.empresa_id) !== String(empresaId)) {
+    if (!isMaster(req) && String(req.user.empresaId) !== String(empresaId)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
 
     if (timeId) {
       const time = await queryOne(
-        `SELECT timeId FROM time
+        `SELECT timeId FROM "time"
          WHERE timeId = @timeId AND eventoId = @eventoId
            AND (empresaId = @empresaId OR @isMaster = 1)`,
-        { timeId, eventoId: evento_id, empresaId, isMaster: isMaster(req) ? 1 : 0 }
+        { timeId, eventoId: eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 }
       );
       if (!time) return res.status(400).json({ error: 'Time não pertence ao evento selecionado' });
     }
@@ -102,8 +102,8 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     if (normalizedBraceletCode) {
       const pulseira = await queryOne(
         `SELECT codigo, status FROM pulseira
-         WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
-        { code: normalizedBraceletCode, empresaId }
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { codigo: normalizedBraceletCode, empresaId }
       );
       if (!pulseira) return res.status(400).json({ error: 'Pulseira não encontrada nesta empresa' });
       if (pulseira.status !== 'disponivel') return res.status(400).json({ error: 'Pulseira não está disponível' });
@@ -111,57 +111,57 @@ router.post('/eventos/:evento_id/criancas', verifyToken, async (req, res) => {
     
     if (normalizedBraceletCode) {
       const existing = await queryOne(
-        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @code`,
-        { code: normalizedBraceletCode }
+        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @codigo`,
+        { codigo: normalizedBraceletCode }
       );
       if (existing) {
         return res.status(400).json({ error: 'Pulseira já está vinculada a outra criança' });
       }
     }
     
-    // ✅ CORRIGIDO: Incluir empresa_id na INSERT
+    // ✅ CORRIGIDO: Incluir empresaId na INSERT
     await query(
       `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira) 
-       VALUES (@id, @evento_id, @empresa_id, @timeId, @name, @nickname, @age, @avatar, @braceletCode)`,
-      { id, evento_id, empresa_id: empresaId, timeId, name, nickname, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode }
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @braceletCode)`,
+      { id, eventoId, empresaId: empresaId, timeId, nome, apelido, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode }
     );
     
     if (normalizedBraceletCode) {
       await query(
-        `UPDATE pulseira SET status = @status, criancaId = @crianca_id
-         WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresa_id`,
-        { status: 'em_uso', crianca_id: id, code: normalizedBraceletCode, empresa_id: empresaId }
+        `UPDATE pulseira SET status = @status, criancaId = @criancaId
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { status: 'em_uso', criancaId: id, codigo: normalizedBraceletCode, empresaId: empresaId }
       );
     }
     
     await query(
-      `UPDATE time SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId) 
+      `UPDATE "time" SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId) 
        WHERE timeId = @timeId`,
       { timeId }
     );
     
-    res.json({ id, name, nickname, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, nome, apelido, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // Buscar criança por pulseira
-router.get('/criancas/by-bracelet/:code', verifyToken, async (req, res) => {
+router.get('/crianca/by-bracelet/:codigo', verifyToken, async (req, res) => {
   try {
-    const normalizedCode = normalizeUid(req.params.code);
+    const normalizedCode = normalizeUid(req.params.codigo);
     if (!normalizedCode) {
       return res.status(400).json({ error: 'Código da pulseira inválido' });
     }
 
-    const empresaId = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const crianca = await queryOne(`
-      SELECT c.*, t.nome as time_name, t.cor as time_color 
+      SELECT c.*, t.nome as time_nome, t.cor as time_color 
       FROM crianca c
-      LEFT JOIN time t ON c.timeId = t.timeId
-      WHERE ${uidSqlExpression('c.codigoPulseira')} = @code
+      LEFT JOIN "time" t ON c.timeId = t.timeId
+      WHERE ${uidSqlExpression('c.codigoPulseira')} = @codigo
         AND (c.empresaId = @empresaId OR @isMaster = 1)
-    `, { code: normalizedCode, empresaId, isMaster: isMaster(req) ? 1 : 0 });
+    `, { codigo: normalizedCode, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     if (!crianca) {
       return res.status(404).json({ error: 'Criança não encontrada' });
@@ -173,21 +173,21 @@ router.get('/criancas/by-bracelet/:code', verifyToken, async (req, res) => {
 });
 
 // Atualizar criança
-router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, res) => {
+router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res) => {
   try {
-    const { name, nickname, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, apelido, age, avatar, braceletCode, timeId } = req.body;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
-    const { evento_id, crianca_id } = req.params;
+    const { eventoId, criancaId } = req.params;
     
-    console.log(`📝 [RECEBIDO] Atualizando criança ${crianca_id}`);
-    console.log(`   - evento_id: ${evento_id}`);
+    console.log(`📝 [RECEBIDO] Atualizando criança ${criancaId}`);
+    console.log(`   - eventoId: ${eventoId}`);
     console.log(`   - braceletCode recebido: "${braceletCode}"`);
     console.log(`   - timeId: ${timeId}`);
-    console.log(`   - name: ${name}`);
+    console.log(`   - name: ${nome}`);
     
     // Verificar se criança existe
-    const crianca = await queryOne('SELECT * FROM crianca WHERE criancaId = @id AND eventoId = @evento_id AND (empresaId = @empresaId OR @isMaster = 1)', 
-      { id: crianca_id, evento_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 });
+    const crianca = await queryOne('SELECT * FROM crianca WHERE criancaId = @id AND eventoId = @eventoId AND (empresaId = @empresaId OR @isMaster = 1)', 
+      { id: criancaId, eventoId, empresaId: req.user.empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     if (!crianca) {
       return res.status(404).json({ error: 'Criança não encontrada' });
@@ -200,17 +200,17 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
       return res.status(400).json({ error: 'Avatar inválido' });
     }
 
-    const nextTimeId = timeId === undefined ? crianca.time_id : (timeId || null);
+    const nextTimeId = timeId === undefined ? crianca.timeId : (timeId || null);
     if (nextTimeId) {
       const targetTime = await queryOne(
-        `SELECT timeId FROM time
+        `SELECT timeId FROM "time"
          WHERE timeId = @timeId
            AND eventoId = @eventoId
            AND (empresaId = @empresaId OR @isMaster = 1)`,
         {
           timeId: nextTimeId,
-          eventoId: evento_id,
-          empresaId: crianca.empresa_id,
+          eventoId: eventoId,
+          empresaId: crianca.empresaId,
           isMaster: isMaster(req) ? 1 : 0,
         }
       );
@@ -220,11 +220,11 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     }
     
     // Se está mudando de pulseira, verificar se a nova pulseira existe e está disponível
-    if (normalizedBraceletCode && normalizedBraceletCode !== normalizeUid(crianca.bracelet_code || '')) {
+    if (normalizedBraceletCode && normalizedBraceletCode !== normalizeUid(crianca.codigoPulseira || '')) {
       // Verificar se outra criança já tem essa pulseira
       const existing = await queryOne(
-        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @code AND criancaId != @criancaId`, 
-        { code: normalizedBraceletCode, criancaId: crianca_id }
+        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @codigo AND criancaId != @criancaId`, 
+        { codigo: normalizedBraceletCode, criancaId: criancaId }
       );
       if (existing) {
         console.error(`❌ Pulseira ${normalizedBraceletCode} já vinculada a outra criança`);
@@ -233,8 +233,8 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
       
       // Verificar se pulseira existe
       const pulseira = await queryOne(
-        `SELECT * FROM pulseira WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
-        { code: normalizedBraceletCode, empresaId: crianca.empresa_id }
+        `SELECT * FROM pulseira WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { codigo: normalizedBraceletCode, empresaId: crianca.empresaId }
       );
       if (!pulseira) {
         console.error(`❌ Pulseira ${normalizedBraceletCode} não encontrada`);
@@ -242,12 +242,12 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
       }
       
       // Atualizar status da pulseira antiga para 'disponível' (se existia)
-      if (crianca.bracelet_code) {
-        const oldCode = normalizeUid(crianca.bracelet_code);
+      if (crianca.codigoPulseira) {
+        const oldCode = normalizeUid(crianca.codigoPulseira);
         await query(
           `UPDATE pulseira SET status = @status, criancaId = NULL
-           WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
-          { status: 'disponivel', code: oldCode, empresaId: crianca.empresa_id }
+           WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+          { status: 'disponivel', codigo: oldCode, empresaId: crianca.empresaId }
         );
         console.log(`   → Pulseira anterior ${oldCode} marcada como disponível`);
       }
@@ -255,8 +255,8 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
       // Marcar pulseira nova como 'em_uso'
       await query(
         `UPDATE pulseira SET status = @status, criancaId = @criancaId
-         WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
-        { status: 'em_uso', criancaId: crianca_id, code: normalizedBraceletCode, empresaId: crianca.empresa_id }
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+        { status: 'em_uso', criancaId: criancaId, codigo: normalizedBraceletCode, empresaId: crianca.empresaId }
       );
       console.log(`   → Pulseira ${normalizedBraceletCode} marcada como em_uso`);
     }
@@ -264,8 +264,8 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
     // Atualizar criança
     await query(
       `UPDATE crianca SET 
-        nome = @name, 
-        apelido = @nickname, 
+        nome = @nome, 
+        apelido = @apelido, 
         idade = @age, 
         avatar = @avatar, 
         codigoPulseira = @braceletCode,
@@ -274,29 +274,29 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
        AND eventoId = @eventoId
        AND empresaId = @empresaId`,
       { 
-        name: name || crianca.name, 
-        nickname: nickname || crianca.nickname, 
-        age: age ? parseInt(age) : crianca.age, 
+        nome: nome || crianca.nome, 
+        apelido: apelido || crianca.apelido, 
+        age: age ? parseInt(age) : crianca.idade, 
         avatar: nextAvatar,
         braceletCode: normalizedBraceletCode,
-        criancaId: crianca_id,
-        eventoId: evento_id,
-        empresaId: crianca.empresa_id,
+        criancaId: criancaId,
+        eventoId: eventoId,
+        empresaId: crianca.empresaId,
         timeId: nextTimeId
       }
     );
 
-    const affectedTeamIds = [...new Set([crianca.time_id, nextTimeId].filter(Boolean))];
+    const affectedTeamIds = [...new Set([crianca.timeId, nextTimeId].filter(Boolean))];
     for (const affectedTeamId of affectedTeamIds) {
       await query(
-        `UPDATE time
+        `UPDATE "time"
          SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
          WHERE timeId = @timeId`,
         { timeId: affectedTeamId }
       );
     }
     
-    console.log(`✅ Criança ${crianca.name} atualizada com pulseira ${normalizedBraceletCode}`);
+    console.log(`✅ Criança ${crianca.nome} atualizada com pulseira ${normalizedBraceletCode}`);
     res.json({ ok: true, message: 'Criança atualizada com sucesso' });
   } catch (err) {
     console.error('❌ Erro ao atualizar criança:', err.message);
@@ -305,23 +305,23 @@ router.put('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, 
 });
 
 // Excluir participante do evento
-router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (req, res) => {
+router.delete('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
     if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
       return res.status(403).json({ error: 'Acesso negado para excluir participantes' });
     }
 
-    const { evento_id, crianca_id } = req.params;
+    const { eventoId, criancaId } = req.params;
     const crianca = await queryOne(
       `SELECT * FROM crianca
        WHERE criancaId = @criancaId
        AND eventoId = @eventoId
        AND (empresaId = @empresaId OR @isMaster = 1)`,
       {
-        criancaId: crianca_id,
-        eventoId: evento_id,
-        empresaId: req.user.empresa_id,
+        criancaId: criancaId,
+        eventoId: eventoId,
+        empresaId: req.user.empresaId,
         isMaster: isMaster(req) ? 1 : 0
       }
     );
@@ -330,31 +330,31 @@ router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (re
       return res.status(404).json({ error: 'Participante não encontrado' });
     }
 
-    // Liberar a pulseira antes de remover a criança por causa da FK pulseiras.crianca_id.
+    // Liberar a pulseira antes de remover a criança por causa da FK pulseira.criancaId.
     await query(
       `UPDATE pulseira
        SET status = @status, criancaId = NULL
        WHERE criancaId = @criancaId
        AND empresaId = @empresaId`,
-      { status: 'disponivel', criancaId: crianca_id, empresaId: crianca.empresa_id }
+      { status: 'disponivel', criancaId: criancaId, empresaId: crianca.empresaId }
     );
 
     // Remover registros que possuem FK obrigatória para a criança.
-    await query('DELETE FROM criancaConquista WHERE criancaId = @criancaId', { criancaId: crianca_id });
-    await query('DELETE FROM cacaTesourScan WHERE criancaId = @criancaId', { criancaId: crianca_id });
-    await query('DELETE FROM pontuacao WHERE criancaId = @criancaId', { criancaId: crianca_id });
-    await query('DELETE FROM leitura WHERE criancaId = @criancaId', { criancaId: crianca_id });
+    await query('DELETE FROM criancaConquista WHERE criancaId = @criancaId', { criancaId: criancaId });
+    await query('DELETE FROM cacaTesourScan WHERE criancaId = @criancaId', { criancaId: criancaId });
+    await query('DELETE FROM pontuacao WHERE criancaId = @criancaId', { criancaId: criancaId });
+    await query('DELETE FROM leitura WHERE criancaId = @criancaId', { criancaId: criancaId });
 
     // Manter a pontuação do time consistente com a remoção do participante.
-    if (crianca.time_id && crianca.scores) {
+    if (crianca.timeId && crianca.pontos) {
       await query(
-        `UPDATE time
+        `UPDATE "time"
          SET pontos = CASE
            WHEN pontos >= @scores THEN pontos - @scores
            ELSE 0
          END
          WHERE timeId = @timeId AND eventoId = @eventoId`,
-        { scores: crianca.scores, timeId: crianca.time_id, eventoId: evento_id }
+        { scores: crianca.pontos, timeId: crianca.timeId, eventoId: eventoId }
       );
     }
 
@@ -363,10 +363,10 @@ router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (re
        WHERE criancaId = @criancaId
        AND eventoId = @eventoId
        AND empresaId = @empresaId`,
-      { criancaId: crianca_id, eventoId: evento_id, empresaId: crianca.empresa_id }
+      { criancaId: criancaId, eventoId: eventoId, empresaId: crianca.empresaId }
     );
 
-    console.log(`✅ Participante ${crianca.name} (${crianca_id}) excluído do evento ${evento_id}`);
+    console.log(`✅ Participante ${crianca.nome} (${criancaId}) excluído do evento ${eventoId}`);
     res.json({ ok: true, message: 'Participante excluído com sucesso' });
   } catch (err) {
     console.error('❌ Erro ao excluir participante:', err.message);
@@ -375,43 +375,43 @@ router.delete('/eventos/:evento_id/criancas/:crianca_id', verifyToken, async (re
 });
 
 // Desvincular pulseira
-router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
+router.post('/:criancaId/unassign-bracelet', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
     if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
-      return res.status(403).json({ error: 'Acesso negado para desvincular pulseiras' });
+      return res.status(403).json({ error: 'Acesso negado para desvincular pulseira' });
     }
-    const { crianca_id } = req.params;
+    const { criancaId } = req.params;
     const crianca = await queryOne(
       `SELECT * FROM crianca
        WHERE criancaId = @id AND (empresaId = @empresaId OR @isMaster = 1)`,
-      { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+      { id: criancaId, empresaId: req.user.empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
     
     if (!crianca) {
       return res.status(404).json({ error: 'Criança não encontrada' });
     }
     
-    if (!crianca.bracelet_code) {
+    if (!crianca.codigoPulseira) {
       return res.status(400).json({ error: 'Criança não possui pulseira associada' });
     }
     
-    const braceletCode = crianca.bracelet_code;
+    const braceletCode = crianca.codigoPulseira;
     
     await query(
       `UPDATE crianca SET ultimaPulseira = codigoPulseira, codigoPulseira = NULL
        WHERE criancaId = @criancaId AND (empresaId = @empresaId OR @isMaster = 1)`,
-      { criancaId: crianca_id, empresaId: crianca.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+      { criancaId: criancaId, empresaId: crianca.empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
     
     // ✅ NOVO: Atualizar status da pulseira de volta para "disponível"
     await query(
       `UPDATE pulseira SET status = @status, criancaId = NULL
-       WHERE ${uidSqlExpression('codigo')} = @code AND empresaId = @empresaId`,
-      { status: 'disponivel', code: normalizeUid(braceletCode), empresaId: crianca.empresa_id }
+       WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+      { status: 'disponivel', codigo: normalizeUid(braceletCode), empresaId: crianca.empresaId }
     );
     
-    console.log(`✅ Pulseira ${braceletCode} desvinculada de ${crianca.name} e marcada como disponível`);
+    console.log(`✅ Pulseira ${braceletCode} desvinculada de ${crianca.nome} e marcada como disponível`);
     
     res.json({ ok: true, message: 'Pulseira desvinculada com sucesso' });
   } catch (err) {
@@ -420,15 +420,15 @@ router.post('/:crianca_id/unassign-bracelet', verifyToken, async (req, res) => {
 });
 
 // ✅ NOVO: Gerar/Regenerar QR Code para uma criança
-router.post('/:crianca_id/generate-qrcode', verifyToken, async (req, res) => {
+router.post('/:criancaId/generate-qrcode', verifyToken, async (req, res) => {
   try {
-    const { crianca_id } = req.params;
+    const { criancaId } = req.params;
     
     // Validar acesso
     const crianca = await queryOne(
       `SELECT * FROM crianca
        WHERE criancaId = @id AND (empresaId = @empresaId OR @isMaster = 1)`,
-      { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+      { id: criancaId, empresaId: req.user.empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
     
     if (!crianca) {
@@ -436,21 +436,21 @@ router.post('/:crianca_id/generate-qrcode', verifyToken, async (req, res) => {
     }
 
     // Gerar novo QR Code
-    const qrCodeData = await createQRCodeForChild(crianca_id);
+    const qrCodeData = await createQRCodeForChild(criancaId);
 
-    // Salvar na tabela criancas
+    // Salvar na tabela crianca
     await query(
       `UPDATE crianca SET codigoQr = @qrcode 
-       WHERE criancaId = @crianca_id AND (empresaId = @empresaId OR @isMaster = 1)`,
+       WHERE criancaId = @criancaId AND (empresaId = @empresaId OR @isMaster = 1)`,
       { 
         qrcode: qrCodeData.qrCode, 
-        crianca_id, 
-        empresaId: req.user.empresa_id,
+        criancaId, 
+        empresaId: req.user.empresaId,
         isMaster: isMaster(req) ? 1 : 0
       }
     );
 
-    console.log(`✅ QR Code gerado para criança ${crianca.name} (${crianca_id}): ${qrCodeData.qrCode}`);
+    console.log(`✅ QR Code gerado para criança ${crianca.nome} (${criancaId}): ${qrCodeData.qrCode}`);
 
     res.json({
       ok: true,
@@ -465,15 +465,15 @@ router.post('/:crianca_id/generate-qrcode', verifyToken, async (req, res) => {
 });
 
 // ✅ NOVO: Obter imagem do QR Code de uma criança
-router.get('/:crianca_id/qrcode-image', verifyToken, async (req, res) => {
+router.get('/:criancaId/qrcode-image', verifyToken, async (req, res) => {
   try {
-    const { crianca_id } = req.params;
+    const { criancaId } = req.params;
     
     // Validar acesso
     const crianca = await queryOne(
       `SELECT * FROM crianca
        WHERE criancaId = @id AND (empresaId = @empresaId OR @isMaster = 1)`,
-      { id: crianca_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+      { id: criancaId, empresaId: req.user.empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
     
     if (!crianca) {
@@ -481,29 +481,29 @@ router.get('/:crianca_id/qrcode-image', verifyToken, async (req, res) => {
     }
 
     // Se não tem QR Code, gerar um
-    let qrCode = crianca.qrcode;
+    let qrCode = crianca.codigoQr;
     if (!qrCode) {
-      const qrCodeData = await createQRCodeForChild(crianca_id);
+      const qrCodeData = await createQRCodeForChild(criancaId);
       qrCode = qrCodeData.qrCode;
       
       // Salvar na tabela
       await query(
         `UPDATE crianca SET codigoQr = @qrcode 
-         WHERE criancaId = @crianca_id AND (empresaId = @empresaId OR @isMaster = 1)`,
+         WHERE criancaId = @criancaId AND (empresaId = @empresaId OR @isMaster = 1)`,
         { 
           qrcode: qrCode, 
-          crianca_id, 
-          empresaId: req.user.empresa_id,
+          criancaId, 
+          empresaId: req.user.empresaId,
           isMaster: isMaster(req) ? 1 : 0
         }
       );
       
-      console.log(`✅ QR Code auto-gerado para criança ${crianca.name} (${crianca_id}): ${qrCode}`);
+      console.log(`✅ QR Code auto-gerado para criança ${crianca.nome} (${criancaId}): ${qrCode}`);
     }
 
     // Gerar imagem do QR Code existente
     const { generateQRCodeImage } = require('../utils/qrcode');
-    const trackingUrl = generateParentTrackingUrl(qrCode, crianca_id);
+    const trackingUrl = generateParentTrackingUrl(qrCode, criancaId);
     const qrCodeImage = await generateQRCodeImage(trackingUrl);
 
     // Retornar imagem PNG
@@ -516,18 +516,18 @@ router.get('/:crianca_id/qrcode-image', verifyToken, async (req, res) => {
 });
 
 // ✅ NOVO: Gerar QR Code para todas as crianças NULL em um evento (batch)
-router.post('/eventos/:evento_id/generate-qrcodes-batch', verifyToken, async (req, res) => {
+router.post('/evento/:eventoId/generate-qrcodes-batch', verifyToken, async (req, res) => {
   try {
     const allowedRoles = ['admin', 'reception', 'game_master'];
     if (!isMaster(req) && !allowedRoles.includes(req.user?.role)) {
       return res.status(403).json({ error: 'Acesso negado para esta operação em lote' });
     }
 
-    const { evento_id } = req.params;
+    const { eventoId } = req.params;
 
     // Validar que o evento pertence à empresa
-    const evento = await queryOne('SELECT * FROM evento WHERE eventoId = @evento_id AND (empresaId = @empresaId OR @isMaster = 1)', 
-      { evento_id, empresaId: req.user.empresa_id, isMaster: isMaster(req) ? 1 : 0 });
+    const evento = await queryOne('SELECT * FROM evento WHERE eventoId = @eventoId AND (empresaId = @empresaId OR @isMaster = 1)', 
+      { eventoId, empresaId: req.user.empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     if (!evento) {
       return res.status(404).json({ error: 'Evento não encontrado' });
@@ -536,10 +536,10 @@ router.post('/eventos/:evento_id/generate-qrcodes-batch', verifyToken, async (re
     // Buscar todas as crianças sem QR Code
     const criancasSemQR = await allQuery(
       `SELECT criancaId, nome FROM crianca 
-       WHERE eventoId = @evento_id 
+       WHERE eventoId = @eventoId 
        AND (codigoQr IS NULL OR codigoQr = '')
-       AND empresaId = @empresa_id`,
-      { evento_id, empresa_id: evento.empresa_id }
+       AND empresaId = @empresaId`,
+      { eventoId, empresaId: evento.empresaId }
     );
 
     if (criancasSemQR.length === 0) {
@@ -555,27 +555,27 @@ router.post('/eventos/:evento_id/generate-qrcodes-batch', verifyToken, async (re
     const results = [];
     for (const crianca of criancasSemQR) {
       try {
-        const qrCodeData = await createQRCodeForChild(crianca.id);
+        const qrCodeData = await createQRCodeForChild(crianca.criancaId);
         
         await query(
           `UPDATE crianca SET codigoQr = @qrcode 
-           WHERE criancaId = @crianca_id`,
-          { qrcode: qrCodeData.qrCode, crianca_id: crianca.id }
+           WHERE criancaId = @criancaId`,
+          { qrcode: qrCodeData.qrCode, criancaId: crianca.criancaId }
         );
 
         results.push({
-          crianca_id: crianca.id,
-          crianca_name: crianca.name,
+          criancaId: crianca.criancaId,
+          crianca_name: crianca.nome,
           qrCode: qrCodeData.qrCode,
           success: true,
         });
 
-        console.log(`✅ QR Code gerado para ${crianca.name}: ${qrCodeData.qrCode}`);
+        console.log(`✅ QR Code gerado para ${crianca.nome}: ${qrCodeData.qrCode}`);
       } catch (err) {
-        console.error(`❌ Erro ao gerar QR Code para ${crianca.name}:`, err.message);
+        console.error(`❌ Erro ao gerar QR Code para ${crianca.nome}:`, err.message);
         results.push({
-          crianca_id: crianca.id,
-          crianca_name: crianca.name,
+          criancaId: crianca.criancaId,
+          crianca_name: crianca.nome,
           success: false,
           error: err.message,
         });

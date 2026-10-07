@@ -28,22 +28,22 @@ async function ensureGameWinnerBonusesSchema() {
   await query(`
     IF OBJECT_ID('dbo.game_winner_bonuses', 'U') IS NULL
     BEGIN
-      CREATE TABLE bonusVencedorJogo (
+      CREATE TABLE game_winner_bonuses (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
         empresaId NVARCHAR(36) NULL,
         eventoId NVARCHAR(36) NOT NULL,
         partidaId NVARCHAR(36) NOT NULL,
         tipoJogo NVARCHAR(50) NOT NULL,
         timeId NVARCHAR(36) NOT NULL,
-        pontosPorMembro INT NOT NULL DEFAULT 0,
-        membrosPremiados INT NOT NULL DEFAULT 0,
-        criadoEm DATETIME2 NOT NULL DEFAULT SYSDATETIME()
+        points_per_member INT NOT NULL DEFAULT 0,
+        members_awarded INT NOT NULL DEFAULT 0,
+        created_at DATETIME2 NOT NULL DEFAULT SYSDATETIME()
       )
     END
   `);
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_game_winner_bonus_partida' AND object_id = OBJECT_ID('dbo.game_winner_bonuses'))
-      CREATE UNIQUE INDEX uq_game_winner_bonus_partida ON bonusVencedorJogo (partidaId, tipoJogo)
+      CREATE UNIQUE INDEX uq_game_winner_bonus_partida ON game_winner_bonuses (partidaId, tipoJogo)
   `);
 }
 

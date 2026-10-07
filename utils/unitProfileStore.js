@@ -5,30 +5,30 @@ const { formatCnpj } = require('./cnpj');
 const { unitEmailDomain } = require('./unitEmail');
 
 // `db` expõe queryOne/allQuery/query (o módulo database ou o executor de uma transação).
-// O cadastro do buffet em `clientes` não tinha vínculo com a empresa: casa por empresa_id e,
+// O cadastro do buffet em `clientes` não tinha vínculo com a empresa: casa por empresaId e,
 // se ainda não houver, pelo mesmo critério já usado no sistema (nome + cidade).
 async function findCliente(db, empresa) {
-  const linked = await db.queryOne('SELECT * FROM cliente WHERE empresaId = @empresaId', { empresaId: empresa.id });
+  const linked = await db.queryOne('SELECT * FROM cliente WHERE empresaId = @empresaId', { empresaId: empresa.empresaId });
   if (linked) return linked;
   const candidates = await db.allQuery('SELECT * FROM cliente WHERE empresaId IS NULL ORDER BY criadoEm');
   return candidates.find((c) =>
-    normalizeClientText(c.name) === normalizeClientText(empresa.nome) &&
-    normalizeClientText(c.city) === normalizeClientText(empresa.cidade)) || null;
+    normalizeClientText(c.nome) === normalizeClientText(empresa.nome) &&
+    normalizeClientText(c.cidade) === normalizeClientText(empresa.cidade)) || null;
 }
 
 function toProfile(empresa, cliente) {
-  const name = cliente?.name || empresa.nome || '';
+  const name = cliente?.nome || empresa.nome || '';
   return {
-    id: empresa.id,
+    id: empresa.empresaId,
     name,
     // Domínio dos e-mails dos usuários do buffet (ex.: "buffetadv.com"); null se o nome não gera um.
     emailDomain: unitEmailDomain(name),
     email: cliente?.email || '',
-    phone: cliente?.phone ?? empresa.telefone ?? '',
-    address: cliente?.address || '',
-    city: cliente?.city || empresa.cidade || '',
-    state: cliente?.state || empresa.estado || '',
-    backupFrequency: cliente?.backup_frequency || 'daily',
+    phone: cliente?.telefone ?? empresa.telefone ?? '',
+    address: cliente?.endereco || '',
+    city: cliente?.cidade || empresa.cidade || '',
+    state: cliente?.estado || empresa.estado || '',
+    backupFrequency: cliente?.frequenciaBackup || 'daily',
     cnpj: empresa.cnpj ? formatCnpj(empresa.cnpj) : '',
   };
 }
@@ -54,12 +54,12 @@ async function saveUnitProfile(db, empresaId, values, { cnpj, fallbackEmail } = 
 
   const cliente = await findCliente(db, empresa);
   const columns = {
-    name: 'nome', email: 'email', phone: 'telefone', address: 'endereco', backupFrequency: 'frequenciaBackup',
+    name: 'name', email: 'email', phone: 'phone', address: 'address', backupFrequency: 'frequenciaBackup',
   };
 
   if (cliente) {
     const sets = ['empresaId = @empresaId'];
-    const params = { id: cliente.id, empresaId: empresa.id };
+    const params = { id: cliente.clienteId, empresaId: empresa.empresaId };
     for (const [key, column] of Object.entries(columns)) {
       if (key in values) {
         sets.push(`${column} = @${key}`);
@@ -80,31 +80,31 @@ async function saveUnitProfile(db, empresaId, values, { cnpj, fallbackEmail } = 
         phone: values.phone ?? empresa.telefone ?? null,
         plano: empresa.plano || 'starter',
         status: empresa.status || 'active',
-        empresaId: empresa.id,
+        empresaId: empresa.empresaId,
         address: values.address ?? null,
         backupFrequency: values.backupFrequency ?? 'daily',
       }
     );
   }
 
-  const empresaSets = ['dataAtualizacao = GETDATE()'];
-  const empresaParams = { id: empresa.id };
+  const empresaSets = ['data_atualizacao = GETDATE()'];
+  const empresaParams = { id: empresa.empresaId };
   if ('name' in values) { empresaSets.push('nome = @nome'); empresaParams.nome = values.name; }
   if ('phone' in values) { empresaSets.push('telefone = @telefone'); empresaParams.telefone = values.phone; }
   if (cnpj !== undefined) { empresaSets.push('cnpj = @cnpj'); empresaParams.cnpj = cnpj; }
   await db.query(`UPDATE empresa SET ${empresaSets.join(', ')} WHERE empresaId = @id`, empresaParams);
 
-  return loadUnitProfile(db, empresa.id);
+  return loadUnitProfile(db, empresa.empresaId);
 }
 
-// Logo da unidade: fica em clientes (logo_data/logo_name/logo_type), fora do perfil porque é pesada.
+// Logo da unidade: fica em clientes (logoDados/logoNome/logoTipo), fora do perfil porque é pesada.
 async function loadLogo(db, empresaId) {
   const row = await db.queryOne(
     'SELECT logoDados, logoNome, logoTipo FROM cliente WHERE empresaId = @empresaId',
     { empresaId }
   );
-  if (!row?.logo_data) return null;
-  return { dataUrl: row.logo_data, name: row.logo_name || '', type: row.logo_type || '' };
+  if (!row?.logoDados) return null;
+  return { dataUrl: row.logoDados, name: row.logoNome || '', type: row.logoTipo || '' };
 }
 
 // Grava a logo (ou remove, com logo = null). Garante o cadastro em clientes e o vínculo

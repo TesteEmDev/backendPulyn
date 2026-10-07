@@ -24,7 +24,7 @@ async function getEventForUser(req, eventoId) {
     { id: eventoId }
   );
   if (!event) return null;
-  if (!isMaster(req) && String(event.empresa_id) !== String(req.user.empresa_id)) {
+  if (!isMaster(req) && String(event.empresaId) !== String(req.user.empresaId)) {
     return false;
   }
   return event;
@@ -33,16 +33,16 @@ async function getEventForUser(req, eventoId) {
 function serializeMessage(message) {
   return {
     id: message.id,
-    evento_id: message.evento_id,
-    text: message.text,
-    type: message.type,
-    sender: message.sender || null,
-    timestamp: message.sent_at,
-    sent_at: message.sent_at,
+    eventoId: message.eventoId,
+    texto: message.texto,
+    type: message.tipo,
+    remetente: message.remetente || null,
+    timestamp: message.enviadoEm,
+    enviadoEm: message.enviadoEm,
   };
 }
 
-router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (req, res) => {
+router.get('/evento/:eventoId', verifyToken, requireRole(READ_ROLES), async (req, res) => {
   try {
     const event = await getEventForUser(req, req.params.eventoId);
     if (event === null) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -63,28 +63,28 @@ router.get('/eventos/:eventoId', verifyToken, requireRole(READ_ROLES), async (re
   }
 });
 
-router.post('/eventos/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (req, res) => {
+router.post('/evento/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (req, res) => {
   try {
     const event = await getEventForUser(req, req.params.eventoId);
     if (event === null) return res.status(404).json({ error: 'Evento não encontrado' });
     if (event === false) return res.status(403).json({ error: 'Acesso negado ao evento' });
 
-    const text = String(req.body?.text || '').trim();
+    const texto = String(req.body?.texto || '').trim();
     const type = String(req.body?.type || 'custom').toLowerCase();
-    if (!text) return res.status(400).json({ error: 'text é obrigatório' });
-    if (text.length > 500) return res.status(400).json({ error: 'text excede 500 caracteres' });
+    if (!texto) return res.status(400).json({ error: 'texto é obrigatório' });
+    if (texto.length > 500) return res.status(400).json({ error: 'texto excede 500 caracteres' });
     if (!MESSAGE_TYPES.has(type)) return res.status(400).json({ error: 'type inválido' });
 
     const messageId = uuidv4();
     await query(`
       INSERT INTO mensagemDisplay (mensagemId, eventoId, texto, tipo, remetente, enviadoEm)
-      VALUES (@id, @eventoId, @text, @type, @sender, CURRENT_TIMESTAMP)
+      VALUES (@id, @eventoId, @texto, @tipo, @remetente, CURRENT_TIMESTAMP)
     `, {
       id: messageId,
       eventoId: req.params.eventoId,
-      text,
-      type,
-      sender: req.user.email || req.user.id || null,
+      texto,
+      tipo: type,
+      remetente: req.user.email || req.user.id || null,
     });
 
     const message = await queryOne(

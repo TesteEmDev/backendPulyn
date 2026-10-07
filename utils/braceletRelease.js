@@ -41,7 +41,7 @@ async function releaseBraceletsWith(db, eventoId) {
                     WHERE LOWER(eventoId) = LOWER(@eventoId) AND codigoPulseira IS NOT NULL)`,
     { eventoId }
   );
-  // A criança guarda qual pulseira usou (last_bracelet_code) para os relatórios; só o vínculo é desfeito.
+  // A criança guarda qual pulseira usou (ultimaPulseira) para os relatórios; só o vínculo é desfeito.
   const cleared = await db.query(
     `UPDATE crianca SET ultimaPulseira = codigoPulseira, codigoPulseira = NULL
      WHERE LOWER(eventoId) = LOWER(@eventoId) AND codigoPulseira IS NOT NULL`,
@@ -75,17 +75,17 @@ async function runBraceletReleaseTick({ now = new Date() } = {}) {
 
   const released = [];
   for (const event of candidates) {
-    if (!isBraceletReleaseDue(event.ended_at, now)) continue;
+    if (!isBraceletReleaseDue(event.finalizadoEm, now)) continue;
     try {
-      const result = await releaseBraceletsForEvent(event.id);
-      released.push({ eventoId: event.id, ...result });
-      console.log(`🔓 [PULSEIRAS] Evento "${event.name}": ${result.braceletsReleased} pulseira(s) liberada(s), ${result.childrenCleared} criança(s) sem pulseira`);
-      broadcastCompany(event.empresa_id, {
+      const result = await releaseBraceletsForEvent(event.eventoId);
+      released.push({ eventoId: event.eventoId, ...result });
+      console.log(`🔓 [PULSEIRAS] Evento "${event.nome}": ${result.braceletsReleased} pulseira(s) liberada(s), ${result.childrenCleared} criança(s) sem pulseira`);
+      broadcastCompany(event.empresaId, {
         type: 'BRACELETS_RELEASED',
-        payload: { eventoId: event.id, braceletsReleased: result.braceletsReleased },
+        payload: { eventoId: event.eventoId, braceletsReleased: result.braceletsReleased },
       });
     } catch (err) {
-      console.error(`❌ [PULSEIRAS] Falha ao liberar as pulseiras do evento ${event.id}:`, err.message);
+      console.error(`❌ [PULSEIRAS] Falha ao liberar as pulseiras do evento ${event.eventoId}:`, err.message);
     }
   }
   return released;

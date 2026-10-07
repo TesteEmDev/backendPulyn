@@ -8,115 +8,118 @@ const { planDefaultTeams } = require('../utils/defaultTeams');
 
 const TEAM_MANAGER_ROLES = ['admin', 'reception', 'game_master', 'master'];
 
-// Listar times/equipes da empresa
+// Listar time/equipes da empresa
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const role = req.user.role;
 
-    let times;
+    let time;
     if (isMaster(req)) {
-      // Master vê todos os times (exceto os da Master Admin)
-      times = await allQuery(`
+      // Master vê todos os time (exceto os da Master Admin)
+      time = await allQuery(`
         SELECT t.*, (SELECT COUNT(*) FROM crianca c WHERE c.timeId = t.timeId) AS members_count
-        FROM time t
+        FROM "time" t
         LEFT JOIN empresa e ON t.empresaId = e.empresaId
         WHERE e.nome != 'Master Admin'
         ORDER BY t.nome
       `);
-      console.log(`✅ ${times.length} times (master - TODAS as empresas, exceto Master Admin)`);
+      console.log(`✅ ${time.length} time (master - TODAS as empresa, exceto Master Admin)`);
     } else {
-      times = await allQuery(
+      time = await allQuery(
         `SELECT t.*, (SELECT COUNT(*) FROM crianca c WHERE c.timeId = t.timeId) AS members_count
-         FROM time t WHERE t.empresaId = @empresa_id ORDER BY t.nome`,
-        { empresa_id }
+         FROM "time" t WHERE t.empresaId = @empresaId ORDER BY t.nome`,
+        { empresaId }
       );
-      console.log(`✅ ${times.length} times da empresa ${empresa_id}`);
+      console.log(`✅ ${time.length} time da empresa ${empresaId}`);
     }
 
-    res.json(times);
+    res.json(time);
   } catch (err) {
-    console.error('❌ Erro ao listar times:', err);
+    console.error('❌ Erro ao listar time:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Times padrão: modelos da empresa, guardados como times sem evento.
+// Times padrão: modelos da empresa, guardados como time sem evento.
 router.get('/padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const templates = await allQuery(
-      'SELECT timeId, nome, cor, criadoEm FROM time WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, nome',
-      { empresaId: req.user.empresa_id }
+      'SELECT timeId, nome, cor, criadoEm FROM "time" WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, nome',
+      { empresaId: req.user.empresaId }
     );
     res.json(templates);
   } catch (err) {
-    console.error('❌ Erro ao listar times padrão:', err);
+    console.error('❌ Erro ao listar time padrão:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Copia os times padrão para o evento (sem duplicar os que já existem pelo nome).
-router.post('/eventos/:evento_id/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
+// Copia os time padrão para o evento (sem duplicar os que já existem pelo nome).
+router.post('/evento/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id',
-      { evento_id: req.params.evento_id }
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId',
+      { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
     const result = await withTransaction(async (tx) => {
       const templates = await tx.allQuery(
-        'SELECT nome, cor FROM time WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, nome',
-        { empresaId: evento.empresa_id }
+        'SELECT nome, cor FROM "time" WHERE eventoId IS NULL AND empresaId = @empresaId ORDER BY criadoEm, nome',
+        { empresaId: evento.empresaId }
       );
-      if (templates.length === 0) return { error: 'Cadastre os times padrão antes de aplicá-los a um evento.' };
+      if (templates.length === 0) return { error: 'Cadastre os time padrão antes de aplicá-los a um evento.' };
 
       const existing = await tx.allQuery(
-        'SELECT nome FROM time WHERE eventoId = @eventoId AND empresaId = @empresaId',
-        { eventoId: evento.id, empresaId: evento.empresa_id }
+        'SELECT nome FROM "time" WHERE eventoId = @eventoId AND empresaId = @empresaId',
+        { eventoId: evento.eventoId, empresaId: evento.empresaId }
       );
-      const toCreate = planDefaultTeams({ templates, existingTeams: existing });
+      const toCreate = planDefaultTeams({
+        templates: templates.map(t => ({ name: t.nome, color: t.cor })),
+        existingTeams: existing.map(t => ({ name: t.nome })),
+      });
       for (const team of toCreate) {
         await tx.query(
           // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
-          `INSERT INTO time (timeId, eventoId, empresaId, nome, cor, pontos)
-           VALUES (@id, @eventoId, @empresaId, @name, @color, 0)`,
-          { id: uuidv4(), eventoId: evento.id, empresaId: evento.empresa_id, name: team.name, color: team.color }
+          `INSERT INTO "time" (timeId, eventoId, empresaId, nome, cor, pontos)
+           VALUES (@id, @eventoId, @empresaId, @nome, @cor, 0)`,
+          { id: uuidv4(), eventoId: evento.eventoId, empresaId: evento.empresaId, nome: team.nome, cor: team.cor }
         );
       }
       return { created: toCreate.length, skipped: templates.length - toCreate.length };
     });
 
     if (result.error) return res.status(400).json({ error: result.error });
-    console.log(`✅ Times padrão aplicados ao evento ${evento.id}: ${result.created} criado(s), ${result.skipped} já existia(m)`);
+    console.log(`✅ Times padrão aplicados ao evento ${evento.eventoId}: ${result.created} criado(s), ${result.skipped} já existia(m)`);
     res.json(result);
   } catch (err) {
-    console.error('❌ Erro ao aplicar times padrão:', err);
+    console.error('❌ Erro ao aplicar time padrão:', err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Listar times de um evento específico
-router.get('/eventos/:evento_id/times', verifyToken, async (req, res) => {
+// Listar time de um evento específico
+router.get('/evento/:eventoId/time', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
-    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id', { evento_id: req.params.evento_id });
+    const empresaId = req.user.empresaId;
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId', { eventoId: req.params.eventoId });
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (!isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    const times = await allQuery(
-      `SELECT * FROM time 
-       WHERE eventoId = @evento_id AND (empresaId = @empresa_id OR @isMaster = 1)
+    const time = await allQuery(
+      `SELECT * FROM "time" 
+       WHERE eventoId = @eventoId AND (empresaId = @empresaId OR @isMaster = 1)
        ORDER BY pontos DESC`,
-      { evento_id: req.params.evento_id, empresa_id, isMaster: isMaster(req) ? 1 : 0 }
+      { eventoId: req.params.eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 }
     );
 
-    res.json(times);
+    res.json(time);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -125,21 +128,21 @@ router.get('/eventos/:evento_id/times', verifyToken, async (req, res) => {
 // Criar time/equipe
 router.post('/', verifyToken, async (req, res) => {
   try {
-    const { name, color, evento_id } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { nome, color, eventoId } = req.body;
+    const empresaId = req.user.empresaId;
 
-    if (!name || !color) {
+    if (!nome || !color) {
       return res.status(400).json({ error: 'nome e cor são obrigatórios' });
     }
 
-    const evento = evento_id
-      ? await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id', { evento_id })
+    const evento = eventoId
+      ? await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId', { eventoId })
       : null;
-    if (evento_id && !evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (evento && !isMaster(req) && evento.empresa_id !== empresa_id) {
+    if (eventoId && !evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (evento && !isMaster(req) && evento.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
-    const targetEmpresaId = evento?.empresa_id || empresa_id;
+    const targetEmpresaId = evento?.empresaId || empresaId;
     const empresa = await queryOne('SELECT empresaId FROM empresa WHERE empresaId = @id', { id: targetEmpresaId });
     if (!empresa) return res.status(403).json({ error: 'Empresa não encontrada' });
 
@@ -148,13 +151,13 @@ router.post('/', verifyToken, async (req, res) => {
 
     await query(
       // A pontuação nunca vem do cliente: todo time novo começa com 0 ponto.
-      `INSERT INTO time (timeId, eventoId, empresaId, nome, cor, pontos) 
-       VALUES (@id, @evento_id, @empresa_id, @name, @color, 0)`,
-      { id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color }
+      `INSERT INTO "time" (timeId, eventoId, empresaId, nome, cor, pontos) 
+       VALUES (@id, @eventoId, @empresaId, @nome, @color, 0)`,
+      { id, eventoId: eventoId || null, empresaId: targetEmpresaId, nome, color }
     );
 
-    console.log(`✅ Time criado: ${name} (empresa: ${empresa_id}${evento_id ? `, evento: ${evento_id}` : ', sem evento'})`);
-    res.json({ id, evento_id: evento_id || null, empresa_id: targetEmpresaId, name, color, points: 0 });
+    console.log(`✅ Time criado: ${nome} (empresa: ${empresaId}${eventoId ? `, evento: ${eventoId}` : ', sem evento'})`);
+    res.json({ id, eventoId: eventoId || null, empresaId: targetEmpresaId, nome, color, points: 0 });
   } catch (err) {
     console.error('❌ Erro ao criar time:', err);
     res.status(500).json({ error: err.message });
@@ -164,12 +167,12 @@ router.post('/', verifyToken, async (req, res) => {
 // Atualizar time
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { name, color } = req.body;
-    const empresa_id = req.user.empresa_id;
+    const { nome, color } = req.body;
+    const empresaId = req.user.empresaId;
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresaId FROM time WHERE timeId = @id',
+      'SELECT empresaId FROM "time" WHERE timeId = @id',
       { id: req.params.id }
     );
 
@@ -177,14 +180,14 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Time não encontrado' });
     }
 
-    if (time.empresa_id !== empresa_id) {
+    if (time.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: time não pertence a esta empresa' });
     }
 
     // ✅ ATUALIZAR
     await query(
-      'UPDATE time SET nome = @name, cor = @color WHERE timeId = @id',
-      { name, color, id: req.params.id }
+      'UPDATE "time" SET nome = @nome, cor = @color WHERE timeId = @id',
+      { nome, color, id: req.params.id }
     );
 
     console.log(`✅ Time atualizado: ${req.params.id}`);
@@ -197,11 +200,11 @@ router.put('/:id', verifyToken, async (req, res) => {
 // Deletar time
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
-      'SELECT empresaId FROM time WHERE timeId = @id',
+      'SELECT empresaId FROM "time" WHERE timeId = @id',
       { id: req.params.id }
     );
 
@@ -209,12 +212,12 @@ router.delete('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Time não encontrado' });
     }
 
-    if (time.empresa_id !== empresa_id) {
+    if (time.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: time não pertence a esta empresa' });
     }
 
     // ✅ DELETAR
-    await query('DELETE FROM time WHERE timeId = @id', { id: req.params.id });
+    await query('DELETE FROM "time" WHERE timeId = @id', { id: req.params.id });
 
     console.log(`✅ Time deletado: ${req.params.id}`);
     res.json({ deleted: true });
@@ -223,10 +226,10 @@ router.delete('/:id', verifyToken, async (req, res) => {
   }
 });
 
-// Distribuir aleatoriamente as crianças do evento entre os times do evento.
+// Distribuir aleatoriamente as crianças do evento entre os time do evento.
 // mode 'unassigned' (padrão): só quem está sem time. mode 'all': sorteia todos de novo.
 router.post(
-  '/eventos/:evento_id/distribuir-aleatorio',
+  '/evento/:eventoId/distribuir-aleatorio',
   verifyToken,
   requireRole(TEAM_MANAGER_ROLES),
   async (req, res) => {
@@ -235,61 +238,61 @@ router.post(
       if (!DISTRIBUTION_MODES.has(mode)) return res.status(400).json({ error: 'Modo de distribuição inválido' });
 
       const evento = await queryOne(
-        'SELECT eventoId, empresaId FROM evento WHERE eventoId = @evento_id',
-        { evento_id: req.params.evento_id }
+        'SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId',
+        { eventoId: req.params.eventoId }
       );
       if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-      if (!isMaster(req) && evento.empresa_id !== req.user.empresa_id) {
+      if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
         return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
       }
 
       const result = await withTransaction(async (tx) => {
         const teams = await tx.allQuery(
-          'SELECT timeId, nome FROM time WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY nome',
-          { eventoId: evento.id, empresaId: evento.empresa_id }
+          'SELECT timeId, nome FROM "time" WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY nome',
+          { eventoId: evento.eventoId, empresaId: evento.empresaId }
         );
         if (teams.length < 2) {
-          return { error: 'Crie pelo menos 2 times neste evento antes de distribuir os participantes.' };
+          return { error: 'Crie pelo menos 2 time neste evento antes de distribuir os participantes.' };
         }
 
         const children = await tx.allQuery(
           'SELECT criancaId, timeId FROM crianca WHERE eventoId = @eventoId AND empresaId = @empresaId',
-          { eventoId: evento.id, empresaId: evento.empresa_id }
+          { eventoId: evento.eventoId, empresaId: evento.empresaId }
         );
-        const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.id), mode });
+        const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.timeId), mode });
 
         for (const { criancaId, timeId } of assignments) {
           await tx.query(
             'UPDATE crianca SET timeId = @timeId WHERE criancaId = @criancaId AND eventoId = @eventoId',
-            { timeId, criancaId, eventoId: evento.id }
+            { timeId, criancaId, eventoId: evento.eventoId }
           );
         }
 
         // A pontuação do time é a soma das crianças; recalcula para refletir a nova composição.
         for (const team of teams) {
           await tx.query(
-            `UPDATE time
+            `UPDATE "time"
              SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
              WHERE timeId = @timeId`,
-            { timeId: team.id }
+            { timeId: team.timeId }
           );
         }
 
         const sizes = await tx.allQuery(
           'SELECT timeId, COUNT(*) AS total FROM crianca WHERE eventoId = @eventoId AND timeId IS NOT NULL GROUP BY timeId',
-          { eventoId: evento.id }
+          { eventoId: evento.eventoId }
         );
-        const totalByTeam = new Map(sizes.map(row => [row.time_id, Number(row.total)]));
+        const totalByTeam = new Map(sizes.map(row => [row.timeId, Number(row.total)]));
         return {
           mode,
           distributed: assignments.length,
           totalChildren: children.length,
-          teams: teams.map(team => ({ id: team.id, name: team.name, members: totalByTeam.get(team.id) || 0 })),
+          teams: teams.map(team => ({ id: team.timeId, name: team.nome, members: totalByTeam.get(team.timeId) || 0 })),
         };
       });
 
       if (result.error) return res.status(400).json({ error: result.error });
-      console.log(`🎲 Distribuição aleatória (${mode}): ${result.distributed} criança(s) no evento ${evento.id}`);
+      console.log(`🎲 Distribuição aleatória (${mode}): ${result.distributed} criança(s) no evento ${evento.eventoId}`);
       return res.json(result);
     } catch (err) {
       console.error('❌ Erro ao distribuir participantes:', err);

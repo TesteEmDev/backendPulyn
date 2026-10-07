@@ -16,7 +16,7 @@ function shuffle(items, random) {
   return result;
 }
 
-// children: [{ id, time_id }]  |  teamIds: ids dos times do evento
+// children: [{ id, timeId }]  |  teamIds: ids dos times do evento
 // Retorna só as mudanças: [{ criancaId, timeId }]
 function planRandomDistribution({ children, teamIds, mode = 'unassigned', random = Math.random }) {
   if (!DISTRIBUTION_MODES.has(mode)) throw new Error('Modo de distribuição inválido');
@@ -27,9 +27,9 @@ function planRandomDistribution({ children, teamIds, mode = 'unassigned', random
   const pool = [];
 
   for (const child of children) {
-    const hasValidTeam = child.time_id && validTeams.has(child.time_id);
+    const hasValidTeam = child.timeId && validTeams.has(child.timeId);
     if (mode === 'all' || !hasValidTeam) pool.push(child);
-    else counts.set(child.time_id, counts.get(child.time_id) + 1);
+    else counts.set(child.timeId, counts.get(child.timeId) + 1);
   }
 
   const assignments = [];
@@ -38,7 +38,7 @@ function planRandomDistribution({ children, teamIds, mode = 'unassigned', random
     const candidates = teamIds.filter(id => counts.get(id) === smallest);
     const timeId = candidates[Math.floor(random() * candidates.length)];
     counts.set(timeId, smallest + 1);
-    if (child.time_id !== timeId) assignments.push({ criancaId: child.id, timeId });
+    if (child.timeId !== timeId) assignments.push({ criancaId: child.criancaId, timeId });
   }
   return assignments;
 }

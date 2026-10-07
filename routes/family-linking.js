@@ -2,10 +2,19 @@ const express = require('express');
 const router = express.Router();
 const { verifyToken } = require('../utils/middleware');
 const { queryOne, query, withTransaction } = require('../database');
+const { uidSqlExpression } = require('../utils/uid');
+const {
+  parseBraceletUid,
+  checkBraceletLinkable,
+  createAttemptLimiter,
+} = require('../utils/braceletLinkRules');
+
+// Limite de tentativas do vínculo por pulseira (o UID é público e fixo; ver braceletLinkRules.js).
+const braceletAttempts = createAttemptLimiter();
 
 /**
  * MOBILE: POST /api/family/qrcode/validate
- * Valida um QR code e vincula o pais/responsável à criança
+ * Valida um QR codigo e vincula o pais/responsável à criança
  * Chamado quando pais escaneia o código no app
  */
 router.post('/qrcode/validate', verifyToken, async (req, res) => {
@@ -61,7 +70,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   ❌ Não consegui extrair código válido de: ${qrCodeValue}`);
         return res.status(400).json({
           error: 'Formato de QR Code inválido. Esperado: URL ou PULYN-XXXXXXXX',
-          code: 'INVALID_QR_FORMAT'
+          codigo: 'INVALID_QR_FORMAT'
         });
       }
     }
@@ -69,8 +78,8 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     console.log(`   🔍 Buscando código QR no banco: "${codigoQR}"`);
     // Buscar código QR ativo
     const codigoVinculacao = await queryOne(
-      `SELECT flc.*, c.nome, c.apelido, c.idade, e.nome as evento_nome, e.eventoId as evento_id, c.empresaId
-       FROM codigoVinculoFamiliar flc
+      `SELECT flc.*, c.nome, c.apelido, c.idade, e.nome as evento_nome, e.eventoId as eventoId, c.empresaId
+       FROM "codigoVinculoFamiliar" flc
        JOIN crianca c ON flc.criancaId = c.criancaId
        JOIN evento e ON flc.eventoId = e.eventoId
        WHERE flc.valorQrCode = @codigoQR 
@@ -85,11 +94,11 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       console.log(`   ❌ Código QR não encontrado ou expirado`);
       return res.status(404).json({
         error: 'Código QR inválido ou expirado',
-        code: 'INVALID_QR_CODE'
+        codigo: 'INVALID_QR_CODE'
       });
     }
 
-    console.log(`   ✅ Código encontrado para criança: ${codigoVinculacao.nickname}`);
+    console.log(`   ✅ Código encontrado para criança: ${codigoVinculacao.apelido}`);
 
     console.log(`   🔗 Criando vinculação em transação...`);
     // Criar vinculação em transação
@@ -102,7 +111,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
          WHERE loginId = @loginId 
            AND criancaId = @criancaId
          FOR UPDATE`,
-        { loginId: req.user.id, criancaId: codigoVinculacao.crianca_id }
+        { loginId: req.user.id, criancaId: codigoVinculacao.criancaId }
       );
 
       if (vinculacaoExistente) {
@@ -122,7 +131,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         // ✅ Criar nova vinculação
         const linkId = uuidv4();
         console.log(`   📝 Link ID gerado: ${linkId}`);
-        console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.crianca_id}, empresaId=${codigoVinculacao.empresa_id}`);
+        console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.criancaId}, empresaId=${codigoVinculacao.empresaId}`);
         
         await tx.query(
           `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento)
@@ -130,34 +139,34 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
           { 
             linkId: linkId,
             loginId: req.user.id, 
-            criancaId: codigoVinculacao.crianca_id, 
-            empresaId: codigoVinculacao.empresa_id 
+            criancaId: codigoVinculacao.criancaId, 
+            empresaId: codigoVinculacao.empresaId 
           }
         );
         console.log(`   ✅ Link criado com sucesso`);
       }
 
-      // ✅ Marcar QR code como usado
+      // ✅ Marcar QR codigo como usado
       const updateResult = await tx.query(
-        `UPDATE codigoVinculoFamiliar
+        `UPDATE "codigoVinculoFamiliar"
          SET status = 'used', usadoPorLoginId = @loginId
          WHERE id = @codeId`,
         { codeId: codigoVinculacao.id, loginId: req.user.id }
       );
       
-      console.log(`   ✅ QR code marcado como usado. Rows affected: ${updateResult.rowsAffected[0]}`);
+      console.log(`   ✅ QR codigo marcado como usado. Rows affected: ${updateResult.rowsAffected[0]}`);
     });
 
-    console.log(`✅ Pais/Responsável ${req.user.email} vinculado à criança ${codigoVinculacao.nickname}`);
+    console.log(`✅ Pais/Responsável ${req.user.email} vinculado à criança ${codigoVinculacao.apelido}`);
 
     res.json({
       success: true,
       message: 'Criança vinculada com sucesso!',
       linkedChild: {
-        id: codigoVinculacao.crianca_id,
-        name: codigoVinculacao.name,
-        nickname: codigoVinculacao.nickname,
-        age: codigoVinculacao.age,
+        id: codigoVinculacao.criancaId,
+        name: codigoVinculacao.nome,
+        nickname: codigoVinculacao.apelido,
+        age: codigoVinculacao.idade,
         evento: codigoVinculacao.evento_nome
       }
     });
@@ -168,13 +177,122 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       console.log(`   ❌ Já vinculado (status ativo)`);
       return res.status(400).json({
         error: 'Você já está vinculado a esta criança',
-        code: 'ALREADY_LINKED'
+        codigo: 'ALREADY_LINKED'
       });
     }
 
-    console.error('❌ ERRO na validação de QR code:', error.message);
+    console.error('❌ ERRO na validação de QR codigo:', error.message);
     console.error('   Stack:', error.stack);
-    res.status(500).json({ error: 'Erro ao validar QR code', details: error.message });
+    res.status(500).json({ error: 'Erro ao validar QR codigo', details: error.message });
+  }
+});
+
+/**
+ * MOBILE: POST /api/family/bracelet/validate
+ * Vincula o responsável à criança lendo a PULSEIRA NFC no celular (alternativa ao QR Code).
+ * Body: { uid } — UID da pulseira, como lido pelo celular (hex, 4/7/10 bytes).
+ *
+ * Mais restrito que o QR, porque o UID é público e fixo: só vale para pulseira em uso por
+ * uma criança da MESMA empresa, em evento aberto, com limite de tentativas. O vínculo
+ * nasce 'pending' e a recepção aprova, como no QR.
+ */
+router.post('/bracelet/validate', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') {
+      return res.status(403).json({ error: 'Apenas usuários com perfil familiar podem vincular crianças' });
+    }
+
+    const attempt = braceletAttempts.hit(req.user.id);
+    if (!attempt.allowed) {
+      res.set('Retry-After', String(attempt.retryAfterSec));
+      return res.status(429).json({
+        error: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.',
+        codigo: 'TOO_MANY_ATTEMPTS',
+        retryAfterSec: attempt.retryAfterSec,
+      });
+    }
+
+    const parsed = parseBraceletUid(req.body?.uid);
+    if (!parsed.uid) {
+      return res.status(400).json({ error: parsed.error, codigo: parsed.codigo });
+    }
+
+    // A busca já filtra pela empresa do responsável: pulseira de outra empresa é
+    // indistinguível de pulseira que não existe.
+    const row = await queryOne(
+      `SELECT p.codigo, p.status, p.criancaId, p.empresaId,
+              c.nome, c.apelido, c.idade, c.eventoId,
+              e.nome AS evento_nome, e.status AS evento_status
+       FROM pulseira p
+       JOIN crianca c ON c.criancaId = p.criancaId
+       LEFT JOIN evento e ON e.eventoId = c.eventoId
+       WHERE ${uidSqlExpression('p.codigo')} = @uid
+         AND LOWER(p.empresaId) = LOWER(@empresaId)`,
+      { uid: parsed.uid, empresaId: req.user.empresaId }
+    );
+
+    const decision = checkBraceletLinkable(row);
+    if (!decision.ok) {
+      return res.status(404).json({ error: decision.error, codigo: decision.codigo });
+    }
+
+    const { v4: uuidv4 } = require('uuid');
+
+    await withTransaction(async (tx) => {
+      const vinculacaoExistente = await tx.queryOne(
+        `SELECT vinculoId, status FROM vinculoFamiliar
+         WHERE loginId = @loginId
+           AND criancaId = @criancaId
+         FOR UPDATE`,
+        { loginId: req.user.id, criancaId: row.criancaId }
+      );
+
+      if (vinculacaoExistente) {
+        if (vinculacaoExistente.status === 'inactive') {
+          await tx.query(
+            `UPDATE vinculoFamiliar SET status = 'pending' WHERE vinculoId = @linkId`,
+            { linkId: vinculacaoExistente.id }
+          );
+        } else {
+          throw new Error('ALREADY_LINKED');
+        }
+      } else {
+        await tx.query(
+          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento)
+           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
+          {
+            linkId: uuidv4(),
+            loginId: req.user.id,
+            criancaId: row.criancaId,
+            empresaId: row.empresaId,
+          }
+        );
+      }
+    });
+
+    console.log(`✅ [FAMILY-LINKING] ${req.user.email} vinculado (pendente) à criança ${row.nickname || row.name} pela pulseira`);
+
+    res.json({
+      success: true,
+      message: 'Criança vinculada com sucesso!',
+      linkedChild: {
+        id: row.criancaId,
+        name: row.nome,
+        nickname: row.apelido,
+        age: row.age,
+        evento: row.evento_nome,
+      },
+    });
+  } catch (error) {
+    if (error.message === 'ALREADY_LINKED') {
+      return res.status(400).json({
+        error: 'Você já está vinculado a esta criança',
+        codigo: 'ALREADY_LINKED',
+      });
+    }
+
+    console.error('❌ ERRO no vínculo por pulseira:', error.message);
+    res.status(500).json({ error: 'Erro ao vincular pela pulseira' });
   }
 });
 
@@ -215,11 +333,11 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
       console.log(`   ❌ Vínculo não encontrado`);
       return res.status(404).json({
         error: 'Criança não vinculada a sua família',
-        code: 'LINK_NOT_FOUND'
+        codigo: 'LINK_NOT_FOUND'
       });
     }
 
-    console.log(`   ✅ Vínculo encontrado: ${link.id}`);
+    console.log(`   ✅ Vínculo encontrado: ${link.vinculoId}`);
     console.log(`   📝 Status atual: ${link.status}`);
 
     // Desvincullar = marcar como 'inactive'
@@ -227,7 +345,7 @@ router.delete('/children/:childId/unlink', verifyToken, async (req, res) => {
       `UPDATE vinculoFamiliar
        SET status = 'inactive'
        WHERE vinculoId = @linkId`,
-      { linkId: link.id }
+      { linkId: link.vinculoId }
     );
 
     console.log(`   ✅ Criança desvinculada com sucesso`);

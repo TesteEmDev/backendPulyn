@@ -15,12 +15,12 @@ async function getActiveEvent(empresaId) {
     { empresaId }
   );
 
-  if (!selected?.evento_id || !selected.evento_name || !isOpenEvent({ status: selected.evento_status })) {
+  if (!selected?.eventoId || !selected.evento_name || !isOpenEvent({ status: selected.evento_status })) {
     return null;
   }
 
   return {
-    id: selected.evento_id,
+    id: selected.eventoId,
     name: selected.evento_name,
     status: selected.evento_status,
   };
@@ -31,7 +31,7 @@ async function setActiveEvent(empresaId, eventoId) {
   if (eventoId) {
     event = await queryOne(
       `SELECT eventoId, nome, status
-       FROM evento
+       FROM "evento"
        WHERE eventoId = @eventoId AND empresaId = @empresaId`,
       { eventoId, empresaId }
     );
@@ -49,13 +49,13 @@ async function setActiveEvent(empresaId, eventoId) {
       `UPDATE controleEventoEmpresa
        SET eventoId = @eventoId, atualizadoEm = GETDATE()
        WHERE empresaId = @empresaId`,
-      { empresaId, eventoId: event?.id || null }
+      { empresaId, eventoId: event?.eventoId || null }
     );
   } else {
     await query(
       `INSERT INTO controleEventoEmpresa (empresaId, eventoId, atualizadoEm)
        VALUES (@empresaId, @eventoId, GETDATE())`,
-      { empresaId, eventoId: event?.id || null }
+      { empresaId, eventoId: event?.eventoId || null }
     );
   }
 

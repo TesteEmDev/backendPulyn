@@ -2,9 +2,9 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { planRandomDistribution } = require('../utils/teamDistribution');
 
-const kids = (n, timeId = null) => Array.from({ length: n }, (_, i) => ({ id: `c${i}`, time_id: timeId }));
+const kids = (n, timeId = null) => Array.from({ length: n }, (_, i) => ({ criancaId: `c${i}`, timeId: timeId }));
 const sizes = (children, assignments, teamIds) => {
-  const byChild = new Map(children.map(c => [c.id, c.time_id]));
+  const byChild = new Map(children.map(c => [c.criancaId, c.timeId]));
   assignments.forEach(a => byChild.set(a.criancaId, a.timeId));
   return teamIds.map(id => [...byChild.values()].filter(t => t === id).length);
 };
@@ -19,7 +19,7 @@ test('modo unassigned distribui os sem time de forma equilibrada', () => {
 
 test('modo unassigned não mexe em quem já tem time e compensa o time maior', () => {
   const children = [
-    { id: 'x1', time_id: 'A' }, { id: 'x2', time_id: 'A' }, { id: 'x3', time_id: 'A' },
+    { criancaId: 'x1', timeId: 'A' }, { criancaId: 'x2', timeId: 'A' }, { criancaId: 'x3', timeId: 'A' },
     ...kids(3),
   ];
   const result = planRandomDistribution({ children, teamIds: ['A', 'B'] });
@@ -28,7 +28,7 @@ test('modo unassigned não mexe em quem já tem time e compensa o time maior', (
 });
 
 test('criança com time de outro evento é tratada como sem time', () => {
-  const children = [{ id: 'c1', time_id: 'OUTRO' }];
+  const children = [{ criancaId: 'c1', timeId: 'OUTRO' }];
   const result = planRandomDistribution({ children, teamIds: ['A', 'B'] });
   assert.equal(result.length, 1);
   assert.ok(['A', 'B'].includes(result[0].timeId));

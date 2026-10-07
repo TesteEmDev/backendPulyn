@@ -7,7 +7,7 @@ const {
   getMonsterEventStatus,
 } = require('../utils/monster');
 
-router.get('/checkpoints/:checkpointId/status', async (req, res) => {
+router.get('/pontoVerificacao/:checkpointId/status', async (req, res) => {
   try {
     res.json(await getCheckpointMonsterStatus(req.params.checkpointId));
   } catch (err) {
@@ -16,7 +16,7 @@ router.get('/checkpoints/:checkpointId/status', async (req, res) => {
   }
 });
 
-router.get('/eventos/:eventoId/status', verifyToken, async (req, res) => {
+router.get('/evento/:eventoId/status', verifyToken, async (req, res) => {
   try {
     const evento = await queryOne(
       'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
@@ -24,10 +24,10 @@ router.get('/eventos/:eventoId/status', verifyToken, async (req, res) => {
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isMaster(req)
-      && String(evento.empresa_id).trim().toLowerCase() !== String(req.user.empresa_id).trim().toLowerCase()) {
+      && String(evento.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
-    res.json(await getMonsterEventStatus(evento.id));
+    res.json(await getMonsterEventStatus(evento.eventoId));
   } catch (err) {
     console.error('❌ Erro ao consultar status do Caça ao Monstro:', err);
     res.status(500).json({ error: err.message });

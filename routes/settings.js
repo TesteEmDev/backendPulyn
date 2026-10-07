@@ -1,7 +1,7 @@
-// routes/settings.js - Configurações por empresa (buffet)
+// routes/configuracao.js - Configurações por empresa (buffet)
 //
-// Cada buffet guarda as próprias configurações em linhas (empresa_id, setting_key).
-// As linhas antigas sem empresa_id (seed original) não são lidas nem alteradas aqui.
+// Cada buffet guarda as próprias configurações em linhas (empresaId, chave).
+// As linhas antigas sem empresaId (seed original) não são lidas nem alteradas aqui.
 const express = require('express');
 const router = express.Router();
 const { allQuery, withTransaction } = require('../database');
@@ -10,10 +10,10 @@ const { parseSettingsPayload, KEY_PATTERN } = require('../utils/settingsRules');
 
 const WRITE_ROLES = ['admin', 'master'];
 
-// Empresa alvo: a do token; o master pode consultar/alterar outra com ?empresa_id=.
+// Empresa alvo: a do token; o master pode consultar/alterar outra com ?empresaId=.
 function resolveEmpresaId(req) {
-  const requested = req.query?.empresa_id;
-  return isMaster(req) && requested ? String(requested) : req.user.empresa_id;
+  const requested = req.query?.empresaId;
+  return isMaster(req) && requested ? String(requested) : req.user.empresaId;
 }
 
 // Atualiza a linha da empresa e cria se ainda não existir.
@@ -38,11 +38,11 @@ router.get('/', verifyToken, async (req, res) => {
   try {
     const empresaId = resolveEmpresaId(req);
     if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
-    const settings = await allQuery(
+    const configuracao = await allQuery(
       'SELECT chave, valor, empresaId FROM configuracao WHERE empresaId = @empresaId ORDER BY chave',
       { empresaId }
     );
-    res.json(settings || []);
+    res.json(configuracao || []);
   } catch (err) {
     console.error('❌ Erro ao buscar configurações:', err);
     res.status(500).json({ error: err.message });

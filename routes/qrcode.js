@@ -57,7 +57,7 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Criança não encontrada' });
     }
 
-    console.log(`✅ [QRCode] Criança encontrada: ${crianca.name}`);
+    console.log(`✅ [QRCode] Criança encontrada: ${crianca.nome}`);
 
     // ✅ Usar a função que detecta URL automaticamente
     const baseUrl = getBaseUrl();
@@ -70,12 +70,12 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO codigoVinculoFamiliar (criancaId, eventoId, empresaId, valorQrCode, urlRastreio, criadoEm, expiraEm, status)
+      `INSERT INTO "codigoVinculoFamiliar" (criancaId, eventoId, empresaId, valorQrCode, urlRastreio, criadoEm, expiraEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,
-        eventoId: crianca.evento_id,
-        empresaId: crianca.empresa_id,
+        eventoId: crianca.eventoId,
+        empresaId: crianca.empresaId,
         qrCode,
         trackingUrl
       }
@@ -88,9 +88,9 @@ router.get('/generate/:criancaId', verifyToken, async (req, res) => {
       qrCodeDataUrl: `data:image/png;base64,${image.toString('base64')}`,
       qrCode,
       trackingUrl,
-      criancaId: crianca.id,
-      criancaNome: crianca.name,
-      eventoId: crianca.evento_id,
+      criancaId: crianca.criancaId,
+      criancaNome: crianca.nome,
+      eventoId: crianca.eventoId,
     });
   } catch (error) {
     console.error('❌ [QRCode] Erro ao gerar QR Code:', error);
@@ -123,7 +123,7 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Criança não encontrada' });
     }
 
-    console.log(`✅ [QRCode] Criança encontrada: ${crianca.name}`);
+    console.log(`✅ [QRCode] Criança encontrada: ${crianca.nome}`);
 
     // ✅ Usar a função que detecta URL automaticamente
     const baseUrl = getBaseUrl();
@@ -136,12 +136,12 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
 
     // Salvar código QR no banco para validação posterior
     await query(
-      `INSERT INTO codigoVinculoFamiliar (criancaId, eventoId, empresaId, valorQrCode, urlRastreio, criadoEm, expiraEm, status)
+      `INSERT INTO "codigoVinculoFamiliar" (criancaId, eventoId, empresaId, valorQrCode, urlRastreio, criadoEm, expiraEm, status)
        VALUES (@criancaId, @eventoId, @empresaId, @qrCode, @trackingUrl, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '24 hours', 'active')`,
       {
         criancaId,
-        eventoId: crianca.evento_id,
-        empresaId: crianca.empresa_id,
+        eventoId: crianca.eventoId,
+        empresaId: crianca.empresaId,
         qrCode,
         trackingUrl
       }
@@ -154,9 +154,9 @@ router.get('/:criancaId', verifyToken, async (req, res) => {
       qrCodeDataUrl: `data:image/png;base64,${image.toString('base64')}`,
       qrCode,
       trackingUrl,
-      criancaId: crianca.id,
-      criancaNome: crianca.name,
-      eventoId: crianca.evento_id,
+      criancaId: crianca.criancaId,
+      criancaNome: crianca.nome,
+      eventoId: crianca.eventoId,
     });
   } catch (error) {
     console.error('❌ [QRCode] Erro ao buscar QR Code:', error);

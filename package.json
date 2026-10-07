@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:local": "node start-local.js",
     "migrate": "node run-migration.js",
     "migrate:all": "node run-all-migrations.js",
     "migrate:004": "node run-single-migration.js 004",
@@ -30,5 +31,8 @@
     "tedious": "^16.6.0",
     "uuid": "^14.0.0",
     "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "supabase": "^2.119.0"
   }
 }

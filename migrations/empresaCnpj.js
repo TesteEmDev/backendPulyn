@@ -8,7 +8,7 @@ async function ensureEmpresaCnpjSchema() {
     await query('ALTER TABLE empresa ADD COLUMN IF NOT EXISTS cnpj varchar(14)');
   } else {
     await query(`
-      IF COL_LENGTH('dbo.empresas', 'cnpj') IS NULL
+      IF COL_LENGTH('dbo.empresa', 'cnpj') IS NULL
       BEGIN
         ALTER TABLE empresa ADD cnpj varchar(14) NULL
       END

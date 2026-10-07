@@ -14,23 +14,23 @@ router.use(verifyToken, (req, res, next) => {
 
 // ==================== LISTAR USUÁRIOS DA EMPRESA ====================
 
-// GET /api/logins/empresa/:empresa_id
-router.get('/empresa/:empresa_id', requireRole('admin', 'master'), async (req, res) => {
+// GET /api/logins/empresa/:empresaId
+router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, res) => {
   try {
-    const { empresa_id } = req.params;
-    const user_empresa_id = req.user.empresa_id;
+    const { empresaId } = req.params;
+    const user_empresa_id = req.user.empresaId;
 
     // Verificar permissão
-    if (!isMaster(req) && empresa_id !== user_empresa_id) {
+    if (!isMaster(req) && empresaId !== user_empresa_id) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
     const users = await allQuery(`
-      SELECT loginId, email, perfil, status, dataCriacao as created_at
+      SELECT loginId, email, perfil, status, dataCriacao as criadoEm
       FROM login
-      WHERE empresaId = @empresa_id
+      WHERE empresaId = @empresaId
       ORDER BY dataCriacao DESC
-    `, { empresa_id });
+    `, { empresaId });
 
     res.json(users);
   } catch (err) {
@@ -44,17 +44,17 @@ router.get('/empresa/:empresa_id', requireRole('admin', 'master'), async (req, r
 // POST /api/logins
 router.post('/', requireRole('admin', 'master'), async (req, res) => {
   try {
-    const { password, role } = req.body;
+    const { senha, role } = req.body;
     let email = typeof req.body.email === 'string' ? req.body.email.trim() : req.body.email;
-    const empresa_id = req.user.empresa_id;
+    const empresaId = req.user.empresaId;
     const user_role = req.user.role;
 
     // Validações
-    if (!email || !password || !role) {
+    if (!email || !senha || !role) {
       return res.status(400).json({ error: 'Email, senha e role são obrigatórios' });
     }
 
-    if (password.length < 6) {
+    if (senha.length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
 
@@ -66,7 +66,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     // O e-mail dos usuários de um buffet segue o nome da unidade: usuario@nomedaunidade.com.
     // (O master cria usuários da própria conta e não segue essa regra.)
     if (!isMaster(req)) {
-      const profile = await loadUnitProfile(database, empresa_id);
+      const profile = await loadUnitProfile(database, empresaId);
       const checked = checkUnitEmail(email, profile?.name);
       if (checked.error) return res.status(400).json({ error: checked.error });
       email = checked.email;
@@ -89,31 +89,31 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     }
 
     // Hash da senha (base64 - em produção usar bcrypt)
-    const hashedPassword = Buffer.from(password).toString('base64');
+    const hashedPassword = Buffer.from(senha).toString('base64');
 
-    // Criar usuário com empresa_id do token
+    // Criar usuário com empresaId do token
     const id = require('crypto').randomUUID();
     await query(
       `INSERT INTO login (loginId, email, senha, perfil, empresaId, status, dataCriacao)
-       VALUES (@id, @email, @password, @role, @empresa_id, @status, GETDATE())`,
+       VALUES (@id, @email, @senha, @perfil, @empresaId, @status, GETDATE())`,
       {
         id,
         email,
-        password: hashedPassword,
-        role,
-        empresa_id,
+        senha: hashedPassword,
+        perfil: role,
+        empresaId,
         status: 'active'
       }
     );
 
-    console.log(`✅ Usuário criado: ${email} (${role}) para empresa ${empresa_id}`);
+    console.log(`✅ Usuário criado: ${email} (${role}) para empresa ${empresaId}`);
 
     res.json({
       id,
       email,
       role,
       status: 'active',
-      created_at: new Date().toISOString()
+      criadoEm: new Date().toISOString()
     });
 
   } catch (err) {
@@ -128,7 +128,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
   try {
     const { id } = req.params;
-    const user_empresa_id = req.user.empresa_id;
+    const user_empresa_id = req.user.empresaId;
 
     // Buscar usuário
     const user = await queryOne(
@@ -141,16 +141,16 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
     }
 
     // Verificar permissão
-    if (!isMaster(req) && user.empresa_id !== user_empresa_id) {
+    if (!isMaster(req) && user.empresaId !== user_empresa_id) {
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
     // Não deixar deletar o último admin
-    if (user.role === 'admin') {
+    if (user.perfil === 'admin') {
       const adminCount = await queryOne(`
         SELECT COUNT(*) as count FROM login
-        WHERE empresaId = @empresa_id AND perfil = 'admin' AND status = 'active'
-      `, { empresa_id: user.empresa_id });
+        WHERE empresaId = @empresaId AND perfil = 'admin' AND status = 'active'
+      `, { empresaId: user.empresaId });
 
       if (adminCount.count <= 1) {
         return res.status(400).json({ error: 'Não é possível deletar o único admin' });
@@ -162,8 +162,8 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
       `UPDATE login 
        SET status = @status, dataAtualizacao = GETDATE() 
        WHERE loginId = @id 
-       AND empresaId = @empresa_id`,
-      { id, status: 'inactive', empresa_id: user.empresa_id }
+       AND empresaId = @empresaId`,
+      { id, status: 'inactive', empresaId: user.empresaId }
     );
 
     console.log(`✅ Usuário deletado: ${id}`);

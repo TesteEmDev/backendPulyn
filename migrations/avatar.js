@@ -9,7 +9,7 @@ async function ensureAvatarSchema() {
   }
 
   await query(`
-    IF COL_LENGTH('dbo.criancas', 'avatar') IS NOT NULL
+    IF COL_LENGTH('dbo.crianca', 'avatar') IS NOT NULL
     BEGIN
       ALTER TABLE dbo.crianca ALTER COLUMN avatar NVARCHAR(64) NULL
     END

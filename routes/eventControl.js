@@ -9,7 +9,7 @@ router.use(verifyToken, requireRole(VIEW_ROLES));
 
 router.get('/active', async (req, res) => {
   try {
-    const event = await getActiveEvent(req.user.empresa_id);
+    const event = await getActiveEvent(req.user.empresaId);
     res.json({ event });
   } catch (error) {
     console.error('❌ Event control: erro ao carregar evento ativo:', error.message);
@@ -20,7 +20,7 @@ router.get('/active', async (req, res) => {
 router.put('/active', requireRole('reception'), async (req, res) => {
   try {
     const eventId = req.body?.eventId ? String(req.body.eventId).trim() : null;
-    const result = await setActiveEvent(req.user.empresa_id, eventId);
+    const result = await setActiveEvent(req.user.empresaId, eventId);
     if (result.error) return res.status(result.status).json({ error: result.error });
 
     const payload = {
@@ -29,7 +29,7 @@ router.put('/active', requireRole('reception'), async (req, res) => {
       eventStatus: result.event?.status || null,
       updatedAt: new Date().toISOString(),
     };
-    if (global.broadcastToCompany) global.broadcastToCompany(req.user.empresa_id, { type: 'EVENT_SELECTED', payload });
+    if (global.broadcastToCompany) global.broadcastToCompany(req.user.empresaId, { type: 'EVENT_SELECTED', payload });
     res.json({ event: result.event || null });
   } catch (error) {
     console.error('❌ Event control: erro ao selecionar evento:', error.message);
