@@ -6,15 +6,15 @@ const router = express.Router();
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { allQuery, queryOne } = require('../database');
 const {
-  initializeCheckpointEstados,
-  getCheckpointEstados,
-  updateCheckpointEstado,
-  getCheckpointEstado,
-  initializeZoneEstados,
-  getZoneEstados,
-  updateZoneEstado,
-  getZoneEstado,
-  clearPartidaEstados,
+  initializeCheckpointStates,
+  getCheckpointStates,
+  updateCheckpointState,
+  getCheckpointState,
+  initializeZoneStates,
+  getZoneStates,
+  updateZoneState,
+  getZoneState,
+  clearPartidaStates,
 } = require('../utils/zoneConquestStateManager');
 
 // ==================== CHECKPOINT Estado ====================
@@ -31,7 +31,7 @@ router.get(
     try {
       const { eventoId, partidaId } = req.params;
 
-      const estados = await getCheckpointEstados(partidaId, eventoId);
+      const estados = await getCheckpointStates(partidaId, eventoId);
 
       res.json({
         success: true,
@@ -60,7 +60,7 @@ router.get(
     try {
       const { eventoId, checkpointId, partidaId } = req.params;
 
-      const estado = await getCheckpointEstado(checkpointId, partidaId);
+      const estado = await getCheckpointState(checkpointId, partidaId);
 
       if (!estado) {
         return res.status(404).json({
@@ -86,7 +86,7 @@ router.get(
 /**
  * PUT /api/zone-conquest/checkpoint-estado/:estadoId
  * Atualiza o estado de um checkpoint
- * Body: { current_owner_id?, protected_until?, ultimoConquistadoEm?, conquest_count? }
+ * Body: { donoAtualId?, protegidoAte?, ultimoConquistadoEm?, totalConquistas? }
  */
 router.put(
   '/checkpoint-estado/:estadoId',
@@ -97,7 +97,7 @@ router.put(
       const { estadoId } = req.params;
       const updates = req.body;
 
-      await updateCheckpointEstado(estadoId, updates);
+      await updateCheckpointState(estadoId, updates);
 
       res.json({
         success: true,
@@ -128,7 +128,7 @@ router.get(
       const { eventoId } = req.params;
 
       const partidas = await allQuery(
-        `SELECT id, status, numeroRonda, current_team_id, iniciadoEm, finalizadoEm
+        `SELECT id, status, numeroRonda, timeAtualId, iniciadoEm, finalizadoEm
          FROM "zonaConquistaPartidaTime"
          WHERE LOWER(eventoId) = LOWER(@eventoId)
          ORDER BY iniciadoEm DESC`,
@@ -163,7 +163,7 @@ router.get(
       const { eventoId } = req.params;
 
       const partidas = await allQuery(
-        `SELECT id, status, version, iniciadoEm, finalizadoEm
+        `SELECT id, status, versao, iniciadoEm, finalizadoEm
          FROM "zonaConquistaPartidaIndividual"
          WHERE LOWER(eventoId) = LOWER(@eventoId)
          ORDER BY iniciadoEm DESC`,
@@ -194,7 +194,7 @@ router.get(
     try {
       const { eventoId, partidaId } = req.params;
 
-      const estados = await getZoneEstados(partidaId, eventoId);
+      const estados = await getZoneStates(partidaId, eventoId);
 
       res.json({
         success: true,
@@ -223,7 +223,7 @@ router.get(
     try {
       const { eventoId, zoneId, partidaId } = req.params;
 
-      const estado = await getZoneEstado(zoneId, partidaId);
+      const estado = await getZoneState(zoneId, partidaId);
 
       if (!estado) {
         return res.status(404).json({
@@ -249,7 +249,7 @@ router.get(
 /**
  * PUT /api/zone-conquest/zone-estado/:estadoId
  * Atualiza o estado de uma zona
- * Body: { current_owner_id?, is_disputed?, checkpoints_owned?, last_updated_at? }
+ * Body: { donoAtualId?, disputada?, checkpointsConquistados?, ultimaAtualizacaoEm? }
  */
 router.put(
   '/zone-estado/:estadoId',
@@ -260,7 +260,7 @@ router.put(
       const { estadoId } = req.params;
       const updates = req.body;
 
-      await updateZoneEstado(estadoId, updates);
+      await updateZoneState(estadoId, updates);
 
       res.json({
         success: true,
@@ -301,7 +301,7 @@ router.post(
       }
 
       // Inicializar pontoVerificacao
-      const cpCount = await initializeCheckpointEstados(
+      const cpCount = await initializeCheckpointStates(
         partidaId,
         empresaId,
         eventoId,
@@ -309,7 +309,7 @@ router.post(
       );
 
       // Inicializar zonas
-      const zoneCount = await initializeZoneEstados(
+      const zoneCount = await initializeZoneStates(
         partidaId,
         empresaId,
         eventoId,
@@ -322,7 +322,7 @@ router.post(
         data: {
           checkpointsInitialized: cpCount,
           zonesInitialized: zoneCount,
-          gameTipo,
+          gameType,
         },
       });
     } catch (error) {
@@ -348,7 +348,7 @@ router.delete(
     try {
       const { eventoId, partidaId } = req.params;
 
-      await clearPartidaEstados(partidaId, eventoId);
+      await clearPartidaStates(partidaId, eventoId);
 
       res.json({
         success: true,

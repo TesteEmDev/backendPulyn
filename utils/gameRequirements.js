@@ -24,7 +24,7 @@ const GAME_LABELS = {
 
 // Mesma leitura do tipo que as rotas de início usam: brincadeiras.type é a fonte da verdade.
 function resolveGameKind(game) {
-  const type = String(game?.type || game?.game_type || '').trim().toLowerCase();
+  const type = String(game?.tipo || game?.tipoJogo || '').trim().toLowerCase();
   if (type === 'monster_hunt') return 'monster_hunt';
   if (type === 'treasure_hunt') return 'treasure_hunt';
   if (type === 'individual' || type === 'zone_conquest_individual') return 'zone_individual';
@@ -54,22 +54,22 @@ async function checkGameStartRequirements(eventoId, game) {
   const row = game && typeof game === 'object' && 'type' in game && '"pontoVerificacao"' in game
     ? game
     : await queryOne(
-      'SELECT id, name, type, game_type, checkpoints FROM "brincadeira" WHERE LOWER(id) = LOWER(@id)',
-      { id: typeof game === 'object' ? game?.id : game }
+      'SELECT brincadeiraId, nome, tipo, tipoJogo, checkpoints FROM "brincadeira" WHERE LOWER(brincadeiraId) = LOWER(@id)',
+      { id: typeof game === 'object' ? game?.brincadeiraId : game }
     );
 
   const kind = resolveGameKind(row);
   const required = MIN_CHECKPOINTS[kind];
 
   const online = await allQuery(
-    `SELECT id FROM "pontoVerificacao"
-     WHERE LOWER(evento_id) = LOWER(@eventoId)
-       AND LOWER(COALESCE(checkpoint_purpose, 'game')) <> 'reception'
+    `SELECT checkpointId FROM "pontoVerificacao"
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
+       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
        AND LOWER(COALESCE(status, 'offline')) = 'online'`,
     { eventoId }
   );
 
-  let ids = online.map((checkpoint) => String(checkpoint.id).trim().toLowerCase());
+  let ids = online.map((checkpoint) => String(checkpoint.checkpointId).trim().toLowerCase());
   const configured = kind === 'treasure_hunt' ? parseConfiguredIds(row?.checkpoints) : [];
   const scopedToGame = configured.length > 0;
   if (scopedToGame) {

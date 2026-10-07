@@ -8,20 +8,20 @@ async function ensureGameWinnerBonusesSchema() {
 
   if (isPostgres) {
     await query(`
-      CREATE TABLE IF NOT EXISTS game_winner_bonuses (
+      CREATE TABLE IF NOT EXISTS bonusVencedorJogo (
         id varchar(36) PRIMARY KEY,
-        empresa_id varchar(36),
-        evento_id varchar(36) NOT NULL,
-        partida_id varchar(36) NOT NULL,
-        game_type varchar(50) NOT NULL,
-        time_id varchar(36) NOT NULL,
-        points_per_member integer NOT NULL DEFAULT 0,
-        members_awarded integer NOT NULL DEFAULT 0,
-        created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+        empresaId varchar(36),
+        eventoId varchar(36) NOT NULL,
+        partidaId varchar(36) NOT NULL,
+        tipoJogo varchar(50) NOT NULL,
+        timeId varchar(36) NOT NULL,
+        pontosPorMembro integer NOT NULL DEFAULT 0,
+        membrosPremiados integer NOT NULL DEFAULT 0,
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
-    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_game_winner_bonus_partida ON game_winner_bonuses (partida_id, game_type)');
-    await query('CREATE INDEX IF NOT EXISTS idx_game_winner_bonuses_evento ON game_winner_bonuses (evento_id)');
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_game_winner_bonus_partida ON bonusVencedorJogo (partidaId, tipoJogo)');
+    await query('CREATE INDEX IF NOT EXISTS idx_game_winner_bonuses_evento ON bonusVencedorJogo (eventoId)');
     return;
   }
 
@@ -30,11 +30,11 @@ async function ensureGameWinnerBonusesSchema() {
     BEGIN
       CREATE TABLE game_winner_bonuses (
         id NVARCHAR(36) NOT NULL PRIMARY KEY,
-        empresa_id NVARCHAR(36) NULL,
-        evento_id NVARCHAR(36) NOT NULL,
-        partida_id NVARCHAR(36) NOT NULL,
-        game_type NVARCHAR(50) NOT NULL,
-        time_id NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        partidaId NVARCHAR(36) NOT NULL,
+        tipoJogo NVARCHAR(50) NOT NULL,
+        timeId NVARCHAR(36) NOT NULL,
         points_per_member INT NOT NULL DEFAULT 0,
         members_awarded INT NOT NULL DEFAULT 0,
         created_at DATETIME2 NOT NULL DEFAULT SYSDATETIME()
@@ -43,7 +43,7 @@ async function ensureGameWinnerBonusesSchema() {
   `);
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uq_game_winner_bonus_partida' AND object_id = OBJECT_ID('dbo.game_winner_bonuses'))
-      CREATE UNIQUE INDEX uq_game_winner_bonus_partida ON game_winner_bonuses (partida_id, game_type)
+      CREATE UNIQUE INDEX uq_game_winner_bonus_partida ON game_winner_bonuses (partidaId, tipoJogo)
   `);
 }
 

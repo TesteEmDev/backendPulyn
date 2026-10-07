@@ -6,8 +6,8 @@ async function ensureCheckpointMapPositionSchema() {
   if (isPostgres) {
     await query(`
       ALTER TABLE "pontoVerificacao"
-      ADD COLUMN IF NOT EXISTS map_x integer,
-      ADD COLUMN IF NOT EXISTS map_y integer
+      ADD COLUMN IF NOT EXISTS mapaX integer,
+      ADD COLUMN IF NOT EXISTS mapaY integer
     `);
     return;
   }

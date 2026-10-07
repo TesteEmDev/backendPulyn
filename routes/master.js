@@ -21,7 +21,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     // Eventos em andamento (com empresaId e não da Master)
     const activeEvents = await queryOne(`
       SELECT COUNT(*) as count FROM evento e
-      LEFT JOIN empresa emp ON e.empresaId = emp.id
+      LEFT JOIN empresa emp ON e.empresaId = emp.empresaId
       WHERE (e.status = 'active' OR e.status = 'scheduled')
         AND e.empresaId IS NOT NULL
         AND emp.nome != 'Master Admin'
@@ -31,9 +31,9 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const onlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
       FROM pontoVerificacao c
-      LEFT JOIN empresa emp ON c.empresaId = emp.id
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE c.status = 'online'
-        AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
+        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
         AND emp.nome != 'Master Admin'
     `);
     
@@ -41,7 +41,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const activeChildren = await queryOne(`
       SELECT COUNT(*) as count
       FROM crianca c
-      LEFT JOIN empresa emp ON c.empresaId = emp.id
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE CAST(GETDATE() AS DATE) = CAST(c.criadoEm AS DATE)
         AND emp.nome != 'Master Admin'
     `);
@@ -50,9 +50,9 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     const offlineCheckpoints = await queryOne(`
       SELECT COUNT(*) as count
       FROM pontoVerificacao c
-      LEFT JOIN empresa emp ON c.empresaId = emp.id
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE (c.status = 'offline' OR c.status IS NULL)
-        AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
+        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
         AND emp.nome != 'Master Admin'
     `);
     
@@ -118,16 +118,16 @@ router.get('/active-events', verifyToken, async (req, res) => {
     // minúsculo do Postgres, então childrenCount chegava undefined).
     const rows = await allQuery(`
       SELECT TOP 10
-        e.id,
+        e.eventoId,
         e.nome,
         e.empresaId,
         e2.nome as cliente,
-        (SELECT COUNT(*) FROM crianca WHERE eventoId = e.id) as children_count,
+        (SELECT COUNT(*) FROM crianca WHERE eventoId = e.eventoId) as children_count,
         e.status,
         e.data as event_date,
         e.criadoEm
       FROM evento e
-      LEFT JOIN empresa e2 ON e.empresaId = e2.id
+      LEFT JOIN empresa e2 ON e.empresaId = e2.empresaId
       WHERE e.status IN ('active', 'scheduled')
         AND e.empresaId IS NOT NULL
         AND e2.nome != 'Master Admin'
@@ -138,7 +138,7 @@ router.get('/active-events', verifyToken, async (req, res) => {
     const events = rows.map((e) => {
       const startedAt = new Date(e.criadoEm || e.event_date).getTime();
       return {
-        id: e.id,
+        id: e.eventoId,
         name: e.nome,
         clientId: e.empresaId,
         cliente: e.cliente,
@@ -174,22 +174,22 @@ router.get('/alerts', verifyToken, async (req, res) => {
     // SQL Server e Postgres).
     const offlineCheckpoints = await allQuery(`
       SELECT TOP 5
-        c.id,
+        c.checkpointId,
         c.nome,
-        c.zone,
+        c.zona,
         c.ultimoVisto,
         emp.nome as empresa_nome
       FROM pontoVerificacao c
-      LEFT JOIN empresa emp ON c.empresaId = emp.id
+      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE c.status = 'offline'
-        AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
+        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
       ORDER BY c.ultimoVisto DESC
     `);
 
     const alerts = offlineCheckpoints.map((cp) => ({
-      id: cp.id,
+      id: cp.checkpointId,
       type: 'offline',
-      message: `Checkpoint "${cp.name || cp.id}" offline${cp.zone ? ` (${cp.zone})` : ''}`,
+      message: `Checkpoint "${cp.nome || cp.checkpointId}" offline${cp.zona ? ` (${cp.zona})` : ''}`,
       cliente: cp.empresa_nome || 'Sem empresa',
       time: cp.ultimoVisto
         ? new Date(cp.ultimoVisto).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })

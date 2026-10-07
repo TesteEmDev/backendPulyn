@@ -13,18 +13,18 @@ router.get('/', verifyToken, async (req, res) => {
     if (isMaster(req)) {
       // Master vê todas as pulseira (exceto as da Master Admin)
       pulseira = await allQuery(`
-        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_nome, p.empresaId
+        SELECT p.codigo, p.status, p.criancaId, c.nome as crianca_nome, p.empresaId
         FROM pulseira p
-        LEFT JOIN crianca c ON p.criancaId = c.id
-        LEFT JOIN empresa e ON p.empresaId = e.id
+        LEFT JOIN crianca c ON p.criancaId = c.criancaId
+        LEFT JOIN empresa e ON p.empresaId = e.empresaId
         WHERE e.nome != 'Master Admin'
         ORDER BY p.codigo
       `);
     } else {
       pulseira = await allQuery(`
-        SELECT p.codigo, p.status, p.criancaId, c.name as crianca_nome, p.empresaId
+        SELECT p.codigo, p.status, p.criancaId, c.nome as crianca_nome, p.empresaId
         FROM pulseira p
-        LEFT JOIN crianca c ON p.criancaId = c.id
+        LEFT JOIN crianca c ON p.criancaId = c.criancaId
         WHERE p.empresaId = @empresaId
         ORDER BY p.codigo
       `, { empresaId });
@@ -101,7 +101,7 @@ router.put('/:codigo/status', verifyToken, async (req, res) => {
     if (status !== 'em_uso' && pulseira.criancaId) {
       await query(
         `UPDATE crianca SET codigoPulseira = NULL
-         WHERE id = @criancaId AND empresaId = @empresaId`,
+         WHERE criancaId = @criancaId AND empresaId = @empresaId`,
         { criancaId: pulseira.criancaId, empresaId: pulseira.empresaId }
       );
     }

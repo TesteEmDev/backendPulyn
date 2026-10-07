@@ -16,7 +16,7 @@ router.get('/evento/:eventoId/ranking/crianca', verifyToken, async (req, res) =>
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresaId FROM evento WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: eventoId }
     );
     
@@ -30,14 +30,14 @@ router.get('/evento/:eventoId/ranking/crianca', verifyToken, async (req, res) =>
     }
     
     const ranking = await allQuery(`
-      SELECT c.id, c.nome, c.nicknome, c.avatar, c.scores, 
+      SELECT c.criancaId, c.nome, c.apelido, c.avatar, c.pontos, 
              t.nome as time_nome, t.cor as time_color
       FROM crianca c
-      LEFT JOIN time t ON c.timeId = t.id
+      LEFT JOIN "time" t ON c.timeId = t.timeId
       WHERE c.eventoId = @eventoId 
         AND (c.empresaId = @empresaId OR @isMaster = 1)
         AND c.status = 'active'
-      ORDER BY c.scores DESC
+      ORDER BY c.pontos DESC
     `, { eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);
@@ -54,7 +54,7 @@ router.get('/evento/:eventoId/ranking/time', verifyToken, async (req, res) => {
     
     // ✅ Validar que o evento pertence à empresa do usuário
     const evento = await queryOne(
-      'SELECT id, empresaId FROM evento WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: eventoId }
     );
     
@@ -68,13 +68,13 @@ router.get('/evento/:eventoId/ranking/time', verifyToken, async (req, res) => {
     }
     
     const ranking = await allQuery(`
-      SELECT t.*, COUNT(c.id) as membros_count
-      FROM time t
-      LEFT JOIN crianca c ON c.timeId = t.id AND c.status = 'active'
+      SELECT t.*, COUNT(c.criancaId) as membros_count
+      FROM "time" t
+      LEFT JOIN crianca c ON c.timeId = t.timeId AND c.status = 'active'
       WHERE t.eventoId = @eventoId
         AND (t.empresaId = @empresaId OR @isMaster = 1)
-      GROUP BY t.id, t.nome, t.cor, t.points, t.criadoEm, t.eventoId, t.empresaId
-      ORDER BY t.points DESC
+      GROUP BY t.timeId, t.nome, t.cor, t.pontos, t.criadoEm, t.eventoId, t.empresaId
+      ORDER BY t.pontos DESC
     `, { eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
     res.json(ranking);

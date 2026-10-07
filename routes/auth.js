@@ -19,10 +19,10 @@ router.post('/login', async (req, res) => {
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.id, l.email, l.senha, l.status, l.perfil, l.nomeFamilia,
-              e.id as empresaId, e.nome as empresa_nome, e.[plano]
-       FROM logins l
-       JOIN empresa e ON l.empresaId = e.id
+      `SELECT l.loginId, l.email, l.senha, l.status, l.perfil, l.nomeFamilia,
+              e.empresaId as empresaId, e.nome as empresa_nome, e.[plano]
+       FROM login l
+       JOIN empresa e ON l.empresaId = e.empresaId
        WHERE LOWER(l.email) = LOWER(@email)`,
       { email: String(email).trim() }
     );
@@ -44,21 +44,21 @@ router.post('/login', async (req, res) => {
     }
 
     if (!VALID_ROLES.has(login.perfil)) {
-      console.error(`❌ Role inválido configurado para o usuário ${email}: ${login.role}`);
+      console.error(`❌ Role inválido configurado para o usuário ${email}: ${login.perfil}`);
       return res.status(403).json({ error: 'Perfil de usuário inválido. Procure o administrador.' });
     }
 
     // ✅ Login bem-sucedido
-    console.log(`✅ Login bem-sucedido: ${email} (role: ${login.role})`);
+    console.log(`✅ Login bem-sucedido: ${email} (role: ${login.perfil})`);
 
     // Gerar JWT com empresaId e role
     const token = jwt.sign(
       { 
-        id: login.id,
+        id: login.loginId,
         email: login.email,
         empresaId: login.empresaId,
         empresa_nome: login.empresa_nome,
-        role: login.role
+        role: login.perfil
       },
       JWT_SECRET,
       { expiresIn: '24h' }
@@ -66,8 +66,8 @@ router.post('/login', async (req, res) => {
 
     // Atualizar último acesso
     await query(
-      'UPDATE logins SET ultimoAcesso = GETDATE() WHERE id = @id',
-      { id: login.id }
+      'UPDATE login SET ultimoAcesso = GETDATE() WHERE loginId = @id',
+      { id: login.loginId }
     );
 
     // Definir redirect baseado no role
@@ -86,11 +86,11 @@ router.post('/login', async (req, res) => {
       success: true,
       token: token,
       user: {
-        id: login.id,
+        id: login.loginId,
         name: login.nomeFamilia || login.empresa_nome,
         email: login.email,
         role: login.perfil,
-        redirect: roleRedirects[login.role] || '/admin',
+        redirect: roleRedirects[login.perfil] || '/admin',
         plan: login.plano,
         empresaId: login.empresaId
       }
@@ -139,7 +139,7 @@ router.get('/check-email', async (req, res) => {
 
     // Verificar se email já existe
     const existingLogin = await queryOne(
-      'SELECT id FROM logins WHERE LOWER(email) = @email',
+      'SELECT loginId FROM login WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
 
@@ -169,7 +169,7 @@ router.post('/register', async (req, res) => {
   try {
     const { email, senha, nome, nomeFamilia } = req.body;
 
-    if (!email || !senha || !name) {
+    if (!email || !senha || !nome) {
       console.log('❌ Email, senha ou nome não fornecidos');
       return res.status(400).json({ error: 'Email, senha e nome são obrigatórios' });
     }
@@ -181,7 +181,7 @@ router.post('/register', async (req, res) => {
     
     // Verificar se email já existe
     const existingLogin = await queryOne(
-      'SELECT id, perfil, status FROM logins WHERE LOWER(email) = @email',
+      'SELECT loginId, perfil, status FROM login WHERE LOWER(email) = @email',
       { email: normalizedEmail }
     );
 
@@ -206,11 +206,11 @@ router.post('/register', async (req, res) => {
     const empresaId = crypto.randomUUID();
     
     await query(
-      `INSERT INTO empresa (id, nome, plano, status, dataCriacao)
+      `INSERT INTO empresa (empresaId, nome, plano, status, dataCriacao)
        VALUES (@id, @nome, 'family', 'active', GETDATE())`,
       { 
         id: empresaId, 
-        nome: `${name}'s Family` 
+        nome: `${nome}'s Family` 
       }
     );
 
@@ -221,14 +221,14 @@ router.post('/register', async (req, res) => {
     console.log('📝 Criando login para família...');
     
     await query(
-      `INSERT INTO logins (id, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
+      `INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
        VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', 'active', GETDATE())`,
       {
         id: loginId,
         empresaId: empresaId,
         email: normalizedEmail,
         senha: hashedPassword,
-        familyName: nomeFamilia || name
+        familyNome: nomeFamilia || nome
       }
     );
 
@@ -240,7 +240,7 @@ router.post('/register', async (req, res) => {
         id: loginId,
         email: normalizedEmail,
         empresaId: empresaId,
-        empresa_nome: `${name}'s Family`,
+        empresa_nome: `${nome}'s Family`,
         role: 'family'
       },
       JWT_SECRET,
@@ -260,7 +260,7 @@ router.post('/register', async (req, res) => {
         nomeFamilia: nomeFamilia || nome,
         role: 'family',
         empresaId: empresaId,
-        empresa_nome: `${name}'s Family`
+        empresa_nome: `${nome}'s Family`
       }
     });
 

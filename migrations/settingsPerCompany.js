@@ -2,7 +2,7 @@
 //
 // A tabela settings nasceu com UNIQUE(setting_key) global: só podia existir uma linha
 // por chave no sistema inteiro. Como cada buffet tem suas próprias configurações, a
-// unicidade passa a ser por (empresa_id, setting_key). As linhas antigas, sem empresa,
+// unicidade passa a ser por (empresaId, setting_key). As linhas antigas, sem empresa,
 // ficam como estão (são o seed original e deixam de ser lidas/alteradas pelas rotas).
 const { query, allQuery, DB_DRIVER } = require('../database');
 
@@ -13,24 +13,24 @@ async function ensureSettingsPerCompanySchema() {
     return;
   }
 
-  await query('ALTER TABLE settings ADD COLUMN IF NOT EXISTS empresa_id text');
+  await query('ALTER TABLE configuracao ADD COLUMN IF NOT EXISTS empresaId text');
 
   // Remove a unicidade antiga, só de setting_key, qualquer que seja o nome da constraint.
   const oldConstraints = await allQuery(`
     SELECT conname
     FROM pg_constraint
-    WHERE conrelid = 'settings'::regclass
+    WHERE conrelid = 'configuracao'::regclass
       AND contype = 'u'
-      AND pg_get_constraintdef(oid) = 'UNIQUE (setting_key)'
+      AND pg_get_constraintdef(oid) = 'UNIQUE (chave)'
   `);
   for (const { conname } of oldConstraints) {
-    await query(`ALTER TABLE settings DROP CONSTRAINT "${conname}"`);
+    await query(`ALTER TABLE configuracao DROP CONSTRAINT "${conname}"`);
     console.log(`✅ settings: constraint ${conname} (setting_key único global) removida`);
   }
 
   await query(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_settings_empresa_key
-    ON settings ((COALESCE(empresa_id, '')), setting_key)
+    ON configuracao ((COALESCE(empresaId, '')), chave)
   `);
 }
 

@@ -96,6 +96,62 @@ function bindNamedParameters(sqlQuery, params = {}) {
   return { text, values };
 }
 
+// O Postgres rebaixa para minúsculas os identificadores sem aspas. As tabelas e
+// colunas do schema são camelCase (eventoId, pontoVerificacao...), então toda
+// palavra com maiúsculas e minúsculas misturadas, fora de strings, comentários
+// e parâmetros, vira um identificador entre aspas. Palavras-chave SQL são sempre
+// tudo maiúsculo ou tudo minúsculo e passam intactas.
+function quoteMixedCaseIdentifiers(sqlQuery) {
+  let text = '';
+  let index = 0;
+  const length = sqlQuery.length;
+  while (index < length) {
+    const character = sqlQuery[index];
+    const next = sqlQuery[index + 1];
+
+    if (character === "'" || character === '"') {
+      let end = index + 1;
+      while (end < length) {
+        if (sqlQuery[end] === character && sqlQuery[end + 1] === character) end += 2;
+        else if (sqlQuery[end] === character) break;
+        else end += 1;
+      }
+      text += sqlQuery.slice(index, end + 1);
+      index = end + 1;
+      continue;
+    }
+
+    if (character === '-' && next === '-') {
+      let end = sqlQuery.indexOf('\n', index);
+      if (end === -1) end = length;
+      text += sqlQuery.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (character === '@' || character === '$' || /[0-9]/.test(character)) {
+      let end = index + 1;
+      while (end < length && /[A-Za-z0-9_]/.test(sqlQuery[end])) end += 1;
+      text += sqlQuery.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    if (/[A-Za-z_]/.test(character)) {
+      let end = index + 1;
+      while (end < length && /[A-Za-z0-9_]/.test(sqlQuery[end])) end += 1;
+      const word = sqlQuery.slice(index, end);
+      text += /[a-z]/.test(word) && /[A-Z]/.test(word) ? `"${word}"` : word;
+      index = end;
+      continue;
+    }
+
+    text += character;
+    index += 1;
+  }
+  return text;
+}
+
 function adaptPostgresSql(sqlQuery) {
   let text = sqlQuery
     .replace(/\[([^\]]+)\]/g, '"$1"')
@@ -121,7 +177,7 @@ function adaptPostgresSql(sqlQuery) {
     text = text.replace(/;\s*$/, '').trimEnd() + ` LIMIT ${limit}${semicolon}`;
   }
 
-  return text;
+  return quoteMixedCaseIdentifiers(text);
 }
 
 async function connectDB() {
@@ -160,10 +216,36 @@ async function connectDB() {
   }
 }
 
+// Proteção de desenvolvimento (ROW_GUARD=1): avisa no log quando o código lê de uma
+// linha do banco uma propriedade que a query não devolveu. Serve para achar nomes
+// de coluna antigos que sobraram no JavaScript. Desligada por padrão.
+const ROW_GUARD = String(process.env.ROW_GUARD || '').toLowerCase() === '1';
+const rowGuardAvisados = new Set();
+const ROW_GUARD_IGNORAR = new Set(['then', 'toJSON', 'inspect', 'constructor', 'length', 'asymmetricMatch', '$typeof', 'nodeType', 'tagName']);
+
+function protegerLinha(row) {
+  if (!ROW_GUARD || !row || typeof row !== 'object') return row;
+  return new Proxy(row, {
+    get(alvo, propriedade, receptor) {
+      if (typeof propriedade === 'string' && !(propriedade in alvo) && !ROW_GUARD_IGNORAR.has(propriedade)) {
+        const local = (new Error().stack.split(String.fromCharCode(10)).slice(2).find((linha) => linha.includes('backendPulyn') && !linha.includes('node_modules') && !linha.includes('database.js')) || '').trim();
+        const chave = propriedade + '@' + local;
+        if (!rowGuardAvisados.has(chave)) {
+          rowGuardAvisados.add(chave);
+          console.warn(`⚠️ [ROW_GUARD] propriedade inexistente '${propriedade}' (colunas: ${Object.keys(alvo).slice(0, 12).join(', ')}) em ${local}`);
+        }
+      }
+      return Reflect.get(alvo, propriedade, receptor);
+    }
+  });
+}
+
 function normalizePostgresResult(result) {
+  const rows = ROW_GUARD && Array.isArray(result.rows) ? result.rows.map(protegerLinha) : result.rows;
   return {
     ...result,
-    recordset: result.rows,
+    rows,
+    recordset: rows,
     rowsAffected: [result.rowCount || 0]
   };
 }

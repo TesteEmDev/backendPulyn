@@ -18,7 +18,7 @@ router.get('/floor-plan', verifyToken, async (req, res) => {
   try {
     const empresaId = resolveEmpresaId(req);
     const empresa = await queryOne(
-      'SELECT id, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM empresa WHERE id = @id',
+      'SELECT empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM empresa WHERE empresaId = @id',
       { id: empresaId }
     );
 
@@ -27,7 +27,7 @@ router.get('/floor-plan', verifyToken, async (req, res) => {
     }
 
     res.json({
-      empresaId: empresa.id,
+      empresaId: empresa.empresaId,
       floorPlan: empresa.dadosPlanoPiso
         ? {
             dataUrl: empresa.dadosPlanoPiso,
@@ -58,10 +58,10 @@ router.post('/floor-plan', verifyToken, requireRole('admin', 'master'), async (r
        SET dadosPlanoPiso = @dataUrl,
            nomePlanoPiso = @nome,
            tipoPlanoPiso = @type
-       WHERE id = @id`,
+       WHERE empresaId = @id`,
       {
         dataUrl,
-        name: String(name || 'planta-do-buffet').slice(0, 255),
+        nome: String(nome || 'planta-do-buffet').slice(0, 255),
         type: String(type || 'image/jpeg').slice(0, 100),
         id: empresaId,
       }
@@ -82,7 +82,7 @@ router.delete('/floor-plan', verifyToken, requireRole('admin', 'master'), async 
        SET dadosPlanoPiso = NULL,
            nomePlanoPiso = NULL,
            tipoPlanoPiso = NULL
-       WHERE id = @id`,
+       WHERE empresaId = @id`,
       { id: empresaId }
     );
     res.json({ success: true, empresaId });
@@ -95,14 +95,14 @@ router.delete('/floor-plan', verifyToken, requireRole('admin', 'master'), async 
 router.get('/zones', verifyToken, async (req, res) => {
   try {
     const empresaId = resolveEmpresaId(req);
-    const empresa = await queryOne('SELECT zones_data FROM empresa WHERE id = @id', { id: empresaId });
+    const empresa = await queryOne('SELECT dadosZonas FROM empresa WHERE empresaId = @id', { id: empresaId });
 
-    if (!empresa || !empresa.zones_data) {
+    if (!empresa || !empresa.dadosZonas) {
       return res.json([]);
     }
 
     try {
-      res.json(JSON.parse(empresa.zones_data));
+      res.json(JSON.parse(empresa.dadosZonas));
     } catch (e) {
       console.error('❌ Erro ao parsear zonas do buffet:', e);
       res.json([]);
@@ -121,8 +121,8 @@ router.post('/zones', verifyToken, requireRole('admin', 'master'), async (req, r
     }
 
     const empresaId = resolveEmpresaId(req);
-    await query('UPDATE empresa SET zones_data = @zones_data WHERE id = @id', {
-      zones_data: JSON.stringify(zones),
+    await query('UPDATE empresa SET dadosZonas = @dadosZonas WHERE empresaId = @id', {
+      dadosZonas: JSON.stringify(zones),
       id: empresaId,
     });
 

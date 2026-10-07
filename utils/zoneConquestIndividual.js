@@ -25,14 +25,14 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
   // Buscar todos os participantes do evento
   const participantes = await allQuery(
-    `SELECT c.id AS crianca_id, c.name, c.uid, c.bracelet_code, t.color AS team_color, 
+    `SELECT c.criancaId AS criancaId, c.nome, c.uid, c.codigoPulseira, t.cor AS team_color, 
             CASE 
-              WHEN t.color IS NOT NULL THEN t.color
-              ELSE '#' || SUBSTRING(CONVERT(VARCHAR(MAX), HASHBYTES('MD5', c.id), 2), 1, 6)
+              WHEN t.cor IS NOT NULL THEN t.cor
+              ELSE '#' || SUBSTRING(CONVERT(VARCHAR(MAX), HASHBYTES('MD5', c.criancaId), 2), 1, 6)
             END AS color
      FROM "crianca" c
-     LEFT JOIN times t ON t.id = c.time_id
-     WHERE LOWER(c.evento_id) = LOWER(@eventoId)
+     LEFT JOIN "time" t ON t.timeId = c.timeId
+     WHERE LOWER(c.eventoId) = LOWER(@eventoId)
        AND c.status = 'ativo'`,
     { eventoId }
   );
@@ -41,11 +41,11 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
   // Buscar todos os checkpoints do evento
   const checkpoints = await allQuery(
-    `SELECT id, name, x, y, radius, evento_id
+    `SELECT checkpointId, nome, mapaX, mapaY, radius, eventoId
      FROM "pontoVerificacao"
-     WHERE LOWER(evento_id) = LOWER(@eventoId)
-       AND checkpoint_purpose IS NULL
-       OR checkpoint_purpose = 'game'`,
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
+       AND proposito IS NULL
+       OR proposito = 'game'`,
     { eventoId }
   );
 
@@ -53,9 +53,9 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
   // Buscar todas as zonas do evento
   const zonas = await allQuery(
-    `SELECT id, name, x, y, width, height, color, evento_id
-     FROM zonas
-     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+    `SELECT zonaId, nome, x, y, largura, altura, cor, eventoId
+     FROM zona
+     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
     { eventoId }
   );
 
@@ -76,8 +76,8 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
   // Inicializar dados de cada participante
   participantes.forEach((p) => {
-    gameState.participants.set(p.crianca_id, {
-      criancaId: p.crianca_id,
+    gameState.participants.set(p.criancaId, {
+      criancaId: p.criancaId,
       participantName: p.name,
       participantColor: p.color,
       checkpointsRead: [],
@@ -92,8 +92,8 @@ async function startZoneConquestIndividual(eventoId, brincadeiraId) {
 
   // Inicializar dados de cada checkpoint
   checkpoints.forEach((cp) => {
-    gameState.checkpointStates.set(cp.id, {
-      checkpointId: cp.id,
+    gameState.checkpointStates.set(cp.checkpointId, {
+      checkpointId: cp.checkpointId,
       currentOwner: null,
       ownerName: null,
       ownerColor: null,
@@ -243,8 +243,8 @@ function calculateZoneColorIndividual(zona, checkpoints, checkpointStates, parti
 
   // Encontrar checkpoints dentro da zona (colisão 2D)
   const cptsInZone = checkpoints.filter((cp) => {
-    const inX = cp.x >= zona.x && cp.x <= zona.x + zona.width;
-    const inY = cp.y >= zona.y && cp.y <= zona.y + zona.height;
+    const inX = cp.mapaX >= zona.x && cp.mapaX <= zona.x + zona.width;
+    const inY = cp.mapaY >= zona.y && cp.mapaY <= zona.y + zona.height;
     return inX && inY;
   });
 
@@ -267,7 +267,7 @@ function calculateZoneColorIndividual(zona, checkpoints, checkpointStates, parti
 
   // Verificar donos dos checkpoints (quem leu por último)
   const cpStates = cptsInZone
-    .map((cp) => checkpointStates.get(cp.id))
+    .map((cp) => checkpointStates.get(cp.checkpointId))
     .filter(Boolean);
 
   const owners = cpStates
@@ -363,7 +363,7 @@ async function recordZoneConquestIndividualScan(
     };
   }
 
-  const checkpoint = gameState.checkpoints.find((cp) => cp.id === checkpointId);
+  const checkpoint = gameState.checkpoints.find((cp) => cp.checkpointId === checkpointId);
   if (!checkpoint) {
     return {
       accepted: false,
@@ -571,12 +571,12 @@ async function getZoneConquestMode(eventoId) {
 
   // Buscar configuração do evento
   const gameMode = await queryOne(
-    `SELECT id, game_type FROM event_game_state
-     WHERE LOWER(evento_id) = LOWER(@eventoId)`,
+    `SELECT eventoId, tipoJogo FROM estadoJogoEvento
+     WHERE LOWER(eventoId) = LOWER(@eventoId)`,
     { eventoId }
   );
 
-  return gameMode?.game_type || null;
+  return gameMode?.tipoJogo || null;
 }
 
 module.exports = {

@@ -6,9 +6,9 @@ async function addSessionIdToLeituras() {
     // PostgreSQL
     await query(`
       ALTER TABLE leitura
-      ADD COLUMN IF NOT EXISTS session_id VARCHAR(36);
+      ADD COLUMN IF NOT EXISTS sessaoId VARCHAR(36);
 
-      CREATE INDEX IF NOT EXISTS idx_leitura_session_id ON leitura(session_id);
+      CREATE INDEX IF NOT EXISTS idx_leitura_session_id ON leitura(sessaoId);
     `);
 
     console.log('✅ Coluna session_id adicionada à tabela leitura (PostgreSQL)');

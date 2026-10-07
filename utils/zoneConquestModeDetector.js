@@ -10,8 +10,8 @@ async function getActiveZoneConquestMode(eventoId) {
 
     // Buscar partida TEAM ativa
     const teamGame = await queryOne(
-      `SELECT id, game_type FROM zone_conquest_team_partidas
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
+      `SELECT id FROM zonaConquistaPartidaTime
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
        LIMIT 1`,
       { eventoId }
@@ -23,8 +23,8 @@ async function getActiveZoneConquestMode(eventoId) {
 
     // Buscar partida INDIVIDUAL ativa
     const individualGame = await queryOne(
-      `SELECT id, game_type FROM zone_conquest_individual_partidas
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
+      `SELECT id FROM zonaConquistaPartidaIndividual
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
        LIMIT 1`,
       { eventoId }
@@ -51,10 +51,10 @@ async function getActiveZoneConquestGameWithMode(eventoId) {
 
     // Buscar TEAM
     const teamGame = await queryOne(
-      `SELECT * FROM zone_conquest_team_partidas
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
+      `SELECT * FROM zonaConquistaPartidaTime
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
-       ORDER BY started_at DESC LIMIT 1`,
+       ORDER BY iniciadoEm DESC LIMIT 1`,
       { eventoId }
     );
 
@@ -67,10 +67,10 @@ async function getActiveZoneConquestGameWithMode(eventoId) {
 
     // Buscar INDIVIDUAL
     const individualGame = await queryOne(
-      `SELECT * FROM zone_conquest_individual_partidas
-       WHERE LOWER(evento_id) = LOWER(@eventoId)
+      `SELECT * FROM zonaConquistaPartidaIndividual
+       WHERE LOWER(eventoId) = LOWER(@eventoId)
          AND status = 'active'
-       ORDER BY started_at DESC LIMIT 1`,
+       ORDER BY iniciadoEm DESC LIMIT 1`,
       { eventoId }
     );
 

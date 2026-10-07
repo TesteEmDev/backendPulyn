@@ -38,7 +38,7 @@ router.put('/me', async (req, res) => {
       }
       if (digits) {
         const duplicate = await database.queryOne(
-          'SELECT id FROM empresa WHERE cnpj = @cnpj AND id <> @id',
+          'SELECT empresaId FROM empresa WHERE cnpj = @cnpj AND empresaId <> @id',
           { cnpj: digits, id: req.user.empresaId }
         );
         if (duplicate) return res.status(409).json({ error: 'Este CNPJ já está cadastrado em outro buffet.' });

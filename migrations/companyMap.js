@@ -8,30 +8,30 @@ async function ensureCompanyMapSchema() {
   if (isPostgres) {
     await query(`
       ALTER TABLE empresa
-      ADD COLUMN IF NOT EXISTS floor_plan_data text,
-      ADD COLUMN IF NOT EXISTS floor_plan_name varchar(255),
-      ADD COLUMN IF NOT EXISTS floor_plan_type varchar(100),
-      ADD COLUMN IF NOT EXISTS zones_data text
+      ADD COLUMN IF NOT EXISTS dadosPlanoPiso text,
+      ADD COLUMN IF NOT EXISTS nomePlanoPiso varchar(255),
+      ADD COLUMN IF NOT EXISTS tipoPlanoPiso varchar(100),
+      ADD COLUMN IF NOT EXISTS dadosZonas text
     `);
     return;
   }
 
   await query(`
-    IF COL_LENGTH('dbo.empresa', 'floor_plan_data') IS NULL
+    IF COL_LENGTH('dbo.empresa', 'dadosPlanoPiso') IS NULL
     BEGIN
-      ALTER TABLE empresa ADD floor_plan_data NVARCHAR(MAX) NULL
+      ALTER TABLE empresa ADD dadosPlanoPiso NVARCHAR(MAX) NULL
     END
-    IF COL_LENGTH('dbo.empresa', 'floor_plan_name') IS NULL
+    IF COL_LENGTH('dbo.empresa', 'nomePlanoPiso') IS NULL
     BEGIN
-      ALTER TABLE empresa ADD floor_plan_name NVARCHAR(255) NULL
+      ALTER TABLE empresa ADD nomePlanoPiso NVARCHAR(255) NULL
     END
-    IF COL_LENGTH('dbo.empresa', 'floor_plan_type') IS NULL
+    IF COL_LENGTH('dbo.empresa', 'tipoPlanoPiso') IS NULL
     BEGIN
-      ALTER TABLE empresa ADD floor_plan_type VARCHAR(100) NULL
+      ALTER TABLE empresa ADD tipoPlanoPiso VARCHAR(100) NULL
     END
-    IF COL_LENGTH('dbo.empresa', 'zones_data') IS NULL
+    IF COL_LENGTH('dbo.empresa', 'dadosZonas') IS NULL
     BEGIN
-      ALTER TABLE empresa ADD zones_data NVARCHAR(MAX) NULL
+      ALTER TABLE empresa ADD dadosZonas NVARCHAR(MAX) NULL
     END
   `);
 }
@@ -45,7 +45,7 @@ async function migrateExistingEventMapDataToCompanies() {
   const isPostgres = DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql';
 
   const companies = await allQuery(
-    'SELECT "empresaId" as id FROM "empresa" WHERE floor_plan_data IS NULL OR zones_data IS NULL'
+    'SELECT "empresaId" as id FROM "empresa" WHERE dadosPlanoPiso IS NULL OR dadosZonas IS NULL'
   );
 
   for (const company of companies) {
@@ -53,21 +53,21 @@ async function migrateExistingEventMapDataToCompanies() {
 
     const floorPlanRow = await queryOne(
       isPostgres
-        ? `SELECT floor_plan_data, floor_plan_name, floor_plan_type FROM evento
-           WHERE empresa_id = @empresa_id AND floor_plan_data IS NOT NULL
-           ORDER BY date DESC LIMIT 1`
-        : `SELECT TOP 1 floor_plan_data, floor_plan_name, floor_plan_type FROM evento
-           WHERE empresa_id = @empresa_id AND floor_plan_data IS NOT NULL
-           ORDER BY date DESC`,
-      { empresa_id: empresaId }
+        ? `SELECT dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento
+           WHERE empresaId = @empresaId AND dadosPlanoPiso IS NOT NULL
+           ORDER BY data DESC LIMIT 1`
+        : `SELECT TOP 1 dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM evento
+           WHERE empresaId = @empresaId AND dadosPlanoPiso IS NOT NULL
+           ORDER BY data DESC`,
+      { empresaId: empresaId }
     );
     if (floorPlanRow) {
       await query(
-        `UPDATE "empresa" SET floor_plan_data = @data, floor_plan_name = @name, floor_plan_type = @type WHERE "empresaId" = @id`,
+        `UPDATE "empresa" SET dadosPlanoPiso = @data, nomePlanoPiso = @name, tipoPlanoPiso = @type WHERE "empresaId" = @id`,
         {
-          data: floorPlanRow.floor_plan_data,
-          name: floorPlanRow.floor_plan_name,
-          type: floorPlanRow.floor_plan_type,
+          data: floorPlanRow.dadosPlanoPiso,
+          name: floorPlanRow.nomePlanoPiso,
+          type: floorPlanRow.tipoPlanoPiso,
           id: empresaId,
         }
       );
@@ -75,17 +75,17 @@ async function migrateExistingEventMapDataToCompanies() {
 
     const zonesRow = await queryOne(
       isPostgres
-        ? `SELECT zones_data FROM evento
-           WHERE empresa_id = @empresa_id AND zones_data IS NOT NULL
-           ORDER BY date DESC LIMIT 1`
-        : `SELECT TOP 1 zones_data FROM evento
-           WHERE empresa_id = @empresa_id AND zones_data IS NOT NULL
-           ORDER BY date DESC`,
-      { empresa_id: empresaId }
+        ? `SELECT dadosZonas FROM evento
+           WHERE empresaId = @empresaId AND dadosZonas IS NOT NULL
+           ORDER BY data DESC LIMIT 1`
+        : `SELECT TOP 1 dadosZonas FROM evento
+           WHERE empresaId = @empresaId AND dadosZonas IS NOT NULL
+           ORDER BY data DESC`,
+      { empresaId: empresaId }
     );
     if (zonesRow) {
-      await query(`UPDATE "empresa" SET zones_data = @zones_data WHERE "empresaId" = @id`, {
-        zones_data: zonesRow.zones_data,
+      await query(`UPDATE "empresa" SET dadosZonas = @dadosZonas WHERE "empresaId" = @id`, {
+        dadosZonas: zonesRow.dadosZonas,
         id: empresaId,
       });
     }

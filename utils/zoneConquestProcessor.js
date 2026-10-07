@@ -20,8 +20,8 @@ async function processZoneConquestScan({
     const scanId = await recordZoneConquestScan(
       eventoId,
       checkpointId,
-      crianca.id,
-      crianca.time_id,
+      crianca.criancaId,
+      crianca.timeId,
       leituraId,
       uid
     );
@@ -31,10 +31,10 @@ async function processZoneConquestScan({
     return {
       accepted: true,
       scanId,
-      checkpoint_id: checkpointId,
-      crianca_name: crianca.name,
-      crianca_id: crianca.id,
-      time_id: crianca.time_id,
+      checkpointId: checkpointId,
+      crianca_name: crianca.nome,
+      criancaId: crianca.criancaId,
+      timeId: crianca.timeId,
       timestamp: now.toISOString(),
       message: 'Checkpoint lido com sucesso',
     };

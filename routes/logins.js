@@ -26,8 +26,8 @@ router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, re
     }
 
     const users = await allQuery(`
-      SELECT id, email, perfil, status, dataCriacao as criadoEm
-      FROM logins
+      SELECT loginId, email, perfil, status, dataCriacao as criadoEm
+      FROM login
       WHERE empresaId = @empresaId
       ORDER BY dataCriacao DESC
     `, { empresaId });
@@ -50,7 +50,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     const user_role = req.user.role;
 
     // Validações
-    if (!email || !senha || !perfil) {
+    if (!email || !senha || !role) {
       return res.status(400).json({ error: 'Email, senha e role são obrigatórios' });
     }
 
@@ -74,7 +74,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
     // Verificar se email já existe (o login ignora maiúsculas/minúsculas)
     const existing = await queryOne(
-      'SELECT id FROM logins WHERE LOWER(email) = LOWER(@email)',
+      'SELECT loginId FROM login WHERE LOWER(email) = LOWER(@email)',
       { email }
     );
 
@@ -84,7 +84,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
     // Validar role
     const validRoles = ['admin', 'reception', 'game_master', 'display', 'family', 'kiosk', 'score_kiosk'];
-    if (!validRoles.includes(perfil)) {
+    if (!validRoles.includes(role)) {
       return res.status(400).json({ error: 'Role inválido' });
     }
 
@@ -94,13 +94,13 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     // Criar usuário com empresaId do token
     const id = require('crypto').randomUUID();
     await query(
-      `INSERT INTO logins (id, email, senha, perfil, empresaId, status, dataCriacao)
+      `INSERT INTO login (loginId, email, senha, perfil, empresaId, status, dataCriacao)
        VALUES (@id, @email, @senha, @perfil, @empresaId, @status, GETDATE())`,
       {
         id,
         email,
         senha: hashedPassword,
-        perfil,
+        perfil: role,
         empresaId,
         status: 'active'
       }
@@ -111,7 +111,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     res.json({
       id,
       email,
-      perfil,
+      role,
       status: 'active',
       criadoEm: new Date().toISOString()
     });
@@ -132,7 +132,7 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
 
     // Buscar usuário
     const user = await queryOne(
-      'SELECT empresaId, perfil, status FROM logins WHERE id = @id',
+      'SELECT empresaId, perfil, status FROM login WHERE loginId = @id',
       { id }
     );
 
@@ -146,10 +146,10 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
     }
 
     // Não deixar deletar o último admin
-    if (user.role === 'admin') {
+    if (user.perfil === 'admin') {
       const adminCount = await queryOne(`
-        SELECT COUNT(*) as count FROM logins
-        WHERE empresaId = @empresaId AND role = 'admin' AND status = 'active'
+        SELECT COUNT(*) as count FROM login
+        WHERE empresaId = @empresaId AND perfil = 'admin' AND status = 'active'
       `, { empresaId: user.empresaId });
 
       if (adminCount.count <= 1) {
@@ -159,9 +159,9 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
 
     // Deletar usuário (soft delete)
     await query(
-      `UPDATE logins 
+      `UPDATE login 
        SET status = @status, dataAtualizacao = GETDATE() 
-       WHERE id = @id 
+       WHERE loginId = @id 
        AND empresaId = @empresaId`,
       { id, status: 'inactive', empresaId: user.empresaId }
     );

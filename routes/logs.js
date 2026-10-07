@@ -23,21 +23,21 @@ router.get('/', verifyToken, async (req, res) => {
         ? listPlatformClients().then((list) =>
             list.map((c) => ({ id: c.id, empresa_nome: c.nome, dataCriacao: c.createdAt })))
         : allQuery(`
-            SELECT id, nome as empresa_nome, dataCriacao
+            SELECT empresaId, nome as empresa_nome, dataCriacao
             FROM empresa
-            WHERE nome <> 'Master Admin' AND id = @empresaId
+            WHERE nome <> 'Master Admin' AND empresaId = @empresaId
           `, { empresaId }),
       allQuery(`
-        SELECT id, cliente as empresa_nome, subject, status, criadoEm
+        SELECT ticketId, cliente as empresa_nome, assunto, status, criadoEm
         FROM chamadoSuport
         WHERE 1=1 ${master ? '' : 'AND empresaId = @empresaId'}
       `, { empresaId }),
       allQuery(`
-        SELECT c.id, c.nome, c.zone, c.ultimoVisto, emp.nome as empresa_nome
+        SELECT c.checkpointId, c.nome, c.zona, c.ultimoVisto, emp.nome as empresa_nome
         FROM pontoVerificacao c
-        LEFT JOIN empresa emp ON c.empresaId = emp.id
+        LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
         WHERE c.status = 'offline'
-          AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) <> 'reception'
+          AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
           ${master ? '' : 'AND c.empresaId = @empresaId'}
       `, { empresaId }),
     ]);
@@ -60,12 +60,12 @@ router.get('/', verifyToken, async (req, res) => {
         details: `Status: ${t.status}`,
       })),
       ...checkpointRows.map((cp) => ({
-        id: `checkpoint-${cp.id}`,
+        id: `checkpoint-${cp.checkpointId}`,
         timestamp: cp.ultimoVisto,
         cliente: cp.empresa_nome || 'Sem empresa',
         type: 'error',
-        message: `Checkpoint "${cp.name || cp.id}" está offline`,
-        details: cp.zone ? `Zona: ${cp.zone}` : '',
+        message: `Checkpoint "${cp.nome || cp.checkpointId}" está offline`,
+        details: cp.zona ? `Zona: ${cp.zona}` : '',
       })),
     ]
       .filter((entry) => entry.timestamp)
@@ -86,7 +86,7 @@ router.post('/', verifyToken, async (req, res) => {
     const empresaId = req.user.empresaId;
     
     await query(
-      `INSERT INTO log (tipo, clienteId, eventoId, message, details, empresaId) 
+      `INSERT INTO log (tipo, clienteId, eventoId, mensagem, detalhes, empresaId) 
        VALUES (@tipo, @clienteId, @eventoId, @message, @details, @empresaId)`,
       { tipo, clienteId, eventoId, message, details, empresaId }
     );

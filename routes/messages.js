@@ -20,7 +20,7 @@ function requireRole(roles) {
 
 async function getEventForUser(req, eventoId) {
   const event = await queryOne(
-    'SELECT id, empresaId FROM evento WHERE id = @id',
+    'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
     { id: eventoId }
   );
   if (!event) return null;
@@ -51,7 +51,7 @@ router.get('/evento/:eventoId', verifyToken, requireRole(READ_ROLES), async (req
     const rawLimit = Number.parseInt(req.query.limit, 10);
     const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 50;
     const messages = await allQuery(`
-      SELECT TOP (@limit) id, eventoId, texto, tipo, remetente, enviadoEm
+      SELECT TOP (@limit) mensagemId, eventoId, texto, tipo, remetente, enviadoEm
       FROM mensagemDisplay
       WHERE eventoId = @eventoId
       ORDER BY enviadoEm DESC
@@ -77,18 +77,18 @@ router.post('/evento/:eventoId', verifyToken, requireRole(WRITE_ROLES), async (r
 
     const messageId = uuidv4();
     await query(`
-      INSERT INTO mensagemDisplay (id, eventoId, texto, tipo, remetente, enviadoEm)
+      INSERT INTO mensagemDisplay (mensagemId, eventoId, texto, tipo, remetente, enviadoEm)
       VALUES (@id, @eventoId, @texto, @tipo, @remetente, CURRENT_TIMESTAMP)
     `, {
       id: messageId,
       eventoId: req.params.eventoId,
       texto,
-      tipo,
+      tipo: type,
       remetente: req.user.email || req.user.id || null,
     });
 
     const message = await queryOne(
-      'SELECT id, eventoId, texto, tipo, remetente, enviadoEm FROM mensagemDisplay WHERE id = @id',
+      'SELECT mensagemId, eventoId, texto, tipo, remetente, enviadoEm FROM mensagemDisplay WHERE mensagemId = @id',
       { id: messageId }
     );
     const serialized = serializeMessage(message);

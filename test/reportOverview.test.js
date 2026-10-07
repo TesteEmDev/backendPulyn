@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 const { summarizeEvents } = require('../utils/reportOverview');
 
 const rows = [
-  { id: 'a', name: 'Festa A', date: '2026-09-10', status: 'finished', participants: '10', teams: '2', total_points: '200', scorings: '40' },
-  { id: 'b', name: 'Festa B', date: '2026-09-25', status: 'completed', participants: '5', teams: '2', total_points: '50', scorings: '9' },
-  { id: 'c', name: 'Festa C', date: '2026-10-05', status: 'active', participants: '0', teams: '0', total_points: '0', scorings: '0' },
-  { id: 'd', name: 'Sem data', date: null, status: 'scheduled', participants: '3', teams: '1', total_points: '0', scorings: '0' },
+  { id: 'a', name: 'Festa A', date: '2026-09-10', status: 'finished', participants: '10', teams: '2', pontosTotais: '200', scorings: '40' },
+  { id: 'b', name: 'Festa B', date: '2026-09-25', status: 'completed', participants: '5', teams: '2', pontosTotais: '50', scorings: '9' },
+  { id: 'c', name: 'Festa C', date: '2026-10-05', status: 'active', participants: '0', teams: '0', pontosTotais: '0', scorings: '0' },
+  { id: 'd', name: 'Sem data', date: null, status: 'scheduled', participants: '3', teams: '1', pontosTotais: '0', scorings: '0' },
 ];
 
 test('totais somam todos os eventos e convertem os números que o banco devolve como texto', () => {

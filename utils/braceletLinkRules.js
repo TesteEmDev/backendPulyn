@@ -37,7 +37,7 @@ function parseBraceletUid(value) {
  * Decide se a pulseira encontrada pode ser vinculada. A resposta de "não pode" é
  * sempre a mesma, para não revelar se um código existe, é de outra empresa ou está livre.
  *
- * @param {{ status?: string, crianca_id?: string|null, evento_status?: string|null, evento_id?: string|null } | null} row
+ * @param {{ status?: string, criancaId?: string|null, evento_status?: string|null, eventoId?: string|null } | null} row
  * @returns {{ ok: true } | { ok: false, code: 'BRACELET_NOT_AVAILABLE', error: string }}
  */
 function checkBraceletLinkable(row) {
@@ -49,8 +49,8 @@ function checkBraceletLinkable(row) {
 
   if (!row) return notAvailable;
   if (String(row.status || '').trim().toLowerCase() !== 'em_uso') return notAvailable;
-  if (!row.crianca_id) return notAvailable;
-  if (!row.evento_id) return notAvailable;
+  if (!row.criancaId) return notAvailable;
+  if (!row.eventoId) return notAvailable;
 
   const eventStatus = String(row.evento_status || 'scheduled').trim().toLowerCase();
   if (CLOSED_EVENT_STATUSES.has(eventStatus)) return notAvailable;

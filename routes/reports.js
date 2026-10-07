@@ -21,47 +21,47 @@ router.get('/overview', async (req, res) => {
 
     const [eventRows, topParticipants, topTeams, topCheckpoints, topGames] = await Promise.all([
       allQuery(`
-        SELECT e.id, e.nome, CAST(e.data AS VARCHAR(10)) AS date, e.status,
-          (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.id) AS participants,
-          (SELECT COALESCE(SUM(c.scores), 0) FROM crianca c WHERE c.eventoId = e.id) AS total_points,
-          (SELECT COUNT(*) FROM time t WHERE t.eventoId = e.id) AS teams,
-          (SELECT COUNT(*) FROM pontuacao p WHERE p.eventoId = e.id) AS scorings
+        SELECT e.eventoId, e.nome, CAST(e.data AS VARCHAR(10)) AS date, e.status,
+          (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS participants,
+          (SELECT COALESCE(SUM(c.pontos), 0) FROM crianca c WHERE c.eventoId = e.eventoId) AS pontosTotais,
+          (SELECT COUNT(*) FROM "time" t WHERE t.eventoId = e.eventoId) AS teams,
+          (SELECT COUNT(*) FROM pontuacao p WHERE p.eventoId = e.eventoId) AS scorings
         FROM evento e
         WHERE e.empresaId = @empresaId
         ORDER BY e.data DESC, e.criadoEm DESC
       `, params),
       allQuery(`
-        SELECT TOP 10 c.id, c.nome, c.nicknome, c.age, c.scores,
+        SELECT TOP 10 c.criancaId, c.nome, c.apelido, c.idade, c.pontos,
           e.nome AS event_nome, t.nome AS team_nome, t.cor AS team_color
         FROM crianca c
-        JOIN evento e ON e.id = c.eventoId
-        LEFT JOIN time t ON t.id = c.timeId
+        JOIN evento e ON e.eventoId = c.eventoId
+        LEFT JOIN "time" t ON t.timeId = c.timeId
         WHERE e.empresaId = @empresaId AND c.status = 'active'
-        ORDER BY c.scores DESC
+        ORDER BY c.pontos DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 t.id, t.nome, t.cor, t.points, e.nome AS event_name
-        FROM time t
-        JOIN evento e ON e.id = t.eventoId
+        SELECT TOP 5 t.timeId, t.nome, t.cor, t.pontos, e.nome AS event_name
+        FROM "time" t
+        JOIN evento e ON e.eventoId = t.eventoId
         WHERE e.empresaId = @empresaId
-        ORDER BY t.points DESC
+        ORDER BY t.pontos DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 cp.id, cp.nome, cp.zone, e.nome AS event_nome, COUNT(p.id) AS readings
+        SELECT TOP 5 cp.checkpointId, cp.nome, cp.zona, e.nome AS event_nome, COUNT(p.pontuacaoId) AS readings
         FROM pontuacao p
-        JOIN pontoVerificacao cp ON cp.id = p.checkpointId
-        JOIN evento e ON e.id = p.eventoId
+        JOIN pontoVerificacao cp ON cp.checkpointId = p.checkpointId
+        JOIN evento e ON e.eventoId = p.eventoId
         WHERE e.empresaId = @empresaId
-        GROUP BY cp.id, cp.nome, cp.zone, e.nome
+        GROUP BY cp.checkpointId, cp.nome, cp.zona, e.nome
         ORDER BY readings DESC
       `, params),
       allQuery(`
-        SELECT TOP 5 b.id, b.nome, COUNT(p.id) AS plays
+        SELECT TOP 5 b.brincadeiraId, b.nome, COUNT(p.pontuacaoId) AS plays
         FROM pontuacao p
-        JOIN brincadeira b ON b.id = CAST(p.brincadeiraId AS VARCHAR(36))
-        JOIN evento e ON e.id = p.eventoId
+        JOIN brincadeira b ON b.brincadeiraId = CAST(p.brincadeiraId AS VARCHAR(36))
+        JOIN evento e ON e.eventoId = p.eventoId
         WHERE e.empresaId = @empresaId
-        GROUP BY b.id, b.nome
+        GROUP BY b.brincadeiraId, b.nome
         ORDER BY plays DESC
       `, params),
     ]);

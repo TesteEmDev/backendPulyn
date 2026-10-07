@@ -22,7 +22,7 @@ router.get('/pontoVerificacao/:checkpointId/status', async (req, res) => {
 router.get('/evento/:eventoId/status', verifyToken, async (req, res) => {
   try {
     const evento = await queryOne(
-      'SELECT id, empresaId FROM evento WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
       { eventoId: req.params.eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });

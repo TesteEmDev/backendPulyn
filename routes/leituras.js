@@ -42,22 +42,22 @@ async function findProcessedReading(readingId, checkpoint) {
   if (!readingId) return null;
 
   const existing = await queryOne(
-    `SELECT l.id, l.checkpointId, l.autorizado, l.pontosAtribuidos,
+    `SELECT l.leituraId, l.checkpointId, l.autorizado, l.pontosAtribuidos,
             l.uid, l.criancaId, l.brincadeiraId, c.eventoId,
-            c.name AS crianca_nome, c.timeId, t.nome AS team_nome, t.cor AS team_color,
-            ms.attack_type AS monster_attack_tipo, ms.damage AS monster_damage,
-            ms.monster_hp_after, ms.monster_defeated, mp.max_hp AS monster_max_hp
+            c.nome AS crianca_nome, c.timeId, t.nome AS team_nome, t.cor AS team_color,
+            ms.tipoAtaque AS monster_attack_tipo, ms.dano AS monster_damage,
+            ms.vidaMonstroApos, ms.monstroDerrotado, mp.vidaMaxima AS monster_max_hp
      FROM leitura l
-     LEFT JOIN crianca c ON c.id = l.criancaId
-     LEFT JOIN time t ON t.id = c.timeId
-     LEFT JOIN ""monsterCacaLeitura"" ms ON ms.leituraId = l.id
-     LEFT JOIN ""monsterCacaPartida"" mp ON mp.id = ms.partidaId
-     WHERE l.id = @readingId`,
+     LEFT JOIN crianca c ON c.criancaId = l.criancaId
+     LEFT JOIN "time" t ON t.timeId = c.timeId
+     LEFT JOIN "monsterCacaLeitura" ms ON ms.leituraId = l.leituraId
+     LEFT JOIN "monsterCacaPartida" mp ON mp.id = ms.partidaId
+     WHERE l.leituraId = @readingId`,
     { readingId }
   );
 
   if (!existing) return null;
-  if (String(existing.checkpointId).trim().toLowerCase() !== String(checkpoint.id).trim().toLowerCase()) {
+  if (String(existing.checkpointId).trim().toLowerCase() !== String(checkpoint.checkpointId).trim().toLowerCase()) {
     const error = new Error('readingId já foi usado em outro checkpoint');
     error.statusCode = 409;
     throw error;
@@ -67,10 +67,10 @@ async function findProcessedReading(readingId, checkpoint) {
 
 async function sendProcessedReading(res, reading) {
   const game = reading.brincadeiraId
-    ? await queryOne('SELECT type FROM brincadeira WHERE id = @id', { id: reading.brincadeiraId })
+    ? await queryOne('SELECT tipo FROM brincadeira WHERE brincadeiraId = @id', { id: reading.brincadeiraId })
     : null;
-  const isTreasure = game?.type === 'treasure_hunt';
-  const isMonster = game?.type === 'monster_hunt' || Boolean(reading.monster_attack_type);
+  const isTreasure = game?.tipo === 'treasure_hunt';
+  const isMonster = game?.tipo === 'monster_hunt' || Boolean(reading.monster_attack_type);
   const monsterStatus = isMonster && reading.eventoId
     ? await getMonsterEventStatus(reading.eventoId)
     : null;
@@ -94,13 +94,13 @@ async function sendProcessedReading(res, reading) {
     monsterAccepted: false,
     attackType: isMonster ? reading.monster_attack_type : undefined,
     damage: isMonster ? Number(reading.monster_damage || 0) : undefined,
-    monsterHp: isMonster ? Number(reading.monster_hp_after || 0) : undefined,
+    monsterHp: isMonster ? Number(reading.vidaMonstroApos || 0) : undefined,
     monsterMaxHp: isMonster ? Number(reading.monster_max_hp || 500) : undefined,
-    monsterDefeated: isMonster && Boolean(reading.monster_defeated),
-    teamMonsterHp: isMonster ? Number(reading.monster_hp_after || teamMonster?.monsterHp || 0) : undefined,
+    monsterDefeated: isMonster && Boolean(reading.monstroDerrotado),
+    teamMonsterHp: isMonster ? Number(reading.vidaMonstroApos || teamMonster?.monsterHp || 0) : undefined,
     teamMonsterMaxHp: isMonster ? Number(teamMonster?.monsterMaxHp || reading.monster_max_hp || 500) : undefined,
-    teamMonsterDefeated: isMonster && Boolean(reading.monster_defeated),
-    teamVictory: isMonster && Boolean(reading.monster_defeated),
+    teamMonsterDefeated: isMonster && Boolean(reading.monstroDerrotado),
+    teamVictory: isMonster && Boolean(reading.monstroDerrotado),
     gameCompleted: isMonster && Boolean(monsterStatus?.gameCompleted),
     monsters: isMonster ? (monsterStatus?.monsters || []) : undefined,
     alreadyScanned: isMonster,
@@ -141,17 +141,17 @@ function broadcastEvent(data) {
 async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameTipo, teamColor, leituraId, uid, now }) {
   try {
     const coords = await queryOne(
-      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
+      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (coords?.mapaX == null || coords?.mapaY == null) {
-      console.warn(`⚠️ [RASTREIO] Checkpoint ${checkpointId} sem mapaX/mapaY — avatar não poderá se mover (${gameType})`);
+      console.warn(`⚠️ [RASTREIO] Checkpoint ${checkpointId} sem mapaX/mapaY — avatar não poderá se mover (${gameTipo})`);
     }
 
     let color = teamColor || crianca.teamColor || null;
     if (!color && crianca.timeId) {
-      const team = await queryOne('SELECT color FROM time WHERE id = @id', { id: crianca.timeId });
-      color = team?.color || null;
+      const team = await queryOne('SELECT cor FROM "time" WHERE timeId = @id', { id: crianca.timeId });
+      color = team?.cor || null;
     }
 
     broadcastEvent({
@@ -160,7 +160,7 @@ async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId,
         id: leituraId,
         checkpointId,
         uid,
-        criancaId: crianca.id,
+        criancaId: crianca.criancaId,
         criancaName: crianca.nome,
         timeId: crianca.timeId || null,
         teamColor: color || '#1E9BD7',
@@ -172,7 +172,7 @@ async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId,
       },
     });
   } catch (err) {
-    console.error(`❌ [RASTREIO] Falha ao enviar CHILD_CHECKPOINT_PASSED (${gameType}):`, err.message);
+    console.error(`❌ [RASTREIO] Falha ao enviar CHILD_CHECKPOINT_PASSED (${gameTipo}):`, err.message);
   }
 }
 
@@ -205,14 +205,14 @@ router.post('/reception', async (req, res) => {
     // Checkpoint e pulseira vêm em UMA consulta (antes eram duas, em sequência):
     // cada ida ao banco remoto soma na demora entre passar a pulseira e a luz acender.
     const checkpoint = await queryOne(
-      `SELECT c.id, c.empresaId, c.eventoId, c.propositoCheckpoint,
+      `SELECT c.checkpointId, c.empresaId, c.eventoId, c.proposito,
               p.codigo AS pulseira_code, p.status AS pulseira_status
        FROM pontoVerificacao c
        LEFT JOIN pulseira p
          ON LOWER(p.empresaId) = LOWER(c.empresaId)
         AND ${uidSqlExpression('p.codigo')} = @uid
-       WHERE c.id = @id
-         AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) = 'reception'`,
+       WHERE c.checkpointId = @id
+         AND LOWER(COALESCE(c.proposito, 'game')) = 'reception'`,
       { id: checkpointId, uid: normalizedUid }
     );
 
@@ -229,13 +229,13 @@ router.post('/reception', async (req, res) => {
     // checkpoint só entra se ainda estiver aberto; se não houver nenhum aberto,
     // mantém o comportamento antigo (evento do checkpoint).
     const openEvents = await allQuery(
-      `SELECT id FROM evento
+      `SELECT eventoId FROM evento
        WHERE LOWER(empresaId) = LOWER(@empresaId)
          AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
       { empresaId: checkpoint.empresaId }
     );
     const targetEventIds = openEvents.length
-      ? openEvents.map(event => event.id)
+      ? openEvents.map(event => event.eventoId)
       : [checkpoint.eventoId].filter(Boolean);
 
     const readingId = uuidv4();
@@ -245,7 +245,7 @@ router.post('/reception', async (req, res) => {
         braceletCode: normalizedUid,
         timestamp: now.toISOString(),
         receivedAt: now.getTime(),
-        checkpointId: checkpoint.id,
+        checkpointId: checkpoint.checkpointId,
         eventoId: targetEventId,
         source: 'reception',
       };
@@ -287,11 +287,11 @@ router.post('/', async (req, res) => {
     }
     
     // O checkpoint define a empresa e o evento da leitura.
-    const checkpoint = await queryOne('SELECT id, empresaId, eventoId, status, propositoCheckpoint FROM pontoVerificacao WHERE id = @id', { id: checkpointId });
+    const checkpoint = await queryOne('SELECT checkpointId, empresaId, eventoId, status, proposito FROM pontoVerificacao WHERE checkpointId = @id', { id: checkpointId });
     if (!checkpoint) {
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
-    if (String(checkpoint.propositoCheckpoint || 'game').trim().toLowerCase() === 'reception') {
+    if (String(checkpoint.proposito || 'game').trim().toLowerCase() === 'reception') {
       return res.status(409).json({ ok: false, error: 'Use a rota de recepção para este checkpoint' });
     }
 
@@ -325,14 +325,14 @@ router.post('/', async (req, res) => {
     if (!treasureSession || checkpointIsOnline) {
       try {
         await query(
-          `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now WHERE id = @checkpointId`,
+          `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now WHERE checkpointId = @checkpointId`,
           { checkpointId, now }
         );
       } catch (err) {
       // Se coluna ultimoVisto não existe ainda, só atualiza o status
       if (err.message.includes('ultimoVisto')) {
         await query(
-          `UPDATE pontoVerificacao SET status = 'online' WHERE id = @checkpointId`,
+          `UPDATE pontoVerificacao SET status = 'online' WHERE checkpointId = @checkpointId`,
           { checkpointId }
         );
       } else {
@@ -378,7 +378,7 @@ router.post('/', async (req, res) => {
 
     const crianca = await queryOne(
       `SELECT c.* FROM crianca c
-       WHERE c.id = @criancaId
+       WHERE c.criancaId = @criancaId
          AND ${uidSqlExpression('c.codigoPulseira')} = @uid`,
       { criancaId: pulseira.criancaId, uid: normalizedUid }
     );
@@ -416,7 +416,7 @@ router.post('/', async (req, res) => {
     // ✅ Pulseira já cadastrada - processar como leitura de jogo
     
     // ✨ NOVO: Validar se o evento está ACTIVE antes de processar pontos
-    const evento = await queryOne('SELECT id, status FROM evento WHERE LOWER(id) = LOWER(@id)', { id: crianca.eventoId });
+    const evento = await queryOne('SELECT eventoId, status FROM evento WHERE LOWER(eventoId) = LOWER(@id)', { id: crianca.eventoId });
     
     // Caça ao Monstro tem prioridade sobre o fluxo de território e confirma
     // scan, HP, vencedor e leitura na mesma transação.
@@ -437,14 +437,14 @@ router.post('/', async (req, res) => {
             if (result?.accepted && !result.alreadyScanned) {
               await tx.query(
                 `INSERT INTO leitura
-                  (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
-                   pontosAtribuidos, forcaSinal, empresaId, session_id)
+                  (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+                   pontosAtribuidos, forcaSinal, empresaId, sessaoId)
                  VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                          0, @signal, @empresaId, @sessionId)`,
                 {
                   id: leituraId,
                   checkpointId,
-                  criancaId: crianca.id,
+                  criancaId: crianca.criancaId,
                   uid: normalizedUid,
                   brincadeiraId: monsterSession.brincadeiraId,
                   signal: signal || -45,
@@ -494,11 +494,11 @@ router.post('/', async (req, res) => {
                 ? 'MONSTER_SPECIAL_ATTACK'
                 : 'MONSTER_PROGRESS';
           broadcastEvent({
-            type: eventTipo,
+            type: eventType,
             payload: {
               ...monsterResult,
               checkpointId,
-              criancaId: crianca.id,
+              criancaId: crianca.criancaId,
               criancaName: crianca.nome,
               timeId: crianca.timeId,
               eventoId: checkpoint.eventoId,
@@ -507,7 +507,7 @@ router.post('/', async (req, res) => {
 
           // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile
           const checkpointData = await queryOne(
-            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
+            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
             { id: checkpointId }
           );
           
@@ -528,7 +528,7 @@ router.post('/', async (req, res) => {
               id: leituraId,
               checkpointId,
               uid: normalizedUid,
-              criancaId: crianca.id,
+              criancaId: crianca.criancaId,
               criancaName: crianca.nome,
               timeId: crianca.timeId,
               teamColor: monsterResult.teamColor || '#FF0000',
@@ -544,7 +544,7 @@ router.post('/', async (req, res) => {
           
           console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Monster Hunt:`);
           console.log(`   - Destinatário: evento ${crianca.eventoId}`);
-          console.log(`   - Criança: ${crianca.name}`);
+          console.log(`   - Criança: ${crianca.nome}`);
           console.log(`   - Checkpoint: ${checkpointId}`);
           console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
           console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
@@ -570,10 +570,10 @@ router.post('/', async (req, res) => {
           attackType: monsterResult.attackType || null,
           damage: Number(monsterResult.damage || 0),
           monsterHp: Number(monsterResult.monsterHp || 0),
-          monsterMaxHp: Number(monsterResult.monsterMaxHp || monsterSession.max_hp || 500),
+          monsterMaxHp: Number(monsterResult.monsterMaxHp || monsterSession.vidaMaxima || 500),
           monsterDefeated: Boolean(monsterResult.monsterDefeated),
           teamMonsterHp: Number(monsterResult.teamMonsterHp ?? monsterResult.monsterHp ?? 0),
-          teamMonsterMaxHp: Number(monsterResult.teamMonsterMaxHp ?? monsterResult.monsterMaxHp ?? monsterSession.max_hp ?? 500),
+          teamMonsterMaxHp: Number(monsterResult.teamMonsterMaxHp ?? monsterResult.monsterMaxHp ?? monsterSession.vidaMaxima ?? 500),
           teamMonsterDefeated: Boolean(monsterResult.teamMonsterDefeated ?? monsterResult.monsterDefeated),
           teamVictory: Boolean(monsterResult.teamVictory ?? monsterResult.monsterDefeated),
           gameCompleted: Boolean(monsterResult.gameCompleted),
@@ -620,14 +620,14 @@ router.post('/', async (req, res) => {
         if (result?.accepted && !result.duplicate) {
           await tx.query(
             `INSERT INTO leitura
-              (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
-               pontosAtribuidos, forcaSinal, empresaId, session_id)
+              (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+               pontosAtribuidos, forcaSinal, empresaId, sessaoId)
              VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                      0, @signal, @empresaId, @sessionId)`,
             {
               id: leituraId,
               checkpointId,
-              criancaId: crianca.id,
+              criancaId: crianca.criancaId,
               uid: normalizedUid,
               brincadeiraId: treasureSession.brincadeiraId,
               signal: signal || -45,
@@ -646,11 +646,11 @@ router.post('/', async (req, res) => {
           ? 'TREASURE_ROUND_COMPLETED'
           : 'TREASURE_PROGRESS';
         broadcast({
-          type: eventTipo,
+          type: eventType,
           payload: {
             ...treasureResult,
             checkpointId,
-            criancaId: crianca.id,
+            criancaId: crianca.criancaId,
             criancaName: crianca.nome,
             timeId: crianca.timeId,
             eventoId: checkpoint.eventoId,
@@ -660,7 +660,7 @@ router.post('/', async (req, res) => {
         // ✨ NOVO: Enviar TERRITORY_CONQUERED para rastreio do avatar no mobile (replicado de Zone)
         if (treasureResult.accepted) {
           const checkpointCoords = await queryOne(
-            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
+            'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
             { id: checkpointId }
           );
           
@@ -681,7 +681,7 @@ router.post('/', async (req, res) => {
               id: leituraId,
               checkpointId,
               uid: normalizedUid,
-              criancaId: crianca.id,
+              criancaId: crianca.criancaId,
               criancaName: crianca.nome,
               timeId: crianca.timeId,
               teamColor: treasureResult.teamColor || '#00AA00',
@@ -697,7 +697,7 @@ router.post('/', async (req, res) => {
           
           console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Treasure Hunt:`);
           console.log(`   - Destinatário: evento ${checkpoint.eventoId}`);
-          console.log(`   - Criança: ${crianca.name}`);
+          console.log(`   - Criança: ${crianca.nome}`);
           console.log(`   - Checkpoint: ${checkpointId}`);
           console.log(`   - Coordenadas: mapX=${territoryPayload.payload.mapX}, mapY=${territoryPayload.payload.mapY}`);
           console.log(`   - Estrutura completa: ${JSON.stringify(territoryPayload, null, 2)}`);
@@ -741,78 +741,7 @@ router.post('/', async (req, res) => {
       }
     }
 
-    // ✅ ZONE CONQUEST: Novo jogo de domínio de zonas por equipe
-    const { getZoneConquestPartidaAtiva } = require('../utils/zoneConquest');
-    const zonePartidaAtiva = await getZoneConquestPartidaAtiva(checkpoint.eventoId);
-    
-    if (zonePartidaAtiva) {
-      const zoneResult = await withTransaction(async (tx) => {
-        const result = await processZoneConquestScan({
-          eventoId: checkpoint.eventoId,
-          checkpointId,
-          crianca,
-          brincadeiraId: zonePartidaAtiva.brincadeiraId,
-          uid: normalizedUid,
-          leituraId,
-          now,
-        });
-
-        if (result?.accepted) {
-          await tx.query(
-            `INSERT INTO leitura
-              (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
-               pontosAtribuidos, forcaSinal, empresaId)
-             VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
-                     0, @signal, @empresaId)`,
-            {
-              id: leituraId,
-              checkpointId,
-              criancaId: crianca.id,
-              uid: normalizedUid,
-              brincadeiraId: zonePartidaAtiva.brincadeiraId || null,
-              signal: signal || -45,
-              empresaId: crianca.empresaId,
-            }
-          );
-        }
-
-        return result;
-      });
-
-      if (zoneResult) {
-        broadcast({
-          type: 'ZONE_CHECKPOINT_SCANNED',
-          payload: {
-            ...zoneResult,
-            checkpointId,
-            criancaId: crianca.id,
-            criancaName: crianca.nome,
-            timeId: crianca.timeId,
-            eventoId: checkpoint.eventoId,
-          },
-        });
-
-        if (zoneResult.accepted) {
-          await broadcastChildCheckpointPassed({
-            checkpointId, crianca, eventoId: checkpoint.eventoId, gameType: 'zone_conquest',
-            teamColor: zoneResult.teamColor, leituraId, uid: normalizedUid, now,
-          });
-        }
-
-        return res.json({
-          ok: true,
-          registered: true,
-          autorizado: Boolean(zoneResult.accepted),
-          zone: true,
-          zoneAccepted: Boolean(zoneResult.accepted),
-          readingId: leituraId,
-          braceletCode: normalizedUid,
-          message: zoneResult.message || 'Leitura processada',
-        });
-      }
-    }
-
-    const checkpointData = await queryOne('SELECT * FROM pontoVerificacao WHERE id = @id', { id: checkpointId });
+    const checkpointData = await queryOne('SELECT * FROM pontoVerificacao WHERE checkpointId = @id', { id: checkpointId });
     
     if (!checkpointData) {
       return res.json({ ok: true, registered: true, braceletCode: normalizedUid, message: 'Pulseira cadastrada' });
@@ -827,7 +756,7 @@ router.post('/', async (req, res) => {
     if (zoneConquestTeamGame || zoneConquestIndividualGame) {
       try {
         const activeSession = await queryOne(
-          `SELECT id FROM ""sessaoJogo"" 
+          `SELECT id FROM "sessaoJogo" 
            WHERE LOWER(eventoId) = LOWER(@eventoId) 
              AND status = 'active'
            ORDER BY iniciadoEm DESC
@@ -878,7 +807,7 @@ router.post('/', async (req, res) => {
         type: 'ZONE_CONQUEST_TEAM_SCAN',
         payload: {
           checkpointId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           criancaName: crianca.nome,
           timeId: crianca.timeId,
           teamColor: crianca.teamColor,
@@ -901,7 +830,7 @@ router.post('/', async (req, res) => {
         gameMode: 'zone_conquest_team',
         pointsGained: scanResult.points,
         criancaName: crianca.nome,
-        message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt`,
+        message: `${crianca.nome} conquistou o checkpoint! +${scanResult.points}pt`,
       });
     }
 
@@ -947,7 +876,7 @@ router.post('/', async (req, res) => {
         type: 'ZONE_CONQUEST_INDIVIDUAL_SCAN',
         payload: {
           checkpointId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           criancaName: crianca.nome,
           pointsGained: scanResult.points,
           totalPoints: scanResult.totalPoints,
@@ -975,7 +904,7 @@ router.post('/', async (req, res) => {
         checkpointsRead: scanResult.checkpointsRead,
         version: scanResult.version,
         criancaName: crianca.nome,
-        message: `${crianca.name} conquistou o checkpoint! +${scanResult.points}pt (Total: ${scanResult.totalPoints}pt)`,
+        message: `${crianca.nome} conquistou o checkpoint! +${scanResult.points}pt (Total: ${scanResult.totalPoints}pt)`,
       });
     }
     
@@ -1020,7 +949,7 @@ router.post('/', async (req, res) => {
       });
     }
     
-    const pointsAwarded = checkpointData.points || 10;
+    const pointsAwarded = checkpointData.pontos || 10;
     const lockDuration = 15000;  // 15 segundos de lock (ninguém consegue)
     const cooldownDuration = 60000;  // 60 segundos para o mesmo time
     
@@ -1036,7 +965,7 @@ router.post('/', async (req, res) => {
           territorioTravadoAte = @lockedUntil,
           territorioCooldownAte = @cooldownUntil,
           ultimoConquistadoEm = @now
-        WHERE id = @checkpointId
+        WHERE checkpointId = @checkpointId
           AND eventoId = @eventoId
           AND empresaId = @empresaId
           AND (territorioTravadoAte IS NULL OR territorioTravadoAte <= @now)
@@ -1061,26 +990,26 @@ router.post('/', async (req, res) => {
       }
 
       await tx.query(
-        'UPDATE crianca SET scores = scores + @points WHERE id = @criancaId',
-        { points: pointsAwarded, criancaId: crianca.id }
+        'UPDATE crianca SET pontos = pontos + @points WHERE criancaId = @criancaId',
+        { points: pointsAwarded, criancaId: crianca.criancaId }
       );
 
       await tx.query(
-        `UPDATE time SET points = (SELECT ISNULL(SUM(scores), 0) FROM crianca WHERE timeId = @timeId)
-         WHERE id = @timeId`,
+        `UPDATE "time" SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
+         WHERE timeId = @timeId`,
         { timeId: crianca.timeId }
       );
 
       await tx.query(
         `INSERT INTO leitura
-          (id, checkpointId, criancaId, uid, brincadeiraId, autorizado,
-           pontosAtribuidos, forcaSinal, empresaId, session_id)
+          (leituraId, checkpointId, criancaId, uid, brincadeiraId, autorizado,
+           pontosAtribuidos, forcaSinal, empresaId, sessaoId)
          VALUES (@id, @checkpointId, @criancaId, @uid, @brincadeiraId, 1,
                  @points, @signal, @empresaId, @sessionId)`,
         {
           id: leituraId,
           checkpointId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           uid: normalizedUid,
           brincadeiraId: brincadeiraId || null,
           points: pointsAwarded,
@@ -1093,12 +1022,12 @@ router.post('/', async (req, res) => {
 
       await tx.query(
         `INSERT INTO pontuacao
-          (id, eventoId, criancaId, brincadeiraId, checkpointId, points, leituraId, empresaId)
+          (pontuacaoId, eventoId, criancaId, brincadeiraId, checkpointId, pontos, leituraId, empresaId)
          VALUES (@id, @eventoId, @criancaId, @brincadeiraId, @checkpointId, @points, @leituraId, @empresaId)`,
         {
           id: uuidv4(),
           eventoId: crianca.eventoId,
-          criancaId: crianca.id,
+          criancaId: crianca.criancaId,
           brincadeiraId: brincadeiraId || null,
           checkpointId,
           points: pointsAwarded,
@@ -1107,16 +1036,16 @@ router.post('/', async (req, res) => {
         }
       );
 
-      const time = await tx.queryOne('SELECT color FROM time WHERE id = @id', { id: crianca.timeId });
+      const time = await tx.queryOne('SELECT cor FROM "time" WHERE timeId = @id', { id: crianca.timeId });
       return {
         conflict: false,
-        teamColor: time?.color || '#00AA00',
+        teamColor: time?.cor || '#00AA00',
       };
     });
 
     if (transactionResult.conflict) {
       const current = await queryOne(
-        'SELECT territorioTravadoAte, territorioCooldownAte, territorioDonoTimeId FROM pontoVerificacao WHERE id = @id',
+        'SELECT territorioTravadoAte, territorioCooldownAte, territorioDonoTimeId FROM pontoVerificacao WHERE checkpointId = @id',
         { id: checkpointId }
       );
       const currentLocked = current?.territorioTravadoAte && new Date(current.territorioTravadoAte) > now;
@@ -1158,7 +1087,7 @@ router.post('/', async (req, res) => {
     
     // 📍 Buscar coordenadas do checkpoint para rastreio no mobile
     const checkpointCoords = await queryOne(
-      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE id = @id',
+      'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     
@@ -1179,7 +1108,7 @@ router.post('/', async (req, res) => {
         id: leituraId,
         checkpointId,
         uid: normalizedUid,
-        criancaId: crianca.id,
+        criancaId: crianca.criancaId,
         criancaName: crianca.nome,
         timeId: crianca.timeId,
         teamColor,
@@ -1195,7 +1124,7 @@ router.post('/', async (req, res) => {
     
     console.log(`📡 [RASTREIO] Enviando TERRITORY_CONQUERED para Zone Conquest:`);
     console.log(`   - Destinatário: evento ${crianca.eventoId}`);
-    console.log(`   - Criança: ${crianca.name}`);
+    console.log(`   - Criança: ${crianca.nome}`);
     console.log(`   - Checkpoint: ${checkpointId}`);
     console.log(`   - Coordenadas: mapX=${zonePayload.payload.mapX}, mapY=${zonePayload.payload.mapY}`);
     console.log(`   - Estrutura completa: ${JSON.stringify(zonePayload, null, 2)}`);
@@ -1216,7 +1145,7 @@ router.post('/', async (req, res) => {
       points: pointsAwarded,
       criancaName: crianca.nome, 
       readingId: leituraId,
-      message: `${crianca.name} conquistou o território! +${pointsAwarded}pt`
+      message: `${crianca.nome} conquistou o território! +${pointsAwarded}pt`
     });
     
   } catch (err) {
@@ -1235,7 +1164,7 @@ router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
     
     // Validar acesso ao evento
     const evento = await queryOne(
-      'SELECT id, empresaId FROM evento WHERE id = @id',
+      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
       { id: eventoId }
     );
     
@@ -1286,7 +1215,7 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
     const sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
 
     const evento = await queryOne(
-      'SELECT id, empresaId FROM evento WHERE LOWER(id) = LOWER(@eventoId)',
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
       { eventoId }
     );
     if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
@@ -1301,42 +1230,42 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
       console.log(`   🔍 [HISTORICO] Filtrando por session_id=${sessionId}`);
       history = await allQuery(`
         SELECT TOP (@limit)
-          l.id,
+          l.leituraId,
           c.eventoId,
           l.criancaId AS child_id,
-          c.name AS child_nome,
-          c.nickname AS child_nicknome,
+          c.nome AS child_nome,
+          c.apelido AS child_apelido,
           l.checkpointId,
-          cp.name AS checkpoint_nome,
+          cp.nome AS checkpoint_nome,
           l.pontosAtribuidos AS points,
           l.criadoEm,
           t.cor AS team_color
         FROM leitura l
-        LEFT JOIN crianca c ON c.id = l.criancaId
-        LEFT JOIN pontoVerificacao cp ON cp.id = l.checkpointId
-        LEFT JOIN time t ON t.id = c.timeId
+        LEFT JOIN crianca c ON c.criancaId = l.criancaId
+        LEFT JOIN pontoVerificacao cp ON cp.checkpointId = l.checkpointId
+        LEFT JOIN "time" t ON t.timeId = c.timeId
         WHERE LOWER(c.eventoId) = LOWER(@eventoId)
-          AND l.session_id = @sessionId
+          AND l.sessaoId = @sessionId
           AND (l.empresaId = @empresaId OR @master = 1)
         ORDER BY l.criadoEm DESC
       `, { limit, eventoId, empresaId, master, sessionId });
     } else {
       history = await allQuery(`
         SELECT TOP (@limit)
-          p.id,
+          p.pontuacaoId,
           p.eventoId,
           p.criancaId AS child_id,
-          c.name AS child_nome,
-          c.nickname AS child_nicknome,
+          c.nome AS child_nome,
+          c.apelido AS child_apelido,
           p.checkpointId,
-          cp.name AS checkpoint_nome,
-          p.points,
+          cp.nome AS checkpoint_nome,
+          p.pontos,
           p.criadoEm,
           t.cor AS team_color
         FROM pontuacao p
-        LEFT JOIN crianca c ON c.id = p.criancaId
-        LEFT JOIN pontoVerificacao cp ON cp.id = p.checkpointId
-        LEFT JOIN time t ON t.id = c.timeId
+        LEFT JOIN crianca c ON c.criancaId = p.criancaId
+        LEFT JOIN pontoVerificacao cp ON cp.checkpointId = p.checkpointId
+        LEFT JOIN "time" t ON t.timeId = c.timeId
         WHERE LOWER(p.eventoId) = LOWER(@eventoId)
           AND (p.empresaId = @empresaId OR @master = 1)
         ORDER BY p.criadoEm DESC
@@ -1350,24 +1279,24 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
       if (req.query.allGames === '1') {
         const extra = await allQuery(`
           SELECT TOP (@limit)
-            l.id,
+            l.leituraId,
             c.eventoId,
             l.criancaId AS child_id,
-            c.name AS child_nome,
-            c.nickname AS child_nicknome,
+            c.nome AS child_nome,
+            c.apelido AS child_apelido,
             l.checkpointId,
-            cp.name AS checkpoint_nome,
+            cp.nome AS checkpoint_nome,
             l.pontosAtribuidos AS points,
             l.criadoEm,
             t.cor AS team_color
           FROM leitura l
-          LEFT JOIN crianca c ON c.id = l.criancaId
-          LEFT JOIN pontoVerificacao cp ON cp.id = l.checkpointId
-          LEFT JOIN time t ON t.id = c.timeId
+          LEFT JOIN crianca c ON c.criancaId = l.criancaId
+          LEFT JOIN pontoVerificacao cp ON cp.checkpointId = l.checkpointId
+          LEFT JOIN "time" t ON t.timeId = c.timeId
           WHERE LOWER(c.eventoId) = LOWER(@eventoId)
             AND l.autorizado = 1
             AND (l.empresaId = @empresaId OR @master = 1)
-            AND NOT EXISTS (SELECT 1 FROM pontuacao p WHERE p.leituraId = l.id)
+            AND NOT EXISTS (SELECT 1 FROM pontuacao p WHERE p.leituraId = l.leituraId)
           ORDER BY l.criadoEm DESC
         `, { limit, eventoId, empresaId, master });
 

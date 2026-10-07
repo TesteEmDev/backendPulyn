@@ -6,7 +6,7 @@ const {
   createAttemptLimiter,
 } = require('../utils/braceletLinkRules');
 
-const aberta = { status: 'em_uso', crianca_id: 'c1', evento_id: 'e1', evento_status: 'scheduled' };
+const aberta = { status: 'em_uso', criancaId: 'c1', eventoId: 'e1', evento_status: 'scheduled' };
 
 test('UID de NTAG (7 bytes) é normalizado para maiúsculas, sem separadores', () => {
   assert.deepEqual(parseBraceletUid('04:e7:2c:1a:89:68:80'), { uid: '04E72C1A896880' });
@@ -34,8 +34,8 @@ test('pulseira inexistente, livre, sem criança ou sem evento: mesma resposta ge
   const casos = [
     null,
     { ...aberta, status: 'disponivel' },
-    { ...aberta, crianca_id: null },
-    { ...aberta, evento_id: null },
+    { ...aberta, criancaId: null },
+    { ...aberta, eventoId: null },
   ];
   for (const row of casos) {
     const result = checkBraceletLinkable(row);

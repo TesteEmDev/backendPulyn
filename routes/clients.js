@@ -11,13 +11,13 @@ const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
 // (o cadastro cria os dois). Devolve os ids do registro legado que corresponde
 // (nome + cidade) à empresa, para editar/excluir os dois lados juntos.
 async function legacyClienteIdsFor(empresaId) {
-  const empresa = await queryOne('SELECT nome, cidade FROM empresa WHERE id = @id', { id: empresaId });
+  const empresa = await queryOne('SELECT nome, cidade FROM empresa WHERE empresaId = @id', { id: empresaId });
   if (!empresa) return [];
-  const rows = await allQuery('SELECT id, nome, cidade FROM cliente');
+  const rows = await allQuery('SELECT clienteId, nome, cidade FROM cliente');
   return rows
-    .filter((c) => normalizeClientText(c.name) === normalizeClientText(empresa.nome) &&
+    .filter((c) => normalizeClientText(c.nome) === normalizeClientText(empresa.nome) &&
       normalizeClientText(c.cidade) === normalizeClientText(empresa.cidade))
-    .map((c) => c.id);
+    .map((c) => c.clienteId);
 }
 
 // ✅ APENAS MASTER pode listar cliente
@@ -85,7 +85,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     const planDefinition = PLAN_DEFINITIONS[planId] || null;
 
     const details = {
-      id: cliente.id,
+      id: cliente.clienteId,
       origin: cliente.origin,
       name: cliente.nome,
       cnpj: null,
@@ -111,19 +111,19 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
     if (cliente.empresaId) {
       const empresaId = cliente.empresaId;
       const [empresa, users, events, tickets] = await Promise.all([
-        queryOne('SELECT cnpj, dataAtualizacao FROM empresa WHERE id = @id', { id: empresaId }),
+        queryOne('SELECT cnpj, dataAtualizacao FROM empresa WHERE empresaId = @id', { id: empresaId }),
         allQuery(
-          `SELECT id, email, perfil, status, ultimoAcesso, dataCriacao
-           FROM logins WHERE empresaId = @id ORDER BY perfil, email`,
+          `SELECT loginId, email, perfil, status, ultimoAcesso, dataCriacao
+           FROM login WHERE empresaId = @id ORDER BY perfil, email`,
           { id: empresaId }
         ),
         allQuery(
-          `SELECT e.id, e.nome, TO_CHAR(e.data, 'YYYY-MM-DD') AS date_str, e.hora, e.duracao, e.status,
+          `SELECT e.eventoId, e.nome, TO_CHAR(e.data, 'YYYY-MM-DD') AS date_str, e.hora, e.duracao, e.status,
                   e.nomeResponsavel, e.iniciadoEm, e.finalizadoEm,
-                  (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.id) AS children_count,
+                  (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS children_count,
                   (SELECT COUNT(*) FROM pontoVerificacao k
-                    WHERE k.eventoId = e.id
-                      AND LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception') AS checkpoints_count
+                    WHERE k.eventoId = e.eventoId
+                      AND LOWER(COALESCE(k.proposito, 'game')) <> 'reception') AS totalCheckpoints
            FROM evento e
            WHERE e.empresaId = @id
            ORDER BY e.data DESC, e.hora DESC`,
@@ -158,7 +158,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
         startedAt: toIso(e.iniciadoEm),
         endedAt: toIso(e.finalizadoEm),
         childrenCount: Number(e.children_count) || 0,
-        checkpointsCount: Number(e.checkpoints_count) || 0,
+        checkpointsCount: Number(e.totalCheckpoints) || 0,
       }));
 
       const countByGroup = (group) => details.events.filter((e) => EVENT_STATUS_GROUPS[group].includes(e.status)).length;
@@ -220,7 +220,7 @@ router.post('/', verifyToken, async (req, res) => {
     try {
       // 1️⃣ Criar EMPRESA
       await query(
-        `INSERT INTO empresa (id, nome, cidade, estado, telefone, plano, status) 
+        `INSERT INTO empresa (empresaId, nome, cidade, estado, telefone, plano, status) 
          VALUES (@id, @nome, @cidade, @estado, @telefone, @plano, @status)`,
         {
           id: empresaId,
@@ -232,11 +232,11 @@ router.post('/', verifyToken, async (req, res) => {
           status: 'active'
         }
       );
-      console.log(`✅ Empresa criada: ${name} (ID: ${empresaId})`);
+      console.log(`✅ Empresa criada: ${nome} (ID: ${empresaId})`);
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO logins (id, empresaId, email, senha, status) 
+        `INSERT INTO login (loginId, empresaId, email, senha, status) 
          VALUES (@id, @empresaId, @email, @senha, @status)`,
         {
           id: loginId,
@@ -250,12 +250,12 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO cliente (id, nome, cidade, estado, email, telefone, plano, status, empresaId) 
+        `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId) 
          VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId)`,
         {
           id: clienteId,
           empresaId: empresaId,
-          name: nome,
+          nome: nome,
           cidade: cidade,
           estado: estado,
           email: email,
@@ -264,7 +264,7 @@ router.post('/', verifyToken, async (req, res) => {
           status: 'active'
         }
       );
-      console.log(`✅ Cliente criado: ${name} (ID: ${clienteId})`);
+      console.log(`✅ Cliente criado: ${nome} (ID: ${clienteId})`);
 
       res.json({
         id: clienteId,
@@ -277,7 +277,7 @@ router.post('/', verifyToken, async (req, res) => {
         telefone,
         plan: plan || 'starter',
         status: 'active',
-        message: `Cliente ${name} criado com sucesso! Email: ${email}`
+        message: `Cliente ${nome} criado com sucesso! Email: ${email}`
       });
 
     } catch (error) {
@@ -310,7 +310,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       await query(
         `UPDATE empresa SET nome = @nome, cidade = @cidade, estado = @estado, 
          telefone = @telefone, plano = @plano, status = @status, dataAtualizacao = GETDATE()
-         WHERE id = @id`,
+         WHERE empresaId = @id`,
         {
           nome: nome,
           cidade: cidade,
@@ -326,8 +326,8 @@ router.put('/:id', verifyToken, async (req, res) => {
       // e-mail era gravado em todos os logins da empresa: recepção, telão, famílias...)
       if (email) {
         await query(
-          `UPDATE logins SET email = @email, dataAtualizacao = GETDATE()
-           WHERE empresaId = @empresaId AND role = 'admin'`,
+          `UPDATE login SET email = @email, dataAtualizacao = GETDATE()
+           WHERE empresaId = @empresaId AND perfil = 'admin'`,
           {
             email: email,
             empresaId: req.params.id
@@ -337,12 +337,12 @@ router.put('/:id', verifyToken, async (req, res) => {
 
       for (const legacyId of legacyIds) {
         await query(
-          `UPDATE cliente SET nome = COALESCE(@nome, name), cidade = COALESCE(@cidade, cidade),
+          `UPDATE cliente SET nome = COALESCE(@nome, nome), cidade = COALESCE(@cidade, cidade),
            estado = COALESCE(@estado, estado), email = COALESCE(@email, email),
            telefone = COALESCE(@telefone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
-           WHERE id = @id`,
+           WHERE clienteId = @id`,
           {
-            name: name ?? null, cidade: cidade ?? null, estado: estado ?? null, email: email || null,
+            nome: nome ?? null, cidade: cidade ?? null, estado: estado ?? null, email: email || null,
             telefone: telefone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
           }
         );
@@ -371,18 +371,18 @@ router.put('/:id/status', verifyToken, async (req, res) => {
 
     const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
     for (const legacyId of legacyIds) {
-      await query('UPDATE cliente SET status = @status WHERE id = @id', { status, id: legacyId });
+      await query('UPDATE cliente SET status = @status WHERE clienteId = @id', { status, id: legacyId });
     }
 
     // Atualizar status na EMPRESA
     await query(
-      'UPDATE empresa SET status = @status, dataAtualizacao = GETDATE() WHERE id = @id',
+      'UPDATE empresa SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
       { status, id: req.params.id }
     );
 
     // Atualizar status no LOGIN também
     await query(
-      'UPDATE logins SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
+      'UPDATE login SET status = @status, dataAtualizacao = GETDATE() WHERE empresaId = @id',
       { status, id: req.params.id }
     );
 
@@ -408,21 +408,21 @@ router.delete('/:id', verifyToken, async (req, res) => {
 
       // 1. Deletar LOGIN
       await query(
-        'DELETE FROM logins WHERE empresaId = @id',
+        'DELETE FROM login WHERE empresaId = @id',
         { id: req.params.id }
       );
       console.log(`✅ Login deletado`);
 
       // 2. Deletar EMPRESA
       await query(
-        'DELETE FROM empresa WHERE id = @id',
+        'DELETE FROM empresa WHERE empresaId = @id',
         { id: req.params.id }
       );
       console.log(`✅ Empresa deletada`);
 
       // 3. Deletar CLIENTE (compatibilidade)
       for (const legacyId of legacyIds) {
-        await query('DELETE FROM cliente WHERE id = @id', { id: legacyId });
+        await query('DELETE FROM cliente WHERE clienteId = @id', { id: legacyId });
       }
       console.log(`✅ Cliente deletado`);
 

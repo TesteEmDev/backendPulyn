@@ -29,12 +29,12 @@ router.use(verifyToken, requireRole('kiosk'));
 router.get('/events', async (req, res) => {
   try {
     const events = await require('../database').allQuery(
-      `SELECT e.id, e.nome, e.data, e.hora, e.duracao, e.status,
+      `SELECT e.eventoId, e.nome, e.data, e.hora, e.duracao, e.status,
               CASE WHEN EXISTS (
                 SELECT 1
                 FROM pontoVerificacao c
-                WHERE c.eventoId = e.id
-                  AND LOWER(COALESCE(c.propositoCheckpoint, 'game')) = 'reception'
+                WHERE c.eventoId = e.eventoId
+                  AND LOWER(COALESCE(c.proposito, 'game')) = 'reception'
               ) THEN 1 ELSE 0 END AS has_reception_checkpoint
        FROM evento e
        WHERE e.empresaId = @empresaId
@@ -55,15 +55,15 @@ router.get('/events/:eventId/reception-readings', async (req, res) => {
   try {
     const { queryOne } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresaId, status FROM evento
-       WHERE id = @eventId AND empresaId = @empresaId`,
+      `SELECT eventoId, empresaId, status FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto' });
 
     const since = Number(req.query.since || 0);
-    const eventKey = String(event.id).trim().toLowerCase();
+    const eventKey = String(event.eventoId).trim().toLowerCase();
     const queue = global.receptionReadingQueues?.get(eventKey) || [];
     const readings = queue.filter(reading => Number(reading.receivedAt || 0) > since);
     res.json({ readings });
@@ -78,19 +78,19 @@ router.get('/events/:eventId/teams', async (req, res) => {
   try {
     const { queryOne, allQuery } = require('../database');
     const event = await queryOne(
-      `SELECT id, empresaId, status FROM evento
-       WHERE id = @eventId AND empresaId = @empresaId`,
+      `SELECT eventoId, empresaId, status FROM evento
+       WHERE eventoId = @eventId AND empresaId = @empresaId`,
       { eventId: req.params.eventId, empresaId: req.user.empresaId }
     );
     if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
     if (!isOpenEvent(event)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
 
     const teams = await allQuery(
-      `SELECT id, nome, color, points
-       FROM time
+      `SELECT timeId, nome, cor, pontos
+       FROM "time"
        WHERE eventoId = @eventId AND empresaId = @empresaId
-       ORDER BY name`,
-      { eventId: event.id, empresaId: req.user.empresaId }
+       ORDER BY nome`,
+      { eventId: event.eventoId, empresaId: req.user.empresaId }
     );
     res.json(teams || []);
   } catch (error) {
@@ -131,9 +131,9 @@ router.get('/bracelets/:codigo', async (req, res) => {
 // Cadastro atômico: cria (se necessário) e vincula a pulseira junto com a criança.
 router.post('/participants', async (req, res) => {
   try {
-    const { eventId, nome, nicknome, age, avatar, braceletCode, timeId } = req.body || {};
+    const { eventId, nome, apelido, age, avatar, braceletCode, timeId } = req.body || {};
     const codigo = normalizeUid(braceletCode);
-    const cleanName = String(name || '').trim();
+    const cleanName = String(nome || '').trim();
     const avatarValue = getAvatarForCreate(avatar);
 
     if (!avatarValue) {
@@ -144,14 +144,14 @@ router.post('/participants', async (req, res) => {
     if (!eventId || !cleanName || !codigo) {
       return res.status(400).json({ error: 'Evento, nome e pulseira são obrigatórios' });
     }
-    if (cleanName.length > 100 || String(nickname || '').trim().length > 100) {
+    if (cleanName.length > 100 || String(apelido || '').trim().length > 100) {
       return res.status(400).json({ error: 'Nome ou apelido excede o limite permitido' });
     }
 
     const participant = await withTransaction(async (tx) => {
       const event = await tx.queryOne(
-        `SELECT id, empresaId, status FROM evento
-         WHERE id = @eventId AND empresaId = @empresaId`,
+        `SELECT eventoId, empresaId, status FROM evento
+         WHERE eventoId = @eventId AND empresaId = @empresaId`,
         { eventId, empresaId: req.user.empresaId }
       );
       if (!event) throw httpError('Evento não encontrado', 404);
@@ -160,8 +160,8 @@ router.post('/participants', async (req, res) => {
       let team = null;
       if (timeId) {
         team = await tx.queryOne(
-          `SELECT id, name FROM time
-           WHERE id = @timeId AND eventoId = @eventId AND empresaId = @empresaId`,
+          `SELECT timeId, nome FROM "time"
+           WHERE timeId = @timeId AND eventoId = @eventId AND empresaId = @empresaId`,
           { timeId, eventId, empresaId: event.empresaId }
         );
         if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
@@ -193,15 +193,15 @@ router.post('/participants', async (req, res) => {
       const childId = uuidv4();
       await tx.query(
         `INSERT INTO crianca
-          (id, eventoId, empresaId, timeId, nome, nicknome, age, avatar, codigoPulseira, scores)
-         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @nicknome, @age, @avatar, @codigo, 0)`,
+          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos)
+         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigo, 0)`,
         {
           id: childId,
-          eventId: event.id,
+          eventId: event.eventoId,
           empresaId: event.empresaId,
-          timeId: team ? team.id : null,
-          name: cleanNome,
-          nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
+          timeId: team ? team.timeId : null,
+          nome: cleanName,
+          apelido: String(apelido || '').trim() || cleanName.split(/\s+/)[0],
           age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
           avatar: avatarValue,
           codigo,
@@ -223,13 +223,13 @@ router.post('/participants', async (req, res) => {
 
       return {
         id: childId,
-        name: cleanNome,
-        nickname: String(nickname || '').trim() || cleanName.split(/\s+/)[0],
+        name: cleanName,
+        nickname: String(apelido || '').trim() || cleanName.split(/\s+/)[0],
         age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
         avatar: avatarValue,
         braceletCode: codigo,
-        timeId: team ? team.id : null,
-        teamName: team ? team.name : null,
+        timeId: team ? team.timeId : null,
+        teamName: team ? team.nome : null,
         scores: 0,
       };
     });

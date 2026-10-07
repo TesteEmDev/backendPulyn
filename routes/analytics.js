@@ -58,7 +58,7 @@ const sumMrr = (clients) => clients.filter(isActive).reduce((sum, c) => sum + pl
 
 // Escopo "de cliente": evento de empresa (não os de teste sem empresa nem da conta Master).
 const CUSTOMER_EVENTS = `e.empresaId IS NOT NULL
-  AND e.empresaId NOT IN (SELECT id FROM empresa WHERE nome = 'Master Admin')`;
+  AND e.empresaId NOT IN (SELECT empresaId FROM empresa WHERE nome = 'Master Admin')`;
 
 // ✅ Indicadores gerais
 router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master pode ver métricas globais'), async (req, res) => {
@@ -79,8 +79,8 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(k.status, '')) = 'online' THEN 1 ELSE 0 END) AS online
         FROM pontoVerificacao k
-        JOIN evento e ON e.id = k.eventoId
-        WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
+        JOIN evento e ON e.eventoId = k.eventoId
+        WHERE LOWER(COALESCE(k.proposito, 'game')) <> 'reception'
           AND ${CUSTOMER_EVENTS}
       `),
       queryOne(`
@@ -88,7 +88,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(c.status, 'active')) = 'active' THEN 1 ELSE 0 END) AS active
         FROM crianca c
-        JOIN evento e ON e.id = c.eventoId
+        JOIN evento e ON e.eventoId = c.eventoId
         WHERE ${CUSTOMER_EVENTS}
       `),
     ]);
@@ -198,8 +198,8 @@ router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso neg
     const rows = await allQuery(`
       SELECT k.criadoEm
       FROM pontoVerificacao k
-      JOIN evento e ON e.id = k.eventoId
-      WHERE LOWER(COALESCE(k.propositoCheckpoint, 'game')) <> 'reception'
+      JOIN evento e ON e.eventoId = k.eventoId
+      WHERE LOWER(COALESCE(k.proposito, 'game')) <> 'reception'
         AND ${CUSTOMER_EVENTS}
     `);
 

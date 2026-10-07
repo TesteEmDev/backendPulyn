@@ -22,13 +22,13 @@ async function ensureSupportTable() {
     if (DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql') {
       await query(`
         CREATE TABLE IF NOT EXISTS chamadoSuport (
-          id varchar(36) PRIMARY KEY,
+          ticketId varchar(36) PRIMARY KEY,
           empresaId varchar(36),
           cliente varchar(255) NOT NULL,
-          subject varchar(255) NOT NULL,
+          assunto varchar(255) NOT NULL,
           status varchar(20) NOT NULL DEFAULT 'aberto',
-          priority varchar(20) NOT NULL DEFAULT 'media',
-          description texto,
+          prioridade varchar(20) NOT NULL DEFAULT 'media',
+          descricao texto,
           atribuidoPara varchar(255),
           criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
           atualizadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -117,7 +117,7 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
     await ensureSupportTable();
     const tickets = await allQuery(`
       SELECT TOP (@limit)
-        id, empresaId, cliente, subject, status, priority, description,
+        ticketId, empresaId, cliente, assunto, status, prioridade, descricao,
         atribuidoPara, criadoEm, atualizadoEm
       FROM chamadoSuport
       ORDER BY criadoEm DESC
@@ -144,7 +144,7 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
     const id = uuidv4();
     await query(`
       INSERT INTO chamadoSuport
-        (id, empresaId, cliente, subject, status, priority, description, atribuidoPara)
+        (ticketId, empresaId, cliente, assunto, status, prioridade, descricao, atribuidoPara)
       VALUES
         (@id, @empresaId, @cliente, @subject, @status, @priority, @description, @atribuidoPara)
     `, {
@@ -158,7 +158,7 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
       atribuidoPara: atribuidoPara ? String(atribuidoPara) : 'Atribuir',
     });
 
-    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE id = @id', { id });
+    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE ticketId = @id', { id });
     return res.status(201).json(serializeTicket(ticket));
   } catch (err) {
     console.error('❌ Erro ao criar ticket:', err);
@@ -174,15 +174,15 @@ router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
       return res.status(400).json({ error: 'status inválido' });
     }
 
-    const existing = await queryOne('SELECT id FROM chamadoSuport WHERE id = @id', { id: req.params.id });
+    const existing = await queryOne('SELECT ticketId FROM chamadoSuport WHERE ticketId = @id', { id: req.params.id });
     if (!existing) return res.status(404).json({ error: 'Ticket não encontrado' });
 
     await query(`
       UPDATE chamadoSuport
       SET status = @status, atualizadoEm = CURRENT_TIMESTAMP
-      WHERE id = @id
+      WHERE ticketId = @id
     `, { id: req.params.id, status });
-    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE id = @id', { id: req.params.id });
+    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE ticketId = @id', { id: req.params.id });
     return res.json(serializeTicket(ticket));
   } catch (err) {
     console.error('❌ Erro ao atualizar status do ticket:', err);

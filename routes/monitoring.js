@@ -28,24 +28,24 @@ function formatEvent(event) {
 async function loadMonitoringData() {
   const [companies, pontoVerificacao, events] = await Promise.all([
     allQuery(`
-      SELECT id, nome, cidade, estado, status
+      SELECT empresaId, nome, cidade, estado, status
       FROM empresa
       WHERE nome <> @masterName
       ORDER BY nome
     `, { masterName: 'Master Admin' }),
     allQuery(`
-      SELECT id, eventoId, empresaId, nome, status, ultimoVisto, ip, zone, points
+      SELECT checkpointId, eventoId, empresaId, nome, status, ultimoVisto, ip, zona, pontos
       FROM pontoVerificacao
-      WHERE LOWER(COALESCE(propositoCheckpoint, 'game')) <> 'reception'
+      WHERE LOWER(COALESCE(proposito, 'game')) <> 'reception'
     `),
     allQuery(`
-      SELECT id, empresaId, nome, [date] AS event_date, [time] AS event_time, criadoEm
+      SELECT eventoId, empresaId, nome, [data] AS event_date, [hora] AS event_time, criadoEm
       FROM evento
       WHERE empresaId IS NOT NULL
     `),
   ]);
 
-  const eventById = new Map(events.map(event => [String(event.id), event]));
+  const eventById = new Map(events.map(event => [String(event.eventoId), event]));
   const checkpointsByCompany = new Map();
   pontoVerificacao.forEach(checkpoint => {
     const event = eventById.get(String(checkpoint.eventoId));
@@ -69,37 +69,37 @@ async function loadMonitoringData() {
 
   const staleLimit = Date.now() - (5 * 60 * 1000);
   const units = companies.map(company => {
-    const companyCheckpoints = checkpointsByCompany.get(String(company.id)) || [];
+    const companyCheckpoints = checkpointsByCompany.get(String(company.empresaId)) || [];
     const checkpointItems = companyCheckpoints.map(checkpoint => {
       const lastSeen = asDate(checkpoint.ultimoVisto);
       const statusValue = String(checkpoint.status || '').toLowerCase();
       const online = statusValue === 'online' && (!lastSeen || lastSeen.getTime() >= staleLimit);
       return {
-        id: checkpoint.id,
+        id: checkpoint.checkpointId,
         name: checkpoint.nome,
         status: online ? 'online' : 'offline',
         lastSeen: checkpoint.ultimoVisto || null,
         ip: checkpoint.ip || null,
-        zone: checkpoint.zone || null,
-        points: checkpoint.points,
+        zone: checkpoint.zona || null,
+        points: checkpoint.pontos,
       };
     });
     const onlineCount = checkpointItems.filter(checkpoint => checkpoint.status === 'online').length;
     const alerts = checkpointItems
       .filter(checkpoint => checkpoint.status !== 'online')
-      .map(checkpoint => `${checkpoint.nome || checkpoint.id} offline`);
+      .map(checkpoint => `${checkpoint.nome || checkpoint.checkpointId} offline`);
     if (checkpointItems.length === 0) alerts.push('Nenhum checkpoint cadastrado');
     if (String(company.status || '').toLowerCase() !== 'active') alerts.push(`Empresa ${company.status || 'inativa'}`);
 
     return {
-      id: company.id,
+      id: company.empresaId,
       name: company.nome,
       cidade: company.cidade,
       estado: company.estado,
       status: onlineCount > 0 ? 'online' : 'offline',
       checkpointsActive: onlineCount,
       checkpointsTotal: checkpointItems.length,
-      lastEvent: formatEvent(eventsByCompany.get(String(company.id))),
+      lastEvent: formatEvent(eventsByCompany.get(String(company.empresaId))),
       latency: null,
       uptime: null,
       alerts,
