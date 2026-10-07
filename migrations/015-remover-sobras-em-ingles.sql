@@ -28,13 +28,35 @@ BEGIN
   END IF;
 END $$;
 
--- 2. Índices duplicados criados por engano
-DROP INDEX IF EXISTS uq_family_invites_token_hash;
-DROP INDEX IF EXISTS uq_family_child_link;
+-- 2 e 3. Índices únicos equivalentes. Versões diferentes do código criaram, ao longo do tempo,
+-- até três índices únicos iguais em cada tabela. Fica um só, com o nome em português que o
+-- código usa hoje (criado por renomeação, se ainda não existir), e os equivalentes são removidos.
+DO $$
+BEGIN
+  IF to_regclass('public."uqConviteFamiliaHashToken"') IS NULL THEN
+    IF to_regclass('public."uqFamilyInvitesTokenHash"') IS NOT NULL THEN
+      ALTER INDEX "uqFamilyInvitesTokenHash" RENAME TO "uqConviteFamiliaHashToken";
+    ELSIF to_regclass('public.uq_family_invites_token_hash') IS NOT NULL THEN
+      ALTER INDEX uq_family_invites_token_hash RENAME TO "uqConviteFamiliaHashToken";
+    END IF;
+  END IF;
+  IF to_regclass('public."uqConviteFamiliaHashToken"') IS NOT NULL THEN
+    DROP INDEX IF EXISTS "uqFamilyInvitesTokenHash";
+    DROP INDEX IF EXISTS uq_family_invites_token_hash;
+  END IF;
 
--- 3. Nomes em português (os dois índices únicos passam a ter o nome que o código usa)
-ALTER INDEX IF EXISTS "uqFamilyInvitesTokenHash" RENAME TO "uqConviteFamiliaHashToken";
-ALTER INDEX IF EXISTS "uqFamilyChildLink" RENAME TO "uqVinculoFamiliarLoginCrianca";
+  IF to_regclass('public."uqVinculoFamiliarLoginCrianca"') IS NULL THEN
+    IF to_regclass('public."uqFamilyChildLink"') IS NOT NULL THEN
+      ALTER INDEX "uqFamilyChildLink" RENAME TO "uqVinculoFamiliarLoginCrianca";
+    ELSIF to_regclass('public.uq_family_child_link') IS NOT NULL THEN
+      ALTER INDEX uq_family_child_link RENAME TO "uqVinculoFamiliarLoginCrianca";
+    END IF;
+  END IF;
+  IF to_regclass('public."uqVinculoFamiliarLoginCrianca"') IS NOT NULL THEN
+    DROP INDEX IF EXISTS "uqFamilyChildLink";
+    DROP INDEX IF EXISTS uq_family_child_link;
+  END IF;
+END $$;
 
 DO $$
 BEGIN

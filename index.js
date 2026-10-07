@@ -8,6 +8,14 @@ const fs = require('fs');
 const path = require('path');
 const { query, allQuery, queryOne, closeDB, DB_DRIVER } = require('./database');
 
+// Em produção o segredo dos tokens precisa vir do ambiente: o valor padrão está no código-fonte
+// e permitiria forjar um token de qualquer perfil.
+if (process.env.NODE_ENV === 'production'
+  && (!process.env.JWT_SECRET || process.env.JWT_SECRET === 'sua-chave-secreta-super-segura-2026')) {
+  console.error('❌ JWT_SECRET não definido (ou ainda é o valor padrão). Defina um segredo forte antes de iniciar em produção.');
+  process.exit(1);
+}
+
 // Importar rotas
 const authRoutes = require('./routes/auth');
 const kioskRoutes = require('./routes/kiosk');
@@ -36,6 +44,8 @@ const monitoringRoutes = require('./routes/monitoring');
 const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
+const sincronizacaoRoutes = require('./routes/sincronizacao');
+const { obterSincronizador, pararSincronizacao } = require('./utils/sincronizacao');
 const qrcodeRoutes = require('./routes/qrcode');
 const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
@@ -1894,6 +1904,7 @@ app.use('/api/support', supportRoutes);
 app.use('/api/messages', messagesRoutes);
 app.use('/api/parallel-games', parallelGamesRoutes);
 app.use('/api/familias', familiasRoutes);
+app.use('/api/sincronizacao', sincronizacaoRoutes);
 
 // Servir arquivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));
@@ -1965,6 +1976,9 @@ async function startServer() {
   }
 
   server.listen(PORT, HOST, async () => {
+  // Sincronização com a nuvem (só liga com SYNC_ENABLED=1 e SYNC_NUVEM_URL no .env).
+  const sincronizador = obterSincronizador();
+  if (sincronizador) sincronizador.iniciar();
   console.log(`
   ╔═══════════════════════════════════════╗
   ║   🚀 API Pulyn iniciada              ║
@@ -2218,6 +2232,7 @@ async function shutdown(signal) {
   });
 
   try {
+    await pararSincronizacao();
     await closeDB();
     console.log('✅ Conexões com o banco de dados encerradas');
   } catch (err) {
