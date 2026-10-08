@@ -4,6 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { getAvatarForCreate } = require('../utils/avatar');
+const { criarPerfil } = require('../utils/perfilCrianca');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
 const { saveGameState, getGameState } = require('../utils/gameState');
 const {
@@ -280,12 +281,14 @@ router.post('/:eventoId/crianca', verifyToken, async (req, res) => {
       }
     }
     
-    // 3. Inserir criança
+    // 3. Inserir criança (com o cadastro permanente dela)
+    const perfilId = await criarPerfil({ empresaId: evento.empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue });
     await query(
-      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos) 
-       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigoPulseira, 0)`,
+      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos, perfilCriancaId) 
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigoPulseira, 0, @perfilId)`,
       { 
         id, 
+        perfilId,
         eventoId,
         empresaId: evento.empresaId,
         timeId: timeId || null, 
