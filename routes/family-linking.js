@@ -270,7 +270,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       }
     });
 
-    console.log(`✅ [FAMILY-LINKING] ${req.user.email} vinculado (pendente) à criança ${row.nickname || row.name} pela pulseira`);
+    console.log(`✅ [FAMILY-LINKING] ${req.user.email} vinculado (pendente) à criança ${row.apelido || row.nome} pela pulseira`);
 
     res.json({
       success: true,
@@ -279,7 +279,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
         id: row.criancaId,
         name: row.nome,
         nickname: row.apelido,
-        age: row.age,
+        age: row.idade,
         evento: row.evento_nome,
       },
     });

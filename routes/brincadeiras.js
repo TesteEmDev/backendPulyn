@@ -157,7 +157,7 @@ router.post('/', verifyToken, async (req, res) => {
 
     const normalizedCheckpoints = normalizeCheckpointConfigs(tipo, checkpoints);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
-      ? normalizedCheckpoints.map(cp => String(cp.checkpointId || cp)).filter(Boolean)
+      ? normalizedCheckpoints.map(cp => idOf(cp) || String(cp?.checkpointId || '')).filter(Boolean)
       : [];
     if (selectedCheckpointIds.length === 0) {
       return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
@@ -247,7 +247,7 @@ router.put('/:id', verifyToken, async (req, res) => {
     
     const normalizedCheckpoints = normalizeCheckpointConfigs(tipo, checkpoints);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
-      ? normalizedCheckpoints.map(cp => String(cp.checkpointId || cp)).filter(Boolean)
+      ? normalizedCheckpoints.map(cp => idOf(cp) || String(cp?.checkpointId || '')).filter(Boolean)
       : [];
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
 
@@ -316,11 +316,14 @@ router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 
     const requestedIds = Array.isArray(req.body?.checkpoints) ? req.body.checkpoints.map(idOf).filter(Boolean) : [];
     if (requestedIds.length === 0) return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
 
+    // Vale o evento de origem do jogo e também os eventos aos quais ele foi ligado depois (eventoBrincadeira):
+    // um jogo reaproveitado em outro evento continua com o eventoId antigo na própria linha.
     const valid = await allQuery(
       `SELECT checkpointId FROM pontoVerificacao
-       WHERE LOWER(eventoId) = LOWER(@eventoId)
+       WHERE (LOWER(eventoId) = LOWER(@eventoId)
+              OR LOWER(eventoId) IN (SELECT LOWER(eventoId) FROM eventoBrincadeira WHERE LOWER(brincadeiraId) = LOWER(@gameId)))
          AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
-      { eventoId: game.eventoId }
+      { eventoId: game.eventoId, gameId: game.brincadeiraId }
     );
     const validIds = new Set(valid.map(row => String(row.checkpointId).toLowerCase()));
     if (requestedIds.some(id => !validIds.has(id.toLowerCase()))) {
