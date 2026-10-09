@@ -335,13 +335,13 @@ async function pararPartidasDoEvento(eventoId, status = 'cancelada') {
   );
   for (const { partidaId } of partidas) {
     await query(
-      `UPDATE roundBomba SET status = 'finalizado', motivo = 'jogo_parado', finalizadoEm = CURRENT_TIMESTAMP
+      `UPDATE roundBomba SET status = 'finalizado', motivo = 'jogo_parado', finalizadoEm = @agora
        WHERE partidaId = @partidaId AND status IN ('aguardando', 'em_andamento', 'bomba_plantada')`,
-      { partidaId }
+      { partidaId, agora: new Date() }
     );
     await query(
-      `UPDATE partidaBomba SET status = @status, finalizadoEm = CURRENT_TIMESTAMP WHERE partidaId = @partidaId`,
-      { partidaId, status }
+      `UPDATE partidaBomba SET status = @status, finalizadoEm = @agora WHERE partidaId = @partidaId`,
+      { partidaId, status, agora: new Date() }
     );
   }
   limparEmAndamentoDoEvento(eventoId);
@@ -458,12 +458,13 @@ async function iniciarRound(partidaId) {
 
   const portador = await sortearPortador(round, partida.eventoId);
   const resultado = await query(
-    `UPDATE roundBomba SET status = 'em_andamento', iniciadoEm = CURRENT_TIMESTAMP,
+    `UPDATE roundBomba SET status = 'em_andamento', iniciadoEm = @agora,
        portadorCriancaId = @portadorCriancaId, portadorNumero = @portadorNumero
      WHERE roundId = @roundId AND status = 'aguardando'`,
-    { roundId: round.roundId, portadorCriancaId: portador.criancaId, portadorNumero: portador.numeroJogador }
+    { roundId: round.roundId, portadorCriancaId: portador.criancaId, portadorNumero: portador.numeroJogador, agora: new Date() }
   );
   if (!Number(resultado?.rowsAffected?.[0] || 0)) throw erroHttp('O round já foi iniciado', 409);
+  console.log(`🎮 [BOMBA] Round ${round.numero} iniciado | portador: jogador nº ${portador.numeroJogador} | duração ${partida.duracaoRoundSeg}s, bomba ${partida.bombaSeg}s`);
 
   limparEmAndamentoDoEvento(partida.eventoId);
   const estado = await obterEstado(partida.eventoId);
@@ -476,11 +477,12 @@ async function finalizarRound(round, partida, vencedorLado, motivo, detalhes = {
   const vencedorTimeId = vencedorLado === 'tr' ? round.timeTrId : round.timeCtId;
   const resultado = await query(
     `UPDATE roundBomba SET status = 'finalizado', vencedorTimeId = @vencedorTimeId, motivo = @motivo,
-       finalizadoEm = CURRENT_TIMESTAMP, desarmadaPorCriancaId = COALESCE(@desarmadaPor, desarmadaPorCriancaId)
+       finalizadoEm = @agora, desarmadaPorCriancaId = COALESCE(@desarmadaPor, desarmadaPorCriancaId)
      WHERE roundId = @roundId AND status IN ('em_andamento', 'bomba_plantada')`,
-    { roundId: round.roundId, vencedorTimeId, motivo, desarmadaPor: detalhes.desarmadaPorCriancaId || null }
+    { roundId: round.roundId, vencedorTimeId, motivo, desarmadaPor: detalhes.desarmadaPorCriancaId || null, agora: new Date() }
   );
   if (!Number(resultado?.rowsAffected?.[0] || 0)) return null;
+  console.log(`🏁 [BOMBA] Round ${round.numero} encerrado | vencedor: ${vencedorLado === 'tr' ? 'Rebeldes' : 'Agentes'} | motivo: ${motivo}`);
 
   if (mesmoId(vencedorTimeId, partida.timeAId)) {
     await query('UPDATE partidaBomba SET vitoriasA = vitoriasA + 1 WHERE partidaId = @partidaId', { partidaId: partida.partidaId });
@@ -494,9 +496,9 @@ async function finalizarRound(round, partida, vencedorLado, motivo, detalhes = {
   if (partidaVencida) {
     const campeao = atualizada.vitoriasA >= atualizada.vitoriasB ? atualizada.timeAId : atualizada.timeBId;
     await query(
-      `UPDATE partidaBomba SET status = 'finalizada', vencedorTimeId = @campeao, finalizadoEm = CURRENT_TIMESTAMP
+      `UPDATE partidaBomba SET status = 'finalizada', vencedorTimeId = @campeao, finalizadoEm = @agora
        WHERE partidaId = @partidaId`,
-      { partidaId: partida.partidaId, campeao }
+      { partidaId: partida.partidaId, campeao, agora: new Date() }
     );
   } else {
     await criarRound(atualizada, round.numero + 1);
@@ -573,6 +575,7 @@ function restanteMs(inicio, duracaoMs, agora) {
 }
 
 function negado(motivo, mensagem, extra = {}) {
+  console.log(`⛔ [BOMBA] Leitura negada: ${motivo} (${mensagem})`);
   return { ok: true, registered: true, autorizado: false, tipo: 'bomba', acao: 'negado', motivo, mensagem, ...extra };
 }
 
@@ -644,11 +647,12 @@ async function processarLeitura({ checkpointId, uid }) {
     }
 
     const plantou = await query(
-      `UPDATE roundBomba SET status = 'bomba_plantada', plantadaEm = CURRENT_TIMESTAMP,
+      `UPDATE roundBomba SET status = 'bomba_plantada', plantadaEm = @agora,
          localCheckpointId = @checkpointId, plantadaPorCriancaId = @criancaId
        WHERE roundId = @roundId AND status = 'em_andamento'`,
-      { roundId: round.roundId, checkpointId: checkpoint.checkpointId, criancaId: crianca.criancaId }
+      { roundId: round.roundId, checkpointId: checkpoint.checkpointId, criancaId: crianca.criancaId, agora: new Date() }
     );
+    console.log(`💣 [BOMBA] Plantada no checkpoint ${checkpoint.checkpointId} por ${crianca.apelido || crianca.nome} | explode em ${partidaAtual.bombaSeg}s`);
     leiturasEmAndamento.delete(chave(checkpoint.checkpointId));
     if (!Number(plantou?.rowsAffected?.[0] || 0)) return negado('bomba_em_outro_local', 'A bomba já foi plantada em outro local', base);
 
