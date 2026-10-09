@@ -1,5 +1,23 @@
 // utils/planDefinitions.js - planos da plataforma (valor mensal e limites)
 // Usado pela visão de planos (routes/planos.js) e pelos detalhes do cliente (routes/clients.js).
+// Tipos de jogo que existem e o nome mostrado ao criar um jogo.
+const TIPOS_DE_JOGO = {
+  team: 'Equipe',
+  individual: 'Individual',
+  cooperative: 'Cooperativo',
+  treasure_hunt: 'Caça ao Tesouro',
+  monster_hunt: 'Caça ao Monstro',
+  bomb_defusal: 'Conquistar e Destruir (PulynBall)',
+};
+
+// Tipos que cada plano pode CRIAR. O plano PulynBall trabalha só com os jogos de paintball; os demais, com os jogos comuns.
+const TIPOS_COMUNS = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
+const TIPOS_PULYNBALL = ['bomb_defusal'];
+
+function tiposDeJogoDoPlano(planId) {
+  return String(planId || '').trim().toLowerCase() === 'pulynball' ? TIPOS_PULYNBALL : TIPOS_COMUNS;
+}
+
 const PLAN_DEFINITIONS = {
   starter: {
     name: 'Starter', price: 500, color: '#F59E0B', checkpointLimit: 3, eventsPerMonth: 4,
@@ -21,4 +39,4 @@ const PLAN_DEFINITIONS = {
   },
 };
 
-module.exports = { PLAN_DEFINITIONS };
+module.exports = { PLAN_DEFINITIONS, TIPOS_DE_JOGO, TIPOS_COMUNS, TIPOS_PULYNBALL, tiposDeJogoDoPlano };

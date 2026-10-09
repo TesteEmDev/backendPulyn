@@ -1,5 +1,6 @@
 const express = require('express');
 const bomba = require('../utils/bomba');
+const { TIPOS_DE_JOGO, tiposDeJogoDoPlano } = require('../utils/planDefinitions');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
@@ -133,18 +134,38 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
+// Tipos de jogo que o plano da empresa permite criar (o master pode todos).
+async function tiposPermitidos(req, empresaId) {
+  if (isMaster(req)) return Object.keys(TIPOS_DE_JOGO);
+  const empresa = await queryOne('SELECT plano FROM empresa WHERE LOWER(empresaId) = LOWER(@empresaId)', { empresaId });
+  return tiposDeJogoDoPlano(empresa?.plano);
+}
+
+function mensagemTipoNaoPermitido(tipo) {
+  return tipo === bomba.BOMBA_GAME_TYPE ? bomba.MENSAGEM_PLANO : 'Seu plano não permite criar jogos deste tipo.';
+}
+
+// Lista de tipos para o formulário de novo jogo: só o que o plano permite.
+router.get('/tipos', verifyToken, async (req, res) => {
+  try {
+    const permitidos = await tiposPermitidos(req, req.user.empresaId);
+    res.json(permitidos.map((valor) => ({ value: valor, label: TIPOS_DE_JOGO[valor] || valor })));
+  } catch (err) {
+    console.error('❌ Erro ao listar os tipos de jogo do plano:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Criar brincadeira
 router.post('/', verifyToken, async (req, res) => {
   try {
     const { nome, description, rules, tipo, duration, pontosPadrao, eventoId, checkpoints } = req.body;
     const empresaId = req.user.empresaId;
-    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt', bomba.BOMBA_GAME_TYPE];
-
-    if (!validTypes.includes(tipo)) {
+    if (!Object.keys(TIPOS_DE_JOGO).includes(tipo)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
     }
-    if (tipo === bomba.BOMBA_GAME_TYPE && !isMaster(req) && !(await bomba.empresaTemPlanoPulynBall(empresaId))) {
-      return res.status(403).json({ error: bomba.MENSAGEM_PLANO });
+    if (!(await tiposPermitidos(req, empresaId)).includes(tipo)) {
+      return res.status(403).json({ error: mensagemTipoNaoPermitido(tipo) });
     }
     if (!eventoId) {
       return res.status(400).json({ error: 'eventoId é obrigatório' });
@@ -210,17 +231,13 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { nome, description, rules, tipo, duration, pontosPadrao, status, eventoId, checkpoints } = req.body;
     const empresaId = req.user.empresaId;
-    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt', bomba.BOMBA_GAME_TYPE];
-    if (!validTypes.includes(tipo)) {
+    if (!Object.keys(TIPOS_DE_JOGO).includes(tipo)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
-    }
-    if (tipo === bomba.BOMBA_GAME_TYPE && !isMaster(req) && !(await bomba.empresaTemPlanoPulynBall(empresaId))) {
-      return res.status(403).json({ error: bomba.MENSAGEM_PLANO });
     }
     
     // ✅ Verificar que o jogo pertence à empresa
     const brincadeira = await queryOne(
-      `SELECT brincadeiraId, empresaId, eventoId, status
+      `SELECT brincadeiraId, empresaId, eventoId, status, tipo
        FROM brincadeira
        WHERE brincadeiraId = @id`,
       { id: req.params.id }
@@ -235,6 +252,10 @@ router.put('/:id', verifyToken, async (req, res) => {
     
     if (!isMaster(req) && brincadeira.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
+    }
+    // Trocar para um tipo que o plano não permite é recusado; um jogo antigo pode seguir com o tipo que já tem.
+    if (tipo !== brincadeira.tipo && !(await tiposPermitidos(req, empresaId)).includes(tipo)) {
+      return res.status(403).json({ error: mensagemTipoNaoPermitido(tipo) });
     }
 
     const targetEventoId = eventoId || brincadeira.eventoId;
