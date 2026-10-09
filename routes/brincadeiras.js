@@ -1,4 +1,5 @@
 const express = require('express');
+const bomba = require('../utils/bomba');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
@@ -137,10 +138,13 @@ router.post('/', verifyToken, async (req, res) => {
   try {
     const { nome, description, rules, tipo, duration, pontosPadrao, eventoId, checkpoints } = req.body;
     const empresaId = req.user.empresaId;
-    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
+    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt', bomba.BOMBA_GAME_TYPE];
 
     if (!validTypes.includes(tipo)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
+    }
+    if (tipo === bomba.BOMBA_GAME_TYPE && !isMaster(req) && !(await bomba.empresaTemPlanoPulynBall(empresaId))) {
+      return res.status(403).json({ error: bomba.MENSAGEM_PLANO });
     }
     if (!eventoId) {
       return res.status(400).json({ error: 'eventoId é obrigatório' });
@@ -206,9 +210,12 @@ router.put('/:id', verifyToken, async (req, res) => {
   try {
     const { nome, description, rules, tipo, duration, pontosPadrao, status, eventoId, checkpoints } = req.body;
     const empresaId = req.user.empresaId;
-    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
+    const validTypes = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt', bomba.BOMBA_GAME_TYPE];
     if (!validTypes.includes(tipo)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
+    }
+    if (tipo === bomba.BOMBA_GAME_TYPE && !isMaster(req) && !(await bomba.empresaTemPlanoPulynBall(empresaId))) {
+      return res.status(403).json({ error: bomba.MENSAGEM_PLANO });
     }
     
     // ✅ Verificar que o jogo pertence à empresa
