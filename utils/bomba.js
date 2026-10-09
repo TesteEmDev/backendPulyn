@@ -479,7 +479,7 @@ async function finalizarRound(round, partida, vencedorLado, motivo, detalhes = {
     `UPDATE roundBomba SET status = 'finalizado', vencedorTimeId = @vencedorTimeId, motivo = @motivo,
        finalizadoEm = @agora, desarmadaPorCriancaId = COALESCE(@desarmadaPor, desarmadaPorCriancaId)
      WHERE roundId = @roundId AND status IN ('em_andamento', 'bomba_plantada')`,
-    { roundId: round.roundId, vencedorTimeId, motivo, desarmadaPor: detalhes.desarmadaPorCriancaId || null, agora: new Date() }
+    { roundId: round.roundId, vencedorTimeId, motivo, desarmadaPor: detalhes.desarmadaPorCriancaId || null, agora: detalhes.finalizadoEm || new Date() }
   );
   if (!Number(resultado?.rowsAffected?.[0] || 0)) return null;
   console.log(`🏁 [BOMBA] Round ${round.numero} encerrado | vencedor: ${vencedorLado === 'tr' ? 'Rebeldes' : 'Agentes'} | motivo: ${motivo}`);
@@ -532,12 +532,18 @@ async function avaliarRound(partida, round, agora = new Date()) {
 
   if (round.status === 'bomba_plantada' && round.plantadaEm) {
     if (agora.getTime() >= new Date(round.plantadaEm).getTime() + partida.bombaSeg * 1000) {
-      await finalizarRound(round, partida, 'tr', 'explodiu');
+      // O fim vale o instante da explosão (não o da checagem, que pode atrasar até 1 s): todos os checkpoints
+      // contam a vitória a partir dele e tocam juntos.
+      await finalizarRound(round, partida, 'tr', 'explodiu', {
+        finalizadoEm: new Date(new Date(round.plantadaEm).getTime() + partida.bombaSeg * 1000),
+      });
       return buscarRoundAtual(partida.partidaId);
     }
   } else if (round.status === 'em_andamento' && round.iniciadoEm) {
     if (agora.getTime() >= new Date(round.iniciadoEm).getTime() + partida.duracaoRoundSeg * 1000) {
-      await finalizarRound(round, partida, 'ct', 'tempo');
+      await finalizarRound(round, partida, 'ct', 'tempo', {
+        finalizadoEm: new Date(new Date(round.iniciadoEm).getTime() + partida.duracaoRoundSeg * 1000),
+      });
       return buscarRoundAtual(partida.partidaId);
     }
   }
