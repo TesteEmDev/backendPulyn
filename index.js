@@ -60,6 +60,9 @@ const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
 const { ensureBombaSchema } = require('./migrations/bomba');
+const { ensureRefemSchema } = require('./migrations/refem');
+const refemRoutes = require('./routes/refem');
+const refemJogo = require('./utils/refem');
 const bombaRoutes = require('./routes/bomba');
 const zonaDominioRoutes = require('./routes/zonaDominio');
 const { TIPOS_PULYNBALL } = require('./utils/planDefinitions');
@@ -552,7 +555,8 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     const gameType = game.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
       : game.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE
-        : game.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE : 'zone_conquest';
+        : game.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE
+          : game.tipo === refemJogo.REFEM_GAME_TYPE ? refemJogo.REFEM_GAME_TYPE : 'zone_conquest';
     await saveGameState({
       eventoId: evento.eventoId,
       empresaId: evento.empresaId,
@@ -661,7 +665,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     const gameType = selectedGame.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
       : selectedGame.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE
-        : selectedGame.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE : 'zone_conquest';
+        : selectedGame.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE
+          : selectedGame.tipo === refemJogo.REFEM_GAME_TYPE ? refemJogo.REFEM_GAME_TYPE : 'zone_conquest';
     // O modo (equipe/individual) é um dado persistido em brincadeiras.type,
     // escolhido pelo admin ao criar o jogo (AdminGameForm). Nunca inferir
     // isso do nome do jogo (texto livre) ou aceitar cegamente o que o
@@ -674,6 +679,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     let monsterStart = null;
     let zoneConquestStart = null;
     if (gameType !== bombaJogo.BOMBA_GAME_TYPE) await bombaJogo.pararJogo(eventoId);
+    if (gameType !== refemJogo.REFEM_GAME_TYPE) await refemJogo.pararJogo(eventoId);
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
@@ -693,6 +699,13 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
       console.log(`   ✓ Zona Conquest iniciado`);
+    } else if (gameType === refemJogo.REFEM_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch REFÉM (Resgate do Refém)`);
+      await refemJogo.iniciarJogo(eventoId, selectedGame.brincadeiraId);
+      await stopTreasureGame(eventoId);
+      await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
+      console.log(`   ✓ Resgate do Refém iniciado (round 1 aguardando)`);
     } else if (gameType === bombaJogo.BOMBA_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch BOMBA (Conquistar e Destruir)`);
       await bombaJogo.iniciarJogo(eventoId, selectedGame.brincadeiraId);
@@ -1014,6 +1027,7 @@ async function stopGameForEvento(eventoId) {
     await stopMonsterGame(eventoId);
     await stopZoneConquestGame(eventoId);
     await bombaJogo.pararJogo(eventoId);
+    await refemJogo.pararJogo(eventoId);
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
@@ -1912,6 +1926,7 @@ app.use('/api/treasure', treasureRoutes);
 app.use('/api/monster', monsterRoutes);
 
 app.use('/api/bomba', bombaRoutes);
+app.use('/api/refem', refemRoutes);
 app.use('/api/zonaDominio', zonaDominioRoutes);
 
 // Zone Conquest
@@ -1979,6 +1994,8 @@ async function startServer() {
     await ensureBraceletHistorySchema();
     await ensurePerfilCriancaSchema();
     await ensureBombaSchema();
+    await ensureRefemSchema();
+    refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)
     bombaJogo.iniciarRelogio();   // explosão da bomba e fim do tempo do round (Conquistar e Destruir)
     await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();
