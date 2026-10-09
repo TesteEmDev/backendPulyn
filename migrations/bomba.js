@@ -1,9 +1,9 @@
 // migrations/bomba.js - Conquistar e Destruir (PulynBall)
 //
 // partidaBomba: uma partida do evento (duas equipes, placar, regras de tempo).
-// roundBomba:   cada round da partida (qual equipe é TR/CT, quem leva a bomba, onde foi plantada, quem venceu).
+// roundBomba:   cada round da partida (qual equipe é Rebeldes/Agentes, quem leva a bomba, onde foi plantada, quem venceu).
 // crianca.numeroJogador: número do jogador na equipe, definido pelo recreacionista; o portador da bomba
-//   de cada round é sorteado entre os números da equipe TR.
+//   de cada round é sorteado entre os números da equipe dos Rebeldes.
 const { query, DB_DRIVER } = require('../database');
 
 async function ensureBombaSchema() {

@@ -1,14 +1,14 @@
 // utils/bomba.js - Conquistar e Destruir (PulynBall): partida, rounds e regras da bomba.
 //
 // Regras (baseadas no Counter-Strike):
-//   - Duas equipes: uma joga como TR (terroristas, plantam) e a outra como CT (contra-terroristas, desarmam).
-//   - O sorteio de cada round escolhe o número de um jogador da equipe TR: só a pulseira dele planta.
+//   - Duas equipes: os Rebeldes (lado "tr": plantam) e os Agentes (lado "ct": desarmam). Os ids internos continuam tr/ct.
+//   - O sorteio de cada round escolhe o número de um jogador da equipe dos Rebeldes: só a pulseira dele planta.
 //   - Plantar: o portador mantém a pulseira no checkpoint por `plantarMs` sem interrupção (o leitor lê a cada 500 ms).
 //     Se a leitura falhar por mais de TOLERANCIA_LEITURA_MS, o tempo recomeça do zero.
-//   - A bomba fica ativa por `bombaSeg`. Se explodir, a equipe TR vence o round.
-//   - Desarmar: qualquer pulseira da equipe CT mantém a leitura no checkpoint da bomba por `desarmarMs`.
-//     Se o jogador parar, o tempo é zerado e recomeça do zero para quem tentar em seguida. Desarmou: CT vence.
-//   - Passou `duracaoRoundSeg` sem a bomba ser plantada: CT vence. O recreacionista também pode encerrar o round à mão
+//   - A bomba fica ativa por `bombaSeg`. Se explodir, os Rebeldes vencem o round.
+//   - Desarmar: qualquer pulseira da equipe dos Agentes mantém a leitura no checkpoint da bomba por `desarmarMs`.
+//     Se o jogador parar, o tempo é zerado e recomeça do zero para quem tentar em seguida. Desarmou: os Agentes vencem.
+//   - Passou `duracaoRoundSeg` sem a bomba ser plantada: os Agentes vencem. O recreacionista também pode encerrar o round à mão
 //     (por eliminação de uma equipe, por exemplo).
 //   - Vence a partida quem chegar primeiro a `vitoriasParaVencer`. Os lados trocam a cada `roundsPorLado` rounds jogados.
 //   - Só existe uma bomba por round: depois que ela é plantada, o outro local fica bloqueado até o próximo round.
@@ -126,7 +126,7 @@ async function buscarUltimoRoundFinalizado(partidaId) {
 
 // ---------- lados ----------
 
-// Quem joga de TR e de CT no round `numero` (trocam a cada `roundsPorLado` rounds).
+// Quem joga de Rebeldes (tr) e de Agentes (ct) no round `numero` (trocam a cada `roundsPorLado` rounds).
 function ladosDoRound(partida, numero) {
   const bloco = Math.floor((numero - 1) / partida.roundsPorLado);
   const trInicial = partida.timeTrInicialId;
@@ -201,7 +201,7 @@ async function sortearPortador(round, eventoId) {
     { eventoId, timeId: round.timeTrId }
   );
   if (candidatos.length === 0) {
-    throw erroHttp('A equipe TR não tem jogadores numerados. Numere os jogadores antes de iniciar o round.', 409);
+    throw erroHttp('A equipe dos Rebeldes não tem jogadores numerados. Numere os jogadores antes de iniciar o round.', 409);
   }
   return candidatos[Math.floor(Math.random() * candidatos.length)];
 }
@@ -533,7 +533,7 @@ async function processarLeitura({ checkpointId, uid }) {
     };
   }
 
-  // ----- bomba plantada: só a CT desarma, e só no local da bomba -----
+  // ----- bomba plantada: só os Agentes desarmam, e só no local da bomba -----
   if (!mesmoId(checkpoint.checkpointId, round.localCheckpointId)) {
     return negado('bomba_em_outro_local', 'A bomba foi plantada em outro local', base);
   }
