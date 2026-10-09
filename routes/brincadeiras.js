@@ -161,7 +161,7 @@ router.post('/', verifyToken, async (req, res) => {
 
     const normalizedCheckpoints = normalizeCheckpointConfigs(tipo, checkpoints);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
-      ? normalizedCheckpoints.map(cp => String(cp.checkpointId || cp)).filter(Boolean)
+      ? normalizedCheckpoints.map(cp => String(cp.id ?? cp.checkpointId ?? cp)).filter(Boolean)
       : [];
     if (selectedCheckpointIds.length === 0) {
       return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
@@ -254,7 +254,7 @@ router.put('/:id', verifyToken, async (req, res) => {
     
     const normalizedCheckpoints = normalizeCheckpointConfigs(tipo, checkpoints);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
-      ? normalizedCheckpoints.map(cp => String(cp.checkpointId || cp)).filter(Boolean)
+      ? normalizedCheckpoints.map(cp => String(cp.id ?? cp.checkpointId ?? cp)).filter(Boolean)
       : [];
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
 
