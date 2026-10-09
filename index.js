@@ -59,6 +59,9 @@ const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerComp
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
+const { ensureBombaSchema } = require('./migrations/bomba');
+const bombaRoutes = require('./routes/bomba');
+const bombaJogo = require('./utils/bomba');
 const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
 const { ensureParallelGamesSchema } = require('./migrations/parallelGames');
 const parallelGamesRoutes = require('./routes/parallelGames');
@@ -511,7 +514,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const game = await queryOne(
-      'SELECT brincadeiraId, nome, tipo, eventoId, empresaId FROM "brincadeira" WHERE LOWER("eventoId") = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
+      'SELECT brincadeiraId, nome, tipo, eventoId, empresaId FROM "brincadeira" WHERE LOWER(brincadeiraId) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
       { gameId }
     );
     if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
@@ -546,7 +549,8 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
 
     const gameType = game.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : game.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : game.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE
+        : game.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE : 'zone_conquest';
     await saveGameState({
       eventoId: evento.eventoId,
       empresaId: evento.empresaId,
@@ -616,7 +620,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     const selectedGame = await queryOne(
       `SELECT brincadeiraId, nome, tipo, eventoId, empresaId
        FROM "brincadeira"
-       WHERE LOWER("eventoId") = LOWER(@gameId)
+       WHERE LOWER(brincadeiraId) = LOWER(@gameId)
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { gameId }
     );
@@ -641,6 +645,10 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
+    if (selectedGame.tipo === bombaJogo.BOMBA_GAME_TYPE && !isMaster(req) && !(await bombaJogo.empresaTemPlanoPulynBall(eventoAntes.empresaId))) {
+      return res.status(403).json({ error: bombaJogo.MENSAGEM_PLANO });
+    }
+
     // O jogo só começa se o evento tiver o mínimo de pontoVerificacao online para ele (confere antes de mexer em qualquer dado)
     const requirement = await checkGameStartRequirements(eventoId, selectedGame);
     if (!requirement.ok) {
@@ -650,7 +658,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     const gameType = selectedGame.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : selectedGame.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : selectedGame.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE
+        : selectedGame.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE : 'zone_conquest';
     // O modo (equipe/individual) é um dado persistido em brincadeiras.type,
     // escolhido pelo admin ao criar o jogo (AdminGameForm). Nunca inferir
     // isso do nome do jogo (texto livre) ou aceitar cegamente o que o
@@ -662,6 +671,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     let treasureStart = null;
     let monsterStart = null;
     let zoneConquestStart = null;
+    if (gameType !== bombaJogo.BOMBA_GAME_TYPE) await bombaJogo.pararJogo(eventoId);
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
@@ -681,6 +691,13 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
       console.log(`   ✓ Zona Conquest iniciado`);
+    } else if (gameType === bombaJogo.BOMBA_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch BOMBA (Conquistar e Destruir)`);
+      await bombaJogo.iniciarJogo(eventoId, selectedGame.brincadeiraId);
+      await stopTreasureGame(eventoId);
+      await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
+      console.log(`   ✓ Conquistar e Destruir iniciado (round 1 aguardando)`);
     } else {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch STOP_ALL (tipo desconhecido: ${gameType})`);
       await stopTreasureGame(eventoId);
@@ -994,6 +1011,7 @@ async function stopGameForEvento(eventoId) {
     await stopTreasureGame(eventoId);
     await stopMonsterGame(eventoId);
     await stopZoneConquestGame(eventoId);
+    await bombaJogo.pararJogo(eventoId);
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
@@ -1889,6 +1907,8 @@ app.use('/api/treasure', treasureRoutes);
 // Caça ao Monstro
 app.use('/api/monster', monsterRoutes);
 
+app.use('/api/bomba', bombaRoutes);
+
 // Zone Conquest
 app.use('/api/zone-conquest', zoneConquestRoutes);
 
@@ -1953,6 +1973,8 @@ async function startServer() {
     await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
     await ensurePerfilCriancaSchema();
+    await ensureBombaSchema();
+    bombaJogo.iniciarRelogio();   // explosão da bomba e fim do tempo do round (Conquistar e Destruir)
     await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();

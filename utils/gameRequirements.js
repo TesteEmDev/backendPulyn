@@ -13,6 +13,8 @@ const MIN_CHECKPOINTS = {
   zone_team: 2,
   // só dá para reler o mesmo checkpoint depois de ler 3 diferentes: 3 + 1
   zone_individual: 4,
+  // dois locais de bomba (A e B)
+  bomb_defusal: 2,
 };
 
 const GAME_LABELS = {
@@ -20,6 +22,7 @@ const GAME_LABELS = {
   treasure_hunt: 'Caça ao Tesouro',
   zone_team: 'Zona (equipe)',
   zone_individual: 'Zona (individual)',
+  bomb_defusal: 'Conquistar e Destruir',
 };
 
 // Mesma leitura do tipo que as rotas de início usam: brincadeiras.type é a fonte da verdade.
@@ -27,6 +30,7 @@ function resolveGameKind(game) {
   const type = String(game?.tipo || game?.tipoJogo || '').trim().toLowerCase();
   if (type === 'monster_hunt') return 'monster_hunt';
   if (type === 'treasure_hunt') return 'treasure_hunt';
+  if (type === 'bomb_defusal') return 'bomb_defusal';
   if (type === 'individual' || type === 'zone_conquest_individual') return 'zone_individual';
   return 'zone_team';
 }

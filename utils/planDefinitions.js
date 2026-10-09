@@ -13,6 +13,12 @@ const PLAN_DEFINITIONS = {
     name: 'Enterprise', price: 2000, color: '#1E9BD7', checkpointLimit: -1, eventsPerMonth: -1,
     features: ['Checkpoints ilimitados', 'Eventos ilimitados', 'Dashboard completo + analytics'],
   },
+  // Plano para casas de paintball: libera os jogos do modo PulynBall.
+  // Valor e limites abaixo são provisórios (ajuste aqui: aparecem na tela de planos e na receita do master).
+  pulynball: {
+    name: 'PulynBall', price: 1500, color: '#A855F7', checkpointLimit: 15, eventsPerMonth: 20,
+    features: ['Jogos focados em paintball (PulynBall)', 'Até 15 checkpoints simultâneos', 'Até 20 eventos por mês', 'Dashboard completo'],
+  },
 };
 
 module.exports = { PLAN_DEFINITIONS };
