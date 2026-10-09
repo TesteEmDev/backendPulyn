@@ -5,6 +5,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { criarPerfil } = require('../utils/perfilCrianca');
+const bomba = require('../utils/bomba');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
 const { saveGameState, getGameState } = require('../utils/gameState');
 const {
@@ -93,14 +94,21 @@ const MAX_RESPONSIBLE_NAME = 150;
 // exatamente os jogos informados: vincula os novos, tira os desmarcados e, se um jogo criado
 // neste evento for desmarcado, solta o vínculo direto dele. Deve rodar dentro de uma transação.
 async function syncEventGames(eventoId, empresaId, gameIds) {
+  // O plano PulynBall só trabalha com os jogos de paintball (o front já esconde os outros; aqui ninguém contorna).
+  const soPulynBall = await bomba.empresaTemPlanoPulynBall(empresaId);
   const wanted = Array.from(new Set((Array.isArray(gameIds) ? gameIds : []).map((id) => String(id).trim()).filter(Boolean)));
   const same = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
   for (const gameId of wanted) {
     const game = await queryOne(
-      "SELECT brincadeiraId, empresaId FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
+      "SELECT brincadeiraId, empresaId, tipo FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id) AND LOWER(COALESCE(status, 'active')) <> 'archived'",
       { id: gameId }
     );
+    if (soPulynBall && game && game.tipo !== bomba.BOMBA_GAME_TYPE) {
+      const error = new Error('O plano PulynBall só permite os jogos de paintball (PulynBall) nos eventos.');
+      error.statusCode = 400;
+      throw error;
+    }
     if (!game) {
       const error = new Error('Um dos jogos selecionados não foi encontrado');
       error.statusCode = 400;
