@@ -60,6 +60,9 @@ async function ensureBombaSchema() {
   await query('CREATE INDEX IF NOT EXISTS idx_roundbomba_status ON roundBomba (status)');
 
   await query('ALTER TABLE crianca ADD COLUMN IF NOT EXISTS numeroJogador integer');
+
+  // Regras editáveis de cada jogo PulynBall (JSON: tempos, vitórias...). Cada partida nova começa com elas.
+  await query('ALTER TABLE brincadeira ADD COLUMN IF NOT EXISTS configuracaoJogo text');
 }
 
 module.exports = { ensureBombaSchema };

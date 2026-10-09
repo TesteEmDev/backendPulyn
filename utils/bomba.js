@@ -94,6 +94,82 @@ async function empresaTemPlanoPulynBall(empresaId) {
   return String(empresa?.plano || '').trim().toLowerCase() === 'pulynball';
 }
 
+// ---------- regras salvas em cada jogo (tela PulynBall) ----------
+
+// Regras que o cliente PulynBall editou no jogo; valores inválidos ou desconhecidos são ignorados.
+async function configSalvaDoJogo(brincadeiraId) {
+  if (!brincadeiraId) return {};
+  const jogo = await queryOne(
+    'SELECT configuracaoJogo FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@brincadeiraId)',
+    { brincadeiraId }
+  );
+  if (!jogo?.configuracaoJogo) return {};
+  try {
+    return normalizarConfig(JSON.parse(jogo.configuracaoJogo));
+  } catch {
+    return {};
+  }
+}
+
+function montarJogo(linha) {
+  let salva = {};
+  try { salva = normalizarConfig(JSON.parse(linha.configuracaoJogo || '{}')); } catch { /* usa os padrões */ }
+  return {
+    brincadeiraId: linha.brincadeiraId,
+    eventoId: linha.eventoId,
+    nome: linha.nome,
+    descricao: linha.descricao || '',
+    regras: linha.regras || '',
+    status: linha.status || 'active',
+    config: { ...PADROES, ...salva },
+  };
+}
+
+async function listarJogos(eventoId, empresaId) {
+  const linhas = await allQuery(
+    `SELECT brincadeiraId, eventoId, nome, descricao, regras, status, configuracaoJogo FROM brincadeira
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND empresaId = @empresaId AND tipo = @tipo
+       AND LOWER(COALESCE(status, 'active')) <> 'archived'
+     ORDER BY nome`,
+    { eventoId, empresaId, tipo: BOMBA_GAME_TYPE }
+  );
+  return linhas.map(montarJogo);
+}
+
+// Salva nome, texto das regras e os tempos/vitórias do jogo. Vale para as próximas partidas.
+async function salvarJogo(brincadeiraId, empresaId, dados = {}) {
+  const jogo = await queryOne(
+    'SELECT brincadeiraId, empresaId, tipo FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@brincadeiraId)',
+    { brincadeiraId }
+  );
+  if (!jogo || jogo.tipo !== BOMBA_GAME_TYPE) throw erroHttp('Jogo PulynBall não encontrado', 404);
+  if (empresaId && String(jogo.empresaId).toLowerCase() !== String(empresaId).toLowerCase()) {
+    throw erroHttp('Acesso negado: o jogo não pertence à sua empresa', 403);
+  }
+
+  const nome = String(dados.nome ?? '').trim();
+  if (!nome) throw erroHttp('O nome do jogo é obrigatório', 400);
+  if (nome.length > 100) throw erroHttp('O nome do jogo deve ter no máximo 100 caracteres', 400);
+  const config = normalizarConfig(dados.config || {});
+
+  await query(
+    `UPDATE brincadeira SET nome = @nome, descricao = @descricao, regras = @regras, configuracaoJogo = @configuracao
+     WHERE brincadeiraId = @brincadeiraId`,
+    {
+      brincadeiraId: jogo.brincadeiraId,
+      nome,
+      descricao: String(dados.descricao ?? '').slice(0, 2000),
+      regras: String(dados.regras ?? '').slice(0, 4000),
+      configuracao: JSON.stringify(config),
+    }
+  );
+  const atualizado = await queryOne(
+    'SELECT brincadeiraId, eventoId, nome, descricao, regras, status, configuracaoJogo FROM brincadeira WHERE brincadeiraId = @brincadeiraId',
+    { brincadeiraId: jogo.brincadeiraId }
+  );
+  return montarJogo(atualizado);
+}
+
 // ---------- consultas ----------
 
 async function buscarPartidaAtiva(eventoId) {
@@ -259,7 +335,8 @@ async function iniciarJogo(eventoId, brincadeiraId, opcoes = {}) {
     throw erroHttp('As equipes escolhidas não pertencem ao evento', 400);
   }
   const timeTrInicialId = [timeAId, timeBId].find((id) => mesmoId(id, opcoes.timeTrInicialId)) || timeAId;
-  const config = { ...PADROES, ...normalizarConfig(opcoes.config) };
+  const salva = await configSalvaDoJogo(brincadeiraId);
+  const config = { ...PADROES, ...salva, ...normalizarConfig(opcoes.config) };
 
   const partidaId = uuidv4();
   await query(
@@ -724,6 +801,9 @@ async function obterEstadoCheckpoint(checkpointId) {
 
 module.exports = {
   BOMBA_GAME_TYPE,
+  LIMITES,
+  listarJogos,
+  salvarJogo,
   MENSAGEM_PLANO,
   empresaTemPlanoPulynBall,
   PADROES,
