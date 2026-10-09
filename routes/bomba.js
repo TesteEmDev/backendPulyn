@@ -45,6 +45,49 @@ async function partidaAtivaOuErro(evento, res) {
   return partida;
 }
 
+// ---------- tela PulynBall (admin): regras de cada jogo ----------
+
+// O jogo é do plano PulynBall: o master pode abrir em qualquer empresa.
+async function exigirPlanoPulynBall(req, res, empresaId) {
+  if (isMaster(req) || await bomba.empresaTemPlanoPulynBall(empresaId)) return true;
+  res.status(403).json({ error: bomba.MENSAGEM_PLANO });
+  return false;
+}
+
+router.get('/jogos', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const eventoId = String(req.query.eventoId || '').trim();
+    if (!eventoId) return res.status(400).json({ error: 'eventoId é obrigatório' });
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)', { eventoId });
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && String(evento.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+    if (!(await exigirPlanoPulynBall(req, res, evento.empresaId))) return;
+    res.json({
+      jogos: await bomba.listarJogos(evento.eventoId, evento.empresaId),
+      padroes: bomba.PADROES,
+      limites: bomba.LIMITES,
+    });
+  } catch (erro) {
+    responderErro(res, erro, 'Não foi possível carregar os jogos PulynBall');
+  }
+});
+
+router.put('/jogos/:brincadeiraId', verifyToken, requireRole('admin', 'master'), async (req, res) => {
+  try {
+    const jogo = await queryOne('SELECT empresaId FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@id)', { id: req.params.brincadeiraId });
+    if (!jogo) return res.status(404).json({ error: 'Jogo não encontrado' });
+    if (!isMaster(req) && String(jogo.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: o jogo não pertence à sua empresa' });
+    }
+    if (!(await exigirPlanoPulynBall(req, res, jogo.empresaId))) return;
+    res.json(await bomba.salvarJogo(req.params.brincadeiraId, jogo.empresaId, req.body || {}));
+  } catch (erro) {
+    responderErro(res, erro, 'Não foi possível salvar o jogo');
+  }
+});
+
 // ---------- painéis ----------
 
 router.get('/evento/:eventoId', verifyToken, LER, async (req, res) => {
