@@ -122,7 +122,7 @@ router.post('/invites', verifyToken, async (req, res) => {
   }
 });
 
-// Cadastro público: a conta e o vínculo nascem pendentes de aprovação.
+// Cadastro público: a conta e o vínculo já nascem liberados (sem aprovação da recepção).
 router.post('/invites/:token/register', async (req, res) => {
   let invite = null;
   try {
@@ -200,7 +200,7 @@ router.post('/invites/:token/register', async (req, res) => {
           await query(`
             INSERT INTO crianca
               (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, pontos, status)
-            VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @apelido, @age, '👤', 0, 'pending')
+            VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @apelido, @age, '👤', 0, 'active')
           `, {
             id: childId,
             eventoId: invite.eventoId,
@@ -217,8 +217,8 @@ router.post('/invites/:token/register', async (req, res) => {
         const linkId = crypto.randomUUID();
         await query(`
           INSERT INTO vinculoFamiliar
-            (vinculoId, loginId, criancaId, empresaId, relacionamento, status)
-          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'pending')
+            (vinculoId, loginId, criancaId, empresaId, relacionamento, status, aprovadoEm)
+          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'approved', GETDATE())
         `, {
           id: linkId,
           loginId,
@@ -281,17 +281,6 @@ async function listFamilyLinks(status, eventoId, req) {
     isMaster: isMaster(req) ? 1 : 0,
   });
 }
-
-router.get('/pending', verifyToken, async (req, res) => {
-  try {
-    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
-    const pending = await listFamilyLinks('pending', req.query.eventoId || null, req);
-    res.json(pending);
-  } catch (err) {
-    console.error('❌ Erro ao listar aprovações familiares:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 router.get('/approved', verifyToken, async (req, res) => {
   try {
@@ -383,64 +372,6 @@ router.post('/links/:linkId/unlink', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/links/:linkId/approve', verifyToken, async (req, res) => {
-  try {
-    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
-    const result = await getLinkForStaff(req.params.linkId, req);
-    if (result.error) return res.status(result.status).json({ error: result.error });
-    const { link } = result;
-    if (link.status === 'approved') return res.json({ ok: true, status: 'approved', message: 'Solicitação já aprovada' });
-    if (link.status !== 'pending') return res.status(409).json({ error: 'Solicitação já foi rejeitada' });
-
-    await query(`
-      UPDATE vinculoFamiliar
-      SET status = 'approved', aprovadoPor = @approvedBy, aprovadoEm = GETDATE()
-      WHERE vinculoId = @linkId AND status = 'pending'
-    `, { linkId: link.id, approvedBy: req.user.id });
-    await query(`UPDATE login SET status = 'active', dataAtualizacao = GETDATE() WHERE loginId = @loginId`, { loginId: link.loginId });
-    await query(`UPDATE crianca SET status = 'active' WHERE criancaId = @childId AND status = 'pending'`, { childId: link.criancaId });
-
-    res.json({ ok: true, status: 'approved', message: 'Família aprovada com sucesso' });
-  } catch (err) {
-    console.error('❌ Erro ao aprovar família:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/links/:linkId/reject', verifyToken, async (req, res) => {
-  try {
-    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
-    const result = await getLinkForStaff(req.params.linkId, req);
-    if (result.error) return res.status(result.status).json({ error: result.error });
-    const { link } = result;
-    if (link.status === 'rejected') return res.json({ ok: true, status: 'rejected', message: 'Solicitação já rejeitada' });
-    if (link.status === 'approved') return res.status(409).json({ error: 'Uma solicitação aprovada não pode ser rejeitada' });
-
-    await query(`
-      UPDATE vinculoFamiliar
-      SET status = 'rejected', rejeitadoEm = GETDATE()
-      WHERE vinculoId = @linkId AND status = 'pending'
-    `, { linkId: link.id });
-    const approvedLink = await queryOne(`
-      SELECT vinculoId FROM vinculoFamiliar
-      WHERE criancaId = @childId AND status = 'approved'
-    `, { childId: link.criancaId });
-    if (!approvedLink) {
-      await query(`UPDATE crianca SET status = 'inactive' WHERE criancaId = @childId AND status = 'pending'`, { childId: link.criancaId });
-    }
-    const approvedSibling = await queryOne(`
-      SELECT vinculoId FROM vinculoFamiliar WHERE loginId = @loginId AND status = 'approved'
-    `, { loginId: link.loginId });
-    if (!approvedSibling) {
-      await query(`UPDATE login SET status = 'inactive', dataAtualizacao = GETDATE() WHERE loginId = @loginId AND status = 'pending'`, { loginId: link.loginId });
-    }
-
-    res.json({ ok: true, status: 'rejected', message: 'Solicitação rejeitada' });
-  } catch (err) {
-    console.error('❌ Erro ao rejeitar família:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
 // Dados da própria família: todas as consultas usam o login autenticado e vínculo aprovado.
 router.get('/me', verifyToken, async (req, res) => {
   try {

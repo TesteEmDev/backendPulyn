@@ -120,7 +120,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
           console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.id}`);
           await tx.query(
             `UPDATE vinculoFamiliar
-             SET status = 'pending'
+             SET status = 'approved', aprovadoEm = CURRENT_TIMESTAMP
              WHERE vinculoId = @linkId`,
             { linkId: vinculacaoExistente.id }
           );
@@ -134,9 +134,9 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.criancaId}, empresaId=${codigoVinculacao.empresaId}`);
         
         await tx.query(
-          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento)
-           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
-          { 
+          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm)
+           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP)`,
+          {
             linkId: linkId,
             loginId: req.user.id, 
             criancaId: codigoVinculacao.criancaId, 
@@ -194,7 +194,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
  *
  * Mais restrito que o QR, porque o UID é público e fixo: só vale para pulseira em uso por
  * uma criança da MESMA empresa, em evento aberto, com limite de tentativas. O vínculo
- * nasce 'pending' e a recepção aprova, como no QR.
+ * já nasce 'approved' (sem aprovação da recepção), como no QR.
  */
 router.post('/bracelet/validate', verifyToken, async (req, res) => {
   try {
@@ -250,7 +250,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       if (vinculacaoExistente) {
         if (vinculacaoExistente.status === 'inactive') {
           await tx.query(
-            `UPDATE vinculoFamiliar SET status = 'pending' WHERE vinculoId = @linkId`,
+            `UPDATE vinculoFamiliar SET status = 'approved', aprovadoEm = CURRENT_TIMESTAMP WHERE vinculoId = @linkId`,
             { linkId: vinculacaoExistente.id }
           );
         } else {
@@ -258,8 +258,8 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
         }
       } else {
         await tx.query(
-          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento)
-           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'pending', 'responsável')`,
+          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm)
+           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP)`,
           {
             linkId: uuidv4(),
             loginId: req.user.id,
@@ -270,7 +270,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       }
     });
 
-    console.log(`✅ [FAMILY-LINKING] ${req.user.email} vinculado (pendente) à criança ${row.apelido || row.nome} pela pulseira`);
+    console.log(`✅ [FAMILY-LINKING] ${req.user.email} vinculado à criança ${row.apelido || row.nome} pela pulseira`);
 
     res.json({
       success: true,

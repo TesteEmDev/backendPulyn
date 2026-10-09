@@ -25,29 +25,28 @@ function planInviteRegistration({ linkedChildId, children }) {
     }
   }
 
-  // Sem criança (convite genérico e nenhuma criança informada) não existe vínculo para a
-  // recepção aprovar; deixar a conta 'pending' a travaria para sempre, porque o login de
-  // conta pendente é bloqueado e o vínculo por QR Code exige estar logado. A conta nasce
-  // ativa e não enxerga nenhuma criança até vincular uma.
+  // A recepção não aprova mais vínculos: a conta nasce ativa, com ou sem crianças.
   const childless = !linkedChildId && list.length === 0;
-  return { loginStatus: childless ? 'active' : 'pending', childless };
+  return { loginStatus: 'active', childless };
 }
 
 /**
- * Status/mensagem que a rota devolve. Se o e-mail já tinha conta, vale o status dela
- * (uma conta que ainda aguarda aprovação continua aguardando).
+ * Status/mensagem que a rota devolve. Se o e-mail já tinha conta pendente (fluxo antigo),
+ * ela continua valendo como pendente.
  */
 function describeRegistrationResult({ childless, plannedLoginStatus, existingLoginStatus }) {
   const accountStatus = existingLoginStatus || plannedLoginStatus;
-  if (childless && accountStatus === 'active') {
+  if (accountStatus !== 'active') {
     return {
-      status: 'active',
-      message: 'Conta criada! Entre no app e vincule seu filho pelo QR Code entregue pela recepção.',
+      status: 'pending',
+      message: 'Cadastro realizado. Aguarde a liberação da recepção.',
     };
   }
   return {
-    status: 'pending',
-    message: 'Cadastro realizado. Aguarde a aprovação da recepção.',
+    status: 'active',
+    message: childless
+      ? 'Conta criada! Entre no app e vincule seu filho pelo QR Code entregue pela recepção.'
+      : 'Conta criada! Entre no app para acompanhar seu filho.',
   };
 }
 

@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
 
-test('convite genérico SEM crianças é aceito e a conta nasce ativa (não trava esperando aprovação)', () => {
+test('convite genérico SEM crianças é aceito e a conta nasce ativa', () => {
   const plan = planInviteRegistration({ linkedChildId: null, children: [] });
   assert.equal(plan.error, undefined);
   assert.equal(plan.childless, true);
@@ -15,17 +15,17 @@ test('sem o campo children (o app novo não envia) também é aceito', () => {
   assert.equal(plan.loginStatus, 'active');
 });
 
-test('convite genérico COM crianças continua pendente de aprovação da recepção', () => {
+test('convite genérico COM crianças também nasce ativo (sem aprovação da recepção)', () => {
   const plan = planInviteRegistration({ linkedChildId: null, children: [{ name: 'Lia' }] });
   assert.equal(plan.error, undefined);
   assert.equal(plan.childless, false);
-  assert.equal(plan.loginStatus, 'pending');
+  assert.equal(plan.loginStatus, 'active');
 });
 
-test('convite já vinculado a uma criança continua pendente de aprovação', () => {
+test('convite já vinculado a uma criança também nasce ativo', () => {
   const plan = planInviteRegistration({ linkedChildId: 'abc', children: [] });
   assert.equal(plan.childless, false);
-  assert.equal(plan.loginStatus, 'pending');
+  assert.equal(plan.loginStatus, 'active');
 });
 
 test('mais de 10 crianças ou criança sem nome continuam recusados', () => {
@@ -45,13 +45,12 @@ test('resposta: sem crianças e conta ativa => "active" com instrução do QR Co
   assert.match(r.message, /QR Code/);
 });
 
-test('resposta: e-mail que já tinha conta pendente continua "pending"', () => {
-  const r = describeRegistrationResult({ childless: true, plannedLoginStatus: 'active', existingLoginStatus: 'pending' });
-  assert.equal(r.status, 'pending');
+test('resposta: com crianças e conta ativa => "active"', () => {
+  const r = describeRegistrationResult({ childless: false, plannedLoginStatus: 'active', existingLoginStatus: undefined });
+  assert.equal(r.status, 'active');
 });
 
-test('resposta: com crianças => "pending"', () => {
-  const r = describeRegistrationResult({ childless: false, plannedLoginStatus: 'pending', existingLoginStatus: undefined });
+test('resposta: e-mail com conta ainda pendente (fluxo antigo) continua "pending"', () => {
+  const r = describeRegistrationResult({ childless: true, plannedLoginStatus: 'active', existingLoginStatus: 'pending' });
   assert.equal(r.status, 'pending');
-  assert.match(r.message, /aprovação/);
 });
