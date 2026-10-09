@@ -200,6 +200,50 @@ async function buscarUltimoRoundFinalizado(partidaId) {
   );
 }
 
+// ---------- locais da bomba (A, B...) ----------
+
+// Checkpoints-bomba do jogo, na ordem em que foram marcados no jogo (o primeiro é o local A).
+// Sem lista no jogo (jogo antigo), vale qualquer checkpoint de jogo do evento.
+async function locaisDoJogo(eventoId, brincadeiraId) {
+  const doEvento = await allQuery(
+    `SELECT checkpointId FROM pontoVerificacao
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+     ORDER BY criadoEm ASC, nome ASC`,
+    { eventoId }
+  );
+  const existentes = new Map(doEvento.map((c) => [String(c.checkpointId).toLowerCase(), c.checkpointId]));
+
+  let configurados = [];
+  if (brincadeiraId) {
+    const jogo = await queryOne('SELECT checkpoints FROM brincadeira WHERE LOWER(brincadeiraId) = LOWER(@brincadeiraId)', { brincadeiraId });
+    try {
+      const itens = JSON.parse(jogo?.checkpoints || '[]');
+      configurados = (Array.isArray(itens) ? itens : [])
+        .map((item) => String((item && typeof item === 'object' ? (item.id ?? item.checkpointId) : item) ?? '').trim().toLowerCase())
+        .filter((id) => existentes.has(id))
+        .map((id) => existentes.get(id));
+    } catch { /* sem lista: usa todos */ }
+  }
+  return configurados.length ? configurados : doEvento.map((c) => c.checkpointId);
+}
+
+function idsDosLocais(partida) {
+  try {
+    const lista = JSON.parse(partida?.locaisIds || 'null');
+    return Array.isArray(lista) ? lista : null;
+  } catch {
+    return null;
+  }
+}
+
+// Partida antiga (sem lista guardada): qualquer checkpoint serve.
+function ehLocalDoJogo(partida, checkpointId) {
+  const ids = idsDosLocais(partida);
+  return !ids || ids.some((id) => mesmoId(id, checkpointId));
+}
+
+const letraDoLocal = (indice) => String.fromCharCode(65 + indice);
+
 // ---------- lados ----------
 
 // Quem joga de Rebeldes (tr) e de Agentes (ct) no round `numero` (trocam a cada `roundsPorLado` rounds).
@@ -338,16 +382,19 @@ async function iniciarJogo(eventoId, brincadeiraId, opcoes = {}) {
   const salva = await configSalvaDoJogo(brincadeiraId);
   const config = { ...PADROES, ...salva, ...normalizarConfig(opcoes.config) };
 
+  const locais = await locaisDoJogo(evento.eventoId, brincadeiraId);
+  if (locais.length < 2) throw erroHttp('O Conquistar e Destruir precisa de 2 checkpoints de bomba (locais A e B).', 409);
+
   const partidaId = uuidv4();
   await query(
     `INSERT INTO partidaBomba
        (partidaId, eventoId, empresaId, brincadeiraId, timeAId, timeBId, timeTrInicialId,
-        vitoriasParaVencer, roundsPorLado, duracaoRoundSeg, plantarMs, desarmarMs, bombaSeg)
+        vitoriasParaVencer, roundsPorLado, duracaoRoundSeg, plantarMs, desarmarMs, bombaSeg, locaisIds)
      VALUES (@partidaId, @eventoId, @empresaId, @brincadeiraId, @timeAId, @timeBId, @timeTrInicialId,
-             @vitoriasParaVencer, @roundsPorLado, @duracaoRoundSeg, @plantarMs, @desarmarMs, @bombaSeg)`,
+             @vitoriasParaVencer, @roundsPorLado, @duracaoRoundSeg, @plantarMs, @desarmarMs, @bombaSeg, @locaisIds)`,
     {
       partidaId, eventoId: evento.eventoId, empresaId: evento.empresaId, brincadeiraId: brincadeiraId || null,
-      timeAId, timeBId, timeTrInicialId, ...config,
+      timeAId, timeBId, timeTrInicialId, locaisIds: JSON.stringify(locais), ...config,
     }
   );
 
@@ -565,6 +612,10 @@ async function processarLeitura({ checkpointId, uid }) {
   const partida = await buscarPartidaAtiva(checkpoint.eventoId);
   if (!partida) return { ok: true, registered: true, autorizado: false, tipo: 'bomba', acao: 'sem_partida', mensagem: 'Nenhuma partida em andamento' };
 
+  if (!ehLocalDoJogo(partida, checkpoint.checkpointId)) {
+    return negado('fora_do_jogo', 'Este checkpoint não é um local de bomba deste jogo');
+  }
+
   let round = await buscarRoundAtual(partida.partidaId);
   round = await avaliarRound(partida, round, agora);
   const partidaAtual = await buscarPartida(partida.partidaId);
@@ -677,7 +728,7 @@ async function obterEstado(eventoId) {
       { eventoId }
     );
     const timesDaUltima = ultima ? await dadosDosTimes(eventoId) : [];
-    return { agora: agora.toISOString(), ativa: false, partida: ultima ? montarPartida(ultima, timesDaUltima) : null, round: null, jogadores: [], emAndamento: [] };
+    return { agora: agora.toISOString(), ativa: false, partida: ultima ? montarPartida(ultima, timesDaUltima) : null, round: null, locais: [], jogadores: [], emAndamento: [] };
   }
 
   const round = await buscarRoundAtual(partida.partidaId);
@@ -692,6 +743,25 @@ async function obterEstado(eventoId) {
   const ultimo = round && round.status !== 'finalizado' && round.numero > 1
     ? await buscarUltimoRoundFinalizado(partida.partidaId)
     : (round && round.status === 'finalizado' ? round : null);
+
+  // Locais da bomba (A, B...) com o nome do checkpoint cadastrado.
+  const checkpointsDoEvento = await allQuery(
+    `SELECT checkpointId, nome, status FROM pontoVerificacao
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+     ORDER BY criadoEm ASC, nome ASC`,
+    { eventoId }
+  );
+  const idsConfigurados = idsDosLocais(partida) || checkpointsDoEvento.map((c) => c.checkpointId);
+  const locais = idsConfigurados.map((id, indice) => {
+    const linha = checkpointsDoEvento.find((c) => mesmoId(c.checkpointId, id));
+    return {
+      checkpointId: id,
+      letra: letraDoLocal(indice),
+      nome: linha?.nome || id,
+      online: String(linha?.status || '').toLowerCase() === 'online',
+    };
+  });
+  const localPor = (checkpointId) => locais.find((l) => mesmoId(l.checkpointId, checkpointId)) || null;
 
   const emAndamento = [...leiturasEmAndamento.values()]
     .filter((l) => mesmoId(l.eventoId, eventoId) && agora.getTime() - l.ultimaLeitura <= TOLERANCIA_LEITURA_MS)
@@ -714,6 +784,7 @@ async function obterEstado(eventoId) {
       portadorCriancaId: round.portadorCriancaId,
       portadorNumero: round.portadorNumero,
       localCheckpointId: round.localCheckpointId,
+      local: localPor(round.localCheckpointId),
       restanteRoundMs: round.status === 'em_andamento' ? restanteMs(round.iniciadoEm, partida.duracaoRoundSeg * 1000, agora) : null,
       restanteBombaMs: round.status === 'bomba_plantada' ? restanteMs(round.plantadaEm, partida.bombaSeg * 1000, agora) : null,
       vencedorTimeId: round.vencedorTimeId,
@@ -725,7 +796,9 @@ async function obterEstado(eventoId) {
       vencedorLado: mesmoId(ultimo.vencedorTimeId, ultimo.timeTrId) ? 'tr' : 'ct',
       motivo: ultimo.motivo,
       finalizadoEm: ultimo.finalizadoEm,
+      local: localPor(ultimo.localCheckpointId),
     } : null,
+    locais,
     jogadores,
     emAndamento,
   };
@@ -762,6 +835,7 @@ async function obterEstadoCheckpoint(checkpointId) {
   const agora = new Date();
   const partida = await buscarPartidaAtiva(checkpoint.eventoId);
   if (!partida) return { ok: true, ativo: false, fase: 'sem_partida' };
+  if (!ehLocalDoJogo(partida, checkpoint.checkpointId)) return { ok: true, ativo: false, fase: 'fora_do_jogo' };
 
   let round = await buscarRoundAtual(partida.partidaId);
   round = await avaliarRound(partida, round, agora);

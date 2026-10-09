@@ -74,7 +74,7 @@ async function checkGameStartRequirements(eventoId, game) {
   );
 
   let ids = online.map((checkpoint) => String(checkpoint.checkpointId).trim().toLowerCase());
-  const configured = kind === 'treasure_hunt' ? parseConfiguredIds(row?.checkpoints) : [];
+  const configured = (kind === 'treasure_hunt' || kind === 'bomb_defusal') ? parseConfiguredIds(row?.checkpoints) : [];
   const scopedToGame = configured.length > 0;
   if (scopedToGame) {
     const allowed = new Set(configured);
