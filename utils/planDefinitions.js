@@ -8,11 +8,13 @@ const TIPOS_DE_JOGO = {
   treasure_hunt: 'Caça ao Tesouro',
   monster_hunt: 'Caça ao Monstro',
   bomb_defusal: 'Conquistar e Destruir (PulynBall)',
+  zone_domination: 'Zona - Domínio total (PulynBall)',
+  hostage_rescue: 'Resgate do Refém (PulynBall)',
 };
 
 // Tipos que cada plano pode CRIAR. O plano PulynBall trabalha só com os jogos de paintball; os demais, com os jogos comuns.
 const TIPOS_COMUNS = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
-const TIPOS_PULYNBALL = ['bomb_defusal'];
+const TIPOS_PULYNBALL = ['bomb_defusal', 'zone_domination', 'hostage_rescue'];
 
 function tiposDeJogoDoPlano(planId) {
   return String(planId || '').trim().toLowerCase() === 'pulynball' ? TIPOS_PULYNBALL : TIPOS_COMUNS;

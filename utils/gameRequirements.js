@@ -15,6 +15,10 @@ const MIN_CHECKPOINTS = {
   zone_individual: 4,
   // dois locais de bomba (A e B)
   bomb_defusal: 2,
+  // a equipe só relê um checkpoint depois de ler 3 diferentes: 3 + 1 (igual à Zona individual)
+  zone_domination: 4,
+  // o refém percorre os checkpoints em sequência: precisa de ao menos o início e o fim
+  hostage_rescue: 2,
 };
 
 const GAME_LABELS = {
@@ -23,6 +27,8 @@ const GAME_LABELS = {
   zone_team: 'Zona (equipe)',
   zone_individual: 'Zona (individual)',
   bomb_defusal: 'Conquistar e Destruir',
+  zone_domination: 'Zona (domínio total)',
+  hostage_rescue: 'Resgate do Refém',
 };
 
 // Mesma leitura do tipo que as rotas de início usam: brincadeiras.type é a fonte da verdade.
@@ -31,6 +37,8 @@ function resolveGameKind(game) {
   if (type === 'monster_hunt') return 'monster_hunt';
   if (type === 'treasure_hunt') return 'treasure_hunt';
   if (type === 'bomb_defusal') return 'bomb_defusal';
+  if (type === 'zone_domination') return 'zone_domination';
+  if (type === 'hostage_rescue') return 'hostage_rescue';
   if (type === 'individual' || type === 'zone_conquest_individual') return 'zone_individual';
   return 'zone_team';
 }
@@ -74,7 +82,7 @@ async function checkGameStartRequirements(eventoId, game) {
   );
 
   let ids = online.map((checkpoint) => String(checkpoint.checkpointId).trim().toLowerCase());
-  const configured = (kind === 'treasure_hunt' || kind === 'bomb_defusal') ? parseConfiguredIds(row?.checkpoints) : [];
+  const configured = (kind === 'treasure_hunt' || kind === 'bomb_defusal' || kind === 'hostage_rescue') ? parseConfiguredIds(row?.checkpoints) : [];
   const scopedToGame = configured.length > 0;
   if (scopedToGame) {
     const allowed = new Set(configured);
@@ -82,6 +90,17 @@ async function checkGameStartRequirements(eventoId, game) {
   }
 
   const available = ids.length;
+  if (available >= required && kind === 'zone_domination') {
+    // sem zona com checkpoint dentro ninguém consegue dominar "todas as zonas"
+    const { situacaoDasZonas } = require('./zonaDominio');
+    const { totalZonas } = await situacaoDasZonas(eventoId);
+    if (totalZonas < 1) {
+      return {
+        ok: false, kind, required, available,
+        message: 'O jogo Zona (domínio total) precisa de pelo menos uma zona desenhada no mapa com checkpoints posicionados dentro dela. Configure as zonas e posicione os checkpoints antes de iniciar.',
+      };
+    }
+  }
   if (available >= required) return { ok: true, kind, required, available, message: null };
 
   const name = row?.nome ? `"${row.nome}"` : GAME_LABELS[kind];

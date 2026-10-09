@@ -37,6 +37,9 @@ async function ensureZoneConquestSchema() {
       )
     `);
 
+    // Zona - Domínio total: a equipe que dominou todas as zonas (a partida termina na hora).
+    await query('ALTER TABLE zonaConquistaPartidaTime ADD COLUMN IF NOT EXISTS vencedorTimeId varchar(36) NULL');
+
     await query(`
       CREATE TABLE IF NOT EXISTS zonaConquistaTempoTime (
         id varchar(36) PRIMARY KEY,

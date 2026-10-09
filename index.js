@@ -61,6 +61,8 @@ const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
 const { ensureBombaSchema } = require('./migrations/bomba');
 const bombaRoutes = require('./routes/bomba');
+const zonaDominioRoutes = require('./routes/zonaDominio');
+const { TIPOS_PULYNBALL } = require('./utils/planDefinitions');
 const bombaJogo = require('./utils/bomba');
 const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
 const { ensureParallelGamesSchema } = require('./migrations/parallelGames');
@@ -645,8 +647,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
-    if (selectedGame.tipo === bombaJogo.BOMBA_GAME_TYPE && !isMaster(req) && !(await bombaJogo.empresaTemPlanoPulynBall(eventoAntes.empresaId))) {
-      return res.status(403).json({ error: bombaJogo.MENSAGEM_PLANO });
+    if (TIPOS_PULYNBALL.includes(selectedGame.tipo) && !isMaster(req) && !(await bombaJogo.empresaTemPlanoPulynBall(eventoAntes.empresaId))) {
+      return res.status(403).json({ error: 'Este jogo é exclusivo do plano PulynBall.' });
     }
 
     // O jogo só começa se o evento tiver o mínimo de pontoVerificacao online para ele (confere antes de mexer em qualquer dado)
@@ -1244,7 +1246,9 @@ async function checkStaleTeamCheckpoints() {
          AND c."ultimoConquistadoEm" < @cutoff
          AND EXISTS (
            SELECT 1 FROM zonaConquistaPartidaTime p
+           LEFT JOIN brincadeira b ON LOWER(b.brincadeiraId) = LOWER(p.brincadeiraId)
            WHERE LOWER(p.eventoId) = LOWER(c."eventoId") AND p.status = 'active'
+             AND COALESCE(b.tipo, '') <> 'zone_domination'
          )`,
       { cutoff }
     );
@@ -1908,6 +1912,7 @@ app.use('/api/treasure', treasureRoutes);
 app.use('/api/monster', monsterRoutes);
 
 app.use('/api/bomba', bombaRoutes);
+app.use('/api/zonaDominio', zonaDominioRoutes);
 
 // Zone Conquest
 app.use('/api/zone-conquest', zoneConquestRoutes);
