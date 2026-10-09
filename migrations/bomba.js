@@ -34,6 +34,10 @@ async function ensureBombaSchema() {
     )
   `);
   await query('CREATE INDEX IF NOT EXISTS idx_partidabomba_evento ON partidaBomba (eventoId, status)');
+  // Checkpoints-bomba da partida (JSON com os ids, na ordem: o primeiro é o local A, o segundo o B...).
+  await query('ALTER TABLE partidaBomba ADD COLUMN IF NOT EXISTS locaisIds text');
+  // Checkpoints-bomba da partida (JSON com os ids, na ordem: o primeiro é o local A, o segundo o B...).
+  await query('ALTER TABLE partidaBomba ADD COLUMN IF NOT EXISTS locaisIds text');
 
   await query(`
     CREATE TABLE IF NOT EXISTS roundBomba (
