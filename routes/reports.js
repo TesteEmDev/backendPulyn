@@ -1,7 +1,7 @@
 // routes/reports.js - Relatório geral do buffet (todos os evento)
 const express = require('express');
 const router = express.Router();
-const { allQuery } = require('../database');
+const { allQuery, queryOne } = require('../database');
 const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 const { summarizeEvents } = require('../utils/reportOverview');
 
@@ -84,6 +84,48 @@ router.get('/overview', async (req, res) => {
     });
   } catch (err) {
     console.error('❌ Erro ao gerar relatório geral:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Engajamento por zona de UM evento, calculado das leituras reais dos checkpoints (tabela leitura).
+// Zonas sem nenhuma leitura continuam na lista (com zero) para o admin ver onde ninguém passou.
+router.get('/evento/:eventoId/zonas', async (req, res) => {
+  try {
+    const empresaId = resolveEmpresaId(req);
+    if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
+    const eventoId = String(req.params.eventoId || '').trim();
+
+    const evento = await queryOne(
+      'SELECT eventoId FROM evento WHERE eventoId = @eventoId AND empresaId = @empresaId',
+      { eventoId, empresaId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+
+    const rows = await allQuery(`
+      SELECT COALESCE(NULLIF(TRIM(cp.zona), ''), 'Sem zona') AS zona,
+        COUNT(DISTINCT cp.checkpointId) AS checkpoints,
+        COUNT(l.leituraId) AS leituras,
+        COUNT(DISTINCT l.criancaId) AS participantes,
+        COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
+      FROM pontoVerificacao cp
+      LEFT JOIN leitura l ON l.checkpointId = cp.checkpointId AND l.criancaId IS NOT NULL
+      WHERE cp.eventoId = @eventoId
+        AND cp.empresaId = @empresaId
+        AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
+      GROUP BY COALESCE(NULLIF(TRIM(cp.zona), ''), 'Sem zona')
+      ORDER BY leituras DESC, zona
+    `, { eventoId: evento.eventoId, empresaId });
+
+    res.json(rows.map((row) => ({
+      zona: row.zona,
+      checkpoints: Number(row.checkpoints) || 0,
+      leituras: Number(row.leituras) || 0,
+      participantes: Number(row.participantes) || 0,
+      pontos: Number(row.pontos) || 0,
+    })));
+  } catch (err) {
+    console.error('❌ Erro ao calcular engajamento por zona:', err);
     res.status(500).json({ error: err.message });
   }
 });

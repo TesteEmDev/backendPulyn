@@ -4,6 +4,7 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
+const { criarPerfil } = require('../utils/perfilCrianca');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
 const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -197,12 +198,20 @@ router.post('/invites/:token/register', async (req, res) => {
       } else {
         for (const childData of childrenPayload) {
           const childId = crypto.randomUUID();
+          const childNomeLimpo = String(childData.name).trim();
+          const childApelido = String(childData.nickname || childData.name).trim();
+          const childIdade = Number.isFinite(Number(childData.age)) ? Number(childData.age) : null;
+          const perfilId = await criarPerfil({
+            empresaId: invite.empresaId, eventoId: invite.eventoId,
+            nome: childNomeLimpo, apelido: childApelido, idade: childIdade, avatar: '👤',
+          });
           await query(`
             INSERT INTO crianca
-              (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, pontos, status)
-            VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @apelido, @age, '👤', 0, 'pending')
+              (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, pontos, status, perfilCriancaId)
+            VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @apelido, @age, '👤', 0, 'pending', @perfilId)
           `, {
             id: childId,
+            perfilId,
             eventoId: invite.eventoId,
             empresaId: invite.empresaId,
             childNome: String(childData.name).trim(),

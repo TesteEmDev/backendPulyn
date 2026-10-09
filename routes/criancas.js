@@ -6,6 +6,7 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { getAvatarForCreate, isAdventurerAvatarId } = require('../utils/avatar');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
+const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil } = require('../utils/perfilCrianca');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -19,6 +20,7 @@ router.get('/', verifyToken, async (req, res) => {
     const crianca = await allQuery(`
       SELECT TOP 5000
         c.*,
+        CAST((SELECT COALESCE(SUM(x.pontos), 0) FROM crianca x WHERE x.perfilCriancaId = c.perfilCriancaId) AS INTEGER) AS pontosTotais,
         t.nome AS time_nome,
         t.cor AS time_color,
         e.nome AS evento_nome,
@@ -37,6 +39,18 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
+// Cadastro permanente da criança: dados, pontos totais (todos os eventos) e pontos por evento.
+router.get('/perfil/:perfilCriancaId', verifyToken, async (req, res) => {
+  try {
+    const perfil = await pontosDoPerfil(req.params.perfilCriancaId, req.user.empresaId);
+    if (!perfil) return res.status(404).json({ error: 'Cadastro da criança não encontrado' });
+    res.json(perfil);
+  } catch (err) {
+    console.error('❌ Erro ao carregar o cadastro da criança:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Listar crianças de um evento
 router.get('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
@@ -44,7 +58,8 @@ router.get('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const empresaId = req.user?.empresaId;
     
     const crianca = await allQuery(`
-      SELECT c.*, t.nome as time_nome, t.cor as time_color 
+      SELECT c.*, t.nome as time_nome, t.cor as time_color,
+        CAST((SELECT COALESCE(SUM(x.pontos), 0) FROM crianca x WHERE x.perfilCriancaId = c.perfilCriancaId) AS INTEGER) AS pontosTotais
       FROM crianca c
       LEFT JOIN "time" t ON c.timeId = t.timeId
       WHERE c.eventoId = @eventoId
@@ -60,7 +75,7 @@ router.get('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
 // Criar criança
 router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
-    const { nome, apelido, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, apelido, age, avatar, braceletCode, timeId, perfilCriancaId } = req.body;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     const avatarValue = getAvatarForCreate(avatar);
     const { eventoId } = req.params;
@@ -70,7 +85,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
 
-    if (!nome || !String(nome).trim()) {
+    if (!perfilCriancaId && (!nome || !String(nome).trim())) {
       return res.status(400).json({ error: 'Nome da criança é obrigatório' });
     }
 
@@ -119,11 +134,29 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       }
     }
     
+    // Cadastro permanente: criança que volta reaproveita o perfil; criança nova ganha um perfil.
+    let nomeFinal = nome;
+    let perfilId = null;
+    if (perfilCriancaId) {
+      const perfil = await buscarPerfil(perfilCriancaId, empresaId);
+      if (!perfil) return res.status(404).json({ error: 'Cadastro da criança não encontrado' });
+      const jaNoEvento = await queryOne(
+        'SELECT criancaId FROM crianca WHERE perfilCriancaId = @perfilCriancaId AND eventoId = @eventoId',
+        { perfilCriancaId, eventoId }
+      );
+      if (jaNoEvento) return res.status(409).json({ error: 'Esta criança já está cadastrada neste evento' });
+      nomeFinal = perfil.nome;
+      perfilId = perfil.perfilCriancaId;
+      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue });
+    } else {
+      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue });
+    }
+
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
     await query(
-      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira) 
-       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @braceletCode)`,
-      { id, eventoId, empresaId: empresaId, timeId, nome, apelido, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode }
+      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, perfilCriancaId) 
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @braceletCode, @perfilId)`,
+      { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode, perfilId }
     );
     
     if (normalizedBraceletCode) {
@@ -140,7 +173,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, nome, apelido, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -286,6 +319,8 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       }
     );
 
+    await atualizarDadosDoPerfil(crianca.perfilCriancaId, { nome, apelido, idade: age, avatar: nextAvatar });
+
     const affectedTeamIds = [...new Set([crianca.timeId, nextTimeId].filter(Boolean))];
     for (const affectedTeamId of affectedTeamIds) {
       await query(
@@ -365,6 +400,9 @@ router.delete('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, r
        AND empresaId = @empresaId`,
       { criancaId: criancaId, eventoId: eventoId, empresaId: crianca.empresaId }
     );
+
+    // O cadastro permanente continua; só o "último evento" volta para o mais recente que sobrou.
+    await recalcularUltimoEvento(crianca.perfilCriancaId);
 
     console.log(`✅ Participante ${crianca.nome} (${criancaId}) excluído do evento ${eventoId}`);
     res.json({ ok: true, message: 'Participante excluído com sucesso' });

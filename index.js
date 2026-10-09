@@ -58,6 +58,7 @@ const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
+const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
 const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
 const { ensureParallelGamesSchema } = require('./migrations/parallelGames');
 const parallelGamesRoutes = require('./routes/parallelGames');
@@ -1951,6 +1952,7 @@ async function startServer() {
     await ensureClienteUnidadeSchema();
     await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
+    await ensurePerfilCriancaSchema();
     await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();

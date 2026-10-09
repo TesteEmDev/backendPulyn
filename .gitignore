@@ -35,3 +35,6 @@ Thumbs.db
 
 # Inventário local do banco (pode conter nomes internos do schema)
 schema-export.json
+
+# Backups gerados por debug/corrigir-acentos.js
+backups-acentos/
