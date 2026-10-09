@@ -40,7 +40,7 @@ const LIMITES = Object.freeze({
 // Sem leitura por mais que isso (contado do fim da resposta anterior até a chegada da próxima) = a pulseira saiu do leitor.
 // O leitor lê a cada 500 ms; a folga cobre uma leitura perdida e a latência da rede.
 const TOLERANCIA_LEITURA_MS = 2000;
-const MOSTRAR_RESULTADO_MS = 6000;    // quanto tempo os checkpoints mostram o resultado do round
+const MOSTRAR_RESULTADO_MS = 10000;   // quanto tempo os checkpoints ainda veem o resultado do round (a vitória toca ~4 s depois do fim)
 
 // Leituras em andamento (plantar/desarmar), por checkpoint. Só ficam em memória: se o servidor reiniciar,
 // quem estava segurando a pulseira só precisa recomeçar.
