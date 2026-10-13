@@ -442,7 +442,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     }
 
     // Remover referências serializadas da configuração dos jogos do evento.
-    const brincadeira = await allQuery(
+    const jogosDoEvento = await allQuery(
       `SELECT brincadeiraId, checkpoints
        FROM brincadeira
        WHERE LOWER(empresaId) = LOWER(@empresaId)
@@ -457,13 +457,13 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
          )`,
       { empresaId: evento.empresaId, eventoId }
     );
-    for (const brincadeira of brincadeira) {
-      const cleaned = removeCheckpointFromJson(brincadeira.checkpoints, checkpointId);
+    for (const jogo of jogosDoEvento) {
+      const cleaned = removeCheckpointFromJson(jogo.checkpoints, checkpointId);
       if (cleaned.changed) {
         await query(
           `UPDATE brincadeira SET checkpoints = @pontoVerificacao
            WHERE LOWER(brincadeiraId) = LOWER(@brincadeiraId)`,
-          { brincadeiraId: brincadeira.brincadeiraId, pontoVerificacao: cleaned.value }
+          { brincadeiraId: jogo.brincadeiraId, pontoVerificacao: cleaned.value }
         );
       }
     }
