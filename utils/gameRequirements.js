@@ -15,7 +15,7 @@ const MIN_CHECKPOINTS = {
   zone_individual: 4,
   // dois locais de bomba (A e B)
   bomb_defusal: 2,
-  // a equipe só relê um checkpoint depois de ler 3 diferentes: 3 + 1 (igual à Zona individual)
+  // a equipe só relê um checkpoint depois de ler 3 diferentes: 3 + 1 (igual à Zona individual); vence quem domina todos
   zone_domination: 4,
   // o refém percorre os checkpoints em sequência: precisa de ao menos o início e o fim
   hostage_rescue: 2,
@@ -82,7 +82,7 @@ async function checkGameStartRequirements(eventoId, game) {
   );
 
   let ids = online.map((checkpoint) => String(checkpoint.checkpointId).trim().toLowerCase());
-  const configured = (kind === 'treasure_hunt' || kind === 'bomb_defusal' || kind === 'hostage_rescue') ? parseConfiguredIds(row?.checkpoints) : [];
+  const configured = (kind === 'treasure_hunt' || kind === 'bomb_defusal' || kind === 'hostage_rescue' || kind === 'zone_domination') ? parseConfiguredIds(row?.checkpoints) : [];
   const scopedToGame = configured.length > 0;
   if (scopedToGame) {
     const allowed = new Set(configured);
@@ -90,17 +90,6 @@ async function checkGameStartRequirements(eventoId, game) {
   }
 
   const available = ids.length;
-  if (available >= required && kind === 'zone_domination') {
-    // sem zona com checkpoint dentro ninguém consegue dominar "todas as zonas"
-    const { situacaoDasZonas } = require('./zonaDominio');
-    const { totalZonas } = await situacaoDasZonas(eventoId);
-    if (totalZonas < 1) {
-      return {
-        ok: false, kind, required, available,
-        message: 'O jogo Zona (domínio total) precisa de pelo menos uma zona desenhada no mapa com checkpoints posicionados dentro dela. Configure as zonas e posicione os checkpoints antes de iniciar.',
-      };
-    }
-  }
   if (available >= required) return { ok: true, kind, required, available, message: null };
 
   const name = row?.nome ? `"${row.nome}"` : GAME_LABELS[kind];

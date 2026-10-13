@@ -807,7 +807,7 @@ router.post('/', async (req, res) => {
     if (!zoneConquestTeamGame && !zoneConquestIndividualGame) {
       const campeao = await require('../utils/zonaDominio').vencedorDaUltimaPartida(checkpoint.eventoId);
       if (campeao) {
-        const mensagem = `A partida terminou${campeao.nome ? `: ${campeao.nome} dominou todas as zonas` : ''}`;
+        const mensagem = `A partida terminou${campeao.nome ? `: ${campeao.nome} dominou todos os checkpoints` : ''}`;
         return res.json({
           ok: true, registered: true, autorizado: false, braceletCode: normalizedUid,
           gameMode: 'zone_domination', error: mensagem, message: mensagem,
@@ -873,7 +873,7 @@ router.post('/', async (req, res) => {
         criancaName: crianca.nome,
         dominioTotal: Boolean(scanResult.dominioTotal),
         message: scanResult.dominioTotal
-          ? `${crianca.nome} completou o domínio de todas as zonas! Vitória!`
+          ? `${crianca.nome} dominou todos os checkpoints! Vitória!`
           : `${crianca.nome} conquistou o checkpoint! +${scanResult.points}pt`,
       });
     }

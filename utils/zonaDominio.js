@@ -1,15 +1,18 @@
-// utils/zonaDominio.js - Zona (Domínio total, PulynBall): vence a equipe que dominar TODAS as zonas.
+// utils/zonaDominio.js - Zona (Domínio total, PulynBall): vence a equipe que dominar TODOS os checkpoints do jogo.
 //
 // Funciona como a Zona por equipe, com as regras da Zona individual aplicadas à equipe:
 //   - cada leitura vale pontos (10 x multiplicador crescente) e o checkpoint passa a ser da equipe;
 //   - a equipe só relê o MESMO checkpoint depois de ler outros REPETICAO_MINIMA diferentes;
-//   - a zona é da equipe quando TODOS os checkpoints dentro dela são dela (mesma regra do mapa do telão).
-// Quando uma equipe domina todas as zonas que têm checkpoints, a partida termina e ela vence.
+//   - quando uma equipe é dona de todos os checkpoints do jogo, a partida termina, ela vence e o jogo é encerrado
+//     sozinho depois de alguns segundos (tempo de o telão e os checkpoints mostrarem/tocarem a vitória).
 // Os checkpoints não "esfriam" sozinhos neste jogo (a varredura de 1m30s da Zona por equipe não vale aqui).
+// Os checkpoints do jogo são os marcados no jogo (sem lista, todos os checkpoints de jogo do evento).
 const { queryOne, allQuery } = require('../database');
+const bomba = require('./bomba');
 
 const TIPO_ZONA_DOMINIO = 'zone_domination';
 const REPETICAO_MINIMA = 3;
+const ENCERRAR_APOS_MS = 20000;   // vitória na tela e nos checkpoints antes de o jogo parar
 
 function mesmoId(a, b) {
   return Boolean(a) && Boolean(b) && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
@@ -24,62 +27,37 @@ async function ehJogoDeDominio(brincadeiraId) {
   return jogo?.tipo === TIPO_ZONA_DOMINIO;
 }
 
-// Zonas do buffet (desenhadas no mapa): [{ id, name, color, x, y, width, height }].
-async function zonasDoEvento(eventoId) {
-  const linha = await queryOne(
-    `SELECT e.dadosZonas FROM empresa e
-     INNER JOIN evento v ON v.empresaId = e.empresaId
-     WHERE LOWER(v.eventoId) = LOWER(@eventoId)`,
+// Checkpoints que valem neste jogo, com dono atual, na ordem do ID que o recreacionista deu.
+async function checkpointsDoJogo(eventoId, brincadeiraId) {
+  const ids = await bomba.locaisDoJogo(eventoId, brincadeiraId);
+  if (ids.length === 0) return [];
+  const linhas = await allQuery(
+    `SELECT checkpointId, codigo, nome, territorioDonoTimeId FROM pontoVerificacao
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
     { eventoId }
   );
-  try {
-    const zonas = JSON.parse(linha?.dadosZonas || '[]');
-    return Array.isArray(zonas) ? zonas.filter((z) => z && Number.isFinite(Number(z.x)) && Number.isFinite(Number(z.width))) : [];
-  } catch {
-    return [];
-  }
+  const porId = new Map(linhas.map((l) => [String(l.checkpointId).toLowerCase(), l]));
+  return ids
+    .map((id) => porId.get(String(id).toLowerCase()))
+    .filter(Boolean)
+    .sort((a, b) => String(a.codigo || a.checkpointId).localeCompare(String(b.codigo || b.checkpointId), 'pt-BR', { numeric: true, sensitivity: 'base' }));
 }
 
-async function checkpointsDoJogo(eventoId) {
-  return allQuery(
-    `SELECT checkpointId, nome, mapaX, mapaY, territorioDonoTimeId FROM pontoVerificacao
-     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
-     ORDER BY criadoEm ASC, nome ASC`,
-    { eventoId }
-  );
+async function checkpointEhDoJogo(eventoId, brincadeiraId, checkpointId) {
+  const lista = await checkpointsDoJogo(eventoId, brincadeiraId);
+  return lista.some((c) => mesmoId(c.checkpointId, checkpointId));
 }
 
 /**
- * Situação das zonas: quem é dono de cada uma e se alguma equipe já dominou todas.
- * Só contam as zonas que têm pelo menos um checkpoint dentro (zona vazia não dá para dominar).
- * @returns {Promise<{ zonas: object[], vencedorTimeId: string|null, totalZonas: number }>}
+ * Situação do jogo: quem é dono de cada checkpoint e se alguma equipe já dominou todos.
+ * @returns {Promise<{ checkpoints: object[], vencedorTimeId: string|null }>}
  */
-async function situacaoDasZonas(eventoId) {
-  const [zonas, checkpoints] = await Promise.all([zonasDoEvento(eventoId), checkpointsDoJogo(eventoId)]);
-
-  const situacao = zonas.map((zona) => {
-    const x = Number(zona.x), y = Number(zona.y), w = Number(zona.width), h = Number(zona.height);
-    const dentro = checkpoints.filter((cp) => {
-      const cx = Number(cp.mapaX), cy = Number(cp.mapaY);
-      return Number.isFinite(cx) && Number.isFinite(cy) && cx >= x && cx <= x + w && cy >= y && cy <= y + h;
-    });
-    const donos = dentro.map((cp) => cp.territorioDonoTimeId).filter(Boolean);
-    const todosDoMesmo = dentro.length > 0 && donos.length === dentro.length && donos.every((d) => mesmoId(d, donos[0]));
-    return {
-      zonaId: String(zona.id ?? zona.name),
-      nome: zona.name,
-      cor: zona.color || null,
-      checkpoints: dentro.map((cp) => cp.checkpointId),
-      donoTimeId: todosDoMesmo ? donos[0] : null,
-    };
-  });
-
-  const comCheckpoints = situacao.filter((z) => z.checkpoints.length > 0);
-  const primeiro = comCheckpoints[0]?.donoTimeId;
-  const vencedorTimeId = comCheckpoints.length > 0 && primeiro && comCheckpoints.every((z) => mesmoId(z.donoTimeId, primeiro))
-    ? primeiro
-    : null;
-  return { zonas: situacao, vencedorTimeId, totalZonas: comCheckpoints.length };
+async function situacaoDosCheckpoints(eventoId, brincadeiraId) {
+  const checkpoints = await checkpointsDoJogo(eventoId, brincadeiraId);
+  const donos = checkpoints.map((c) => c.territorioDonoTimeId);
+  const primeiro = donos[0];
+  const todosDoMesmo = checkpoints.length > 0 && donos.every((d) => d && mesmoId(d, primeiro));
+  return { checkpoints, vencedorTimeId: todosDoMesmo ? primeiro : null };
 }
 
 // A equipe pode ler este checkpoint agora? Não se ele estiver entre as últimas leituras da equipe nesta partida.
@@ -119,9 +97,8 @@ async function vencedorDaUltimaPartida(eventoId) {
   return { timeId: partida.vencedorTimeId, nome: partida.nome || null };
 }
 
-// Resumo para o telão e o painel: placar das equipes, zonas e vencedor.
-async function estadoDoDominio(eventoId) {
-  const partida = await queryOne(
+async function ultimaPartida(eventoId) {
+  return queryOne(
     `SELECT p.id, p.status, p.brincadeiraId, p.vencedorTimeId, p.iniciadoEm, p.finalizadoEm, b.tipo
      FROM zonaConquistaPartidaTime p
      LEFT JOIN brincadeira b ON LOWER(b.brincadeiraId) = LOWER(p.brincadeiraId)
@@ -129,10 +106,15 @@ async function estadoDoDominio(eventoId) {
      ORDER BY p.iniciadoEm DESC LIMIT 1`,
     { eventoId }
   );
+}
+
+// Resumo para o telão e o painel: placar das equipes, checkpoints e vencedor.
+async function estadoDoDominio(eventoId) {
+  const partida = await ultimaPartida(eventoId);
   if (!partida || partida.tipo !== TIPO_ZONA_DOMINIO) return { ativo: false };
 
   const [situacao, equipes] = await Promise.all([
-    situacaoDasZonas(eventoId),
+    situacaoDosCheckpoints(eventoId, partida.brincadeiraId),
     allQuery(
       `SELECT t.timeId, tm.nome, tm.cor, t.pontosTotais, t.checkpointsLidos
        FROM zonaConquistaTempoTime t INNER JOIN "time" tm ON tm.timeId = t.timeId
@@ -141,34 +123,124 @@ async function estadoDoDominio(eventoId) {
     ),
   ]);
 
-  const nomeDoTime = (id) => equipes.find((e) => mesmoId(e.timeId, id)) || null;
-  const equipesComZonas = equipes.map((e) => ({
+  const equipePor = (id) => equipes.find((e) => mesmoId(e.timeId, id)) || null;
+  const equipesComContagem = equipes.map((e) => ({
     timeId: e.timeId,
     nome: e.nome,
     cor: e.cor,
     pontos: Number(e.pontosTotais) || 0,
     checkpointsLidos: Number(e.checkpointsLidos) || 0,
-    zonas: situacao.zonas.filter((z) => mesmoId(z.donoTimeId, e.timeId)).length,
+    checkpoints: situacao.checkpoints.filter((c) => mesmoId(c.territorioDonoTimeId, e.timeId)).length,
   }));
-  const vencedor = partida.vencedorTimeId ? nomeDoTime(partida.vencedorTimeId) : null;
+  const vencedor = partida.vencedorTimeId ? equipePor(partida.vencedorTimeId) : null;
 
   return {
     ativo: true,
     partidaStatus: partida.status === 'active' ? 'em_andamento' : 'finalizada',
-    totalZonas: situacao.totalZonas,
-    zonas: situacao.zonas.map((z) => ({ ...z, dono: nomeDoTime(z.donoTimeId) ? { timeId: z.donoTimeId, nome: nomeDoTime(z.donoTimeId).nome, cor: nomeDoTime(z.donoTimeId).cor } : null })),
-    equipes: equipesComZonas,
+    totalCheckpoints: situacao.checkpoints.length,
+    checkpoints: situacao.checkpoints.map((c) => {
+      const dono = equipePor(c.territorioDonoTimeId);
+      return {
+        checkpointId: c.checkpointId,
+        codigo: c.codigo || c.checkpointId,
+        nome: c.nome,
+        dono: dono ? { timeId: dono.timeId, nome: dono.nome, cor: dono.cor } : null,
+      };
+    }),
+    equipes: equipesComContagem,
     vencedor: vencedor ? { timeId: vencedor.timeId, nome: vencedor.nome, cor: vencedor.cor } : null,
   };
+}
+
+// Qual dos dois sons de vitória toca para a equipe vencedora: "ct" = vitoriaAgentes, "tr" = vitoriaRebeldes.
+// Pelo nome da equipe (Agentes / Rebeldes); com outro nome, a 1ª equipe do evento usa o som dos Agentes e a 2ª, o dos Rebeldes.
+async function ladoDoSomDaEquipe(eventoId, timeId) {
+  const times = await allQuery(
+    `SELECT timeId, nome FROM "time" WHERE LOWER(eventoId) = LOWER(@eventoId) ORDER BY criadoEm ASC, nome ASC`,
+    { eventoId }
+  );
+  const time = times.find((t) => mesmoId(t.timeId, timeId));
+  const nome = String(time?.nome || '').toLowerCase();
+  if (nome.includes('agente')) return 'ct';
+  if (nome.includes('rebelde')) return 'tr';
+  const indice = times.findIndex((t) => mesmoId(t.timeId, timeId));
+  return indice <= 0 ? 'ct' : 'tr';
+}
+
+// O que um checkpoint precisa saber: jogo em andamento ou vencedor (para tocar o som da equipe e mostrar a cor).
+// Qualquer outro jogo responde ativo = false.
+async function obterEstadoCheckpoint(checkpointId) {
+  const checkpoint = await queryOne(
+    'SELECT checkpointId, eventoId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)',
+    { checkpointId }
+  );
+  if (!checkpoint) return { ok: true, ativo: false, fase: 'sem_partida' };
+
+  const partida = await ultimaPartida(checkpoint.eventoId);
+  if (!partida || partida.tipo !== TIPO_ZONA_DOMINIO) return { ok: true, ativo: false, fase: 'sem_partida' };
+  if (!partida.vencedorTimeId) return { ok: true, ativo: partida.status === 'active', fase: 'jogo' };
+
+  const time = await queryOne('SELECT nome, cor FROM "time" WHERE timeId = @timeId', { timeId: partida.vencedorTimeId });
+  const haMs = partida.finalizadoEm ? Math.max(0, Date.now() - new Date(partida.finalizadoEm).getTime()) : 0;
+  return {
+    ok: true,
+    ativo: true,
+    fase: 'vencedor',
+    resultado: {
+      vencedorLado: await ladoDoSomDaEquipe(checkpoint.eventoId, partida.vencedorTimeId),
+      motivo: 'dominio',
+      haMs,
+      cor: time?.cor || '',
+      nome: time?.nome || '',
+    },
+  };
+}
+
+// Encerra o jogo sozinho depois que uma equipe venceu (passado ENCERRAR_APOS_MS). Vale também depois de o servidor reiniciar.
+async function encerrarJogosDecididos() {
+  const decididos = await allQuery(
+    `SELECT p.eventoId, p.finalizadoEm
+     FROM zonaConquistaPartidaTime p
+     INNER JOIN brincadeira b ON LOWER(b.brincadeiraId) = LOWER(p.brincadeiraId) AND b.tipo = @tipo
+     INNER JOIN estadoJogoEvento g ON LOWER(g.eventoId) = LOWER(p.eventoId) AND g.modo = 'game'
+                                  AND LOWER(g.brincadeiraId) = LOWER(p.brincadeiraId)
+     WHERE p.vencedorTimeId IS NOT NULL AND p.finalizadoEm IS NOT NULL
+       AND p.finalizadoEm < @limite
+       AND NOT EXISTS (SELECT 1 FROM zonaConquistaPartidaTime q
+                       WHERE LOWER(q.eventoId) = LOWER(p.eventoId) AND q.iniciadoEm > p.iniciadoEm)`,
+    { tipo: TIPO_ZONA_DOMINIO, limite: new Date(Date.now() - ENCERRAR_APOS_MS) }
+  );
+  for (const { eventoId } of decididos) {
+    try {
+      if (typeof global.stopGameForEvento === 'function') {
+        console.log(`🏁 [ZONA-DOMINIO] Encerrando o jogo do evento ${eventoId} (equipe vencedora definida)`);
+        await global.stopGameForEvento(eventoId);
+      }
+    } catch (erro) {
+      console.error('❌ [ZONA-DOMINIO] Erro ao encerrar o jogo:', erro.message);
+    }
+  }
+}
+
+let relogio = null;
+function iniciarRelogio() {
+  if (relogio) return relogio;
+  relogio = setInterval(() => { encerrarJogosDecididos().catch(() => {}); }, 3000);
+  if (typeof relogio.unref === 'function') relogio.unref();
+  return relogio;
 }
 
 module.exports = {
   TIPO_ZONA_DOMINIO,
   REPETICAO_MINIMA,
   ehJogoDeDominio,
-  situacaoDasZonas,
+  checkpointsDoJogo,
+  checkpointEhDoJogo,
+  situacaoDosCheckpoints,
   podeLer,
   pontosDaLeitura,
   vencedorDaUltimaPartida,
   estadoDoDominio,
+  obterEstadoCheckpoint,
+  iniciarRelogio,
 };

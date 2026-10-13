@@ -183,6 +183,9 @@ async function processZoneConquestTeamScan({
       if (!crianca.timeId) {
         return { accepted: false, error: 'Você precisa estar em uma equipe para jogar' };
       }
+      if (!(await dominio.checkpointEhDoJogo(eventoId, partida.brincadeiraId, checkpointId))) {
+        return { accepted: false, error: 'Este checkpoint não faz parte deste jogo' };
+      }
       const liberado = await dominio.podeLer(partida.id, crianca.timeId, checkpointId);
       if (!liberado.ok) {
         console.log(`   ⚠️ [ZONA-DOMINIO] Releitura bloqueada: faltam ${liberado.faltam} checkpoint(s) diferente(s)`);
@@ -345,9 +348,10 @@ async function processZoneConquestTeamScan({
   }
 }
 
-// Depois de cada leitura do Domínio total: se uma equipe dominou todas as zonas, a partida termina e ela vence.
+// Depois de cada leitura do Domínio total: se uma equipe dominou todos os checkpoints, a partida termina e ela vence
+// (o jogo é encerrado sozinho logo depois, por utils/zonaDominio.js).
 async function verificarVitoriaPorDominio(partida, eventoId) {
-  const situacao = await dominio.situacaoDasZonas(eventoId);
+  const situacao = await dominio.situacaoDosCheckpoints(eventoId, partida.brincadeiraId);
   if (!situacao.vencedorTimeId) return null;
 
   const agora = new Date();
@@ -357,7 +361,7 @@ async function verificarVitoriaPorDominio(partida, eventoId) {
     { id: partida.id, vencedor: situacao.vencedorTimeId, agora }
   );
   if (!Number(fechou?.rowsAffected?.[0] || 0)) return null;   // outra leitura já encerrou
-  console.log(`🏆 [ZONA-DOMINIO] A equipe ${situacao.vencedorTimeId} dominou todas as zonas e venceu a partida`);
+  console.log(`🏆 [ZONA-DOMINIO] A equipe ${situacao.vencedorTimeId} dominou todos os checkpoints e venceu a partida`);
   if (typeof global.broadcastToEvent === 'function') {
     global.broadcastToEvent(eventoId, {
       type: 'ZONA_DOMINIO_VENCEDOR',
