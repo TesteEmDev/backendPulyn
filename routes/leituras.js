@@ -139,14 +139,14 @@ function broadcastEvent(data) {
  * errado no modo individual. Nunca lança erro — o rastreio não pode derrubar
  * uma leitura já confirmada.
  */
-async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameTipo, teamColor, leituraId, uid, now }) {
+async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId, gameType, teamColor, leituraId, uid, now }) {
   try {
     const coords = await queryOne(
       'SELECT mapaX, mapaY FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (coords?.mapaX == null || coords?.mapaY == null) {
-      console.warn(`⚠️ [RASTREIO] Checkpoint ${checkpointId} sem mapaX/mapaY — avatar não poderá se mover (${gameTipo})`);
+      console.warn(`⚠️ [RASTREIO] Checkpoint ${checkpointId} sem mapaX/mapaY — avatar não poderá se mover (${gameType})`);
     }
 
     let color = teamColor || crianca.teamColor || null;
@@ -167,13 +167,13 @@ async function broadcastChildCheckpointPassed({ checkpointId, crianca, eventoId,
         teamColor: color || '#1E9BD7',
         timestamp: now.toISOString(),
         eventoId,
-        gameTipo,
+        gameType,
         mapX: coords?.mapaX ?? null,
         mapY: coords?.mapaY ?? null,
       },
     });
   } catch (err) {
-    console.error(`❌ [RASTREIO] Falha ao enviar CHILD_CHECKPOINT_PASSED (${gameTipo}):`, err.message);
+    console.error(`❌ [RASTREIO] Falha ao enviar CHILD_CHECKPOINT_PASSED (${gameType}):`, err.message);
   }
 }
 
@@ -347,13 +347,9 @@ router.post('/', async (req, res) => {
     const pulseira = await queryOne(
       `SELECT codigo, empresaId, status, criancaId
        FROM pulseira
-       WHERE ${uidSqlExpression('codigo')} = @uid`,
-      { uid: normalizedUid }
+       WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
+      { uid: normalizedUid, empresaId: checkpoint.empresaId }
     );
-
-    if (pulseira && String(pulseira.empresaId).trim().toLowerCase() !== String(checkpoint.empresaId).trim().toLowerCase()) {
-      return res.status(403).json({ ok: false, error: 'Pulseira não pertence a esta empresa' });
-    }
 
     if (!pulseira) {
       return res.json({
@@ -436,7 +432,7 @@ router.post('/', async (req, res) => {
       return res.json({
         ok: true,
         registered: true,
-        authorized: parallelResult.status === 'won',
+        autorizado: parallelResult.status === 'won',
         braceletCode: normalizedUid,
         readingId: leituraId,
         parallel: true,
@@ -490,7 +486,7 @@ router.post('/', async (req, res) => {
           });
           break;
         } catch (error) {
-          if (error.codigo === 'MONSTER_VERSION_CONFLICT') {
+          if (error.code === 'MONSTER_VERSION_CONFLICT') {
             // Outra tentativa pode ter confirmado a mesma leitura enquanto
             // esta transação aguardava o lock/índice único.
             const processedAfterConflict = await findProcessedReading(leituraId, checkpoint);
@@ -807,6 +803,18 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Zona - Domínio total já decidido: a partida acabou, nenhuma leitura vale mais até o jogo ser reiniciado.
+    if (!zoneConquestTeamGame && !zoneConquestIndividualGame) {
+      const campeao = await require('../utils/zonaDominio').vencedorDaUltimaPartida(checkpoint.eventoId);
+      if (campeao) {
+        const mensagem = `A partida terminou${campeao.nome ? `: ${campeao.nome} dominou todas as zonas` : ''}`;
+        return res.json({
+          ok: true, registered: true, autorizado: false, braceletCode: normalizedUid,
+          gameMode: 'zone_domination', error: mensagem, message: mensagem,
+        });
+      }
+    }
+
     if (zoneConquestTeamGame) {
       console.log(`\n🎮 [ZONE-TEAM] Processando leitura de checkpoint...`);
       
@@ -863,7 +871,10 @@ router.post('/', async (req, res) => {
         gameMode: 'zone_conquest_team',
         pointsGained: scanResult.points,
         criancaName: crianca.nome,
-        message: `${crianca.nome} conquistou o checkpoint! +${scanResult.points}pt`,
+        dominioTotal: Boolean(scanResult.dominioTotal),
+        message: scanResult.dominioTotal
+          ? `${crianca.nome} completou o domínio de todas as zonas! Vitória!`
+          : `${crianca.nome} conquistou o checkpoint! +${scanResult.points}pt`,
       });
     }
 
@@ -1185,7 +1196,7 @@ router.post('/', async (req, res) => {
     console.error('❌ [LEITURA] Erro ao processar leitura:', err);
     console.error('   Stack:', err.stack);
     console.error('   Message:', err.message);
-    console.error('   Code:', err.codigo);
+    console.error('   Code:', err.code);
     res.status(err.statusCode || 500).json({ error: err.message });
   }
 });

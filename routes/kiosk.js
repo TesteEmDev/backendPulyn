@@ -4,6 +4,9 @@ const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { getAvatarForCreate } = require('../utils/avatar');
+const {
+  criarPerfil, buscarPerfil, registrarVolta, buscarPerfisParaKiosk, idadeValida,
+} = require('../utils/perfilCrianca');
 
 const router = express.Router();
 const CLOSED_EVENT_STATUSES = new Set(['completed', 'cancelled', 'canceled', 'finished']);
@@ -19,11 +22,17 @@ function httpError(message, statusCode) {
 }
 
 function isDuplicateKeyError(error) {
-  return error?.codigo === '23505' || error?.number === 2601 || error?.number === 2627;
+  return error?.code === '23505' || error?.number === 2601 || error?.number === 2627;
 }
 
 // O kiosk tem uma superfície de API própria e não recebe acesso às rotas administrativas.
-router.use(verifyToken, requireRole('kiosk'));
+// A recepção também consulta as leituras do leitor (fallback do Check-in quando o WebSocket cai); o resto é só do kiosk.
+const RECEPTION_READINGS = /^\/events\/[^/]+\/reception-readings\/?$/;
+router.use(verifyToken, (req, res, next) => (
+  req.method === 'GET' && RECEPTION_READINGS.test(req.path)
+    ? requireRole('kiosk', 'reception')(req, res, next)
+    : requireRole('kiosk')(req, res, next)
+));
 
 // Eventos abertos da própria empresa, com somente os campos necessários ao visor.
 router.get('/events', async (req, res) => {
@@ -109,15 +118,12 @@ router.get('/bracelets/:codigo', async (req, res) => {
     const bracelet = await queryOne(
       `SELECT codigo, status, criancaId, empresaId
        FROM pulseira
-       WHERE ${uidSqlExpression('codigo')} = @codigo`,
-      { codigo }
+       WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
+      { codigo, empresaId: req.user.empresaId }
     );
 
     if (!bracelet) {
       return res.json({ codigo, exists: false, status: null, available: true });
-    }
-    if (String(bracelet.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
-      return res.status(403).json({ error: 'Esta pulseira não pertence a esta empresa' });
     }
 
     const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.criancaId;
@@ -128,20 +134,44 @@ router.get('/bracelets/:codigo', async (req, res) => {
   }
 });
 
+// Procura o cadastro de uma criança que já esteve em outro evento da empresa.
+// Devolve só o necessário para ela se reconhecer (nome abreviado, apelido, idade e avatar).
+router.get('/profiles', async (req, res) => {
+  try {
+    const eventId = String(req.query.eventId || '').trim();
+    if (!eventId) return res.status(400).json({ error: 'Evento é obrigatório' });
+    const perfis = await buscarPerfisParaKiosk({
+      empresaId: req.user.empresaId,
+      eventoId: eventId,
+      termo: req.query.busca,
+    });
+    res.json(perfis);
+  } catch (error) {
+    console.error('❌ Kiosk: erro ao buscar cadastros:', error.message);
+    res.status(500).json({ error: 'Não foi possível buscar o cadastro' });
+  }
+});
+
 // Cadastro atômico: cria (se necessário) e vincula a pulseira junto com a criança.
+// Criança nova: cria o cadastro permanente (perfilCrianca) e a participação no evento.
+// Criança que volta (perfilCriancaId): reaproveita o cadastro e só cria a participação no evento.
 router.post('/participants', async (req, res) => {
   try {
-    const { eventId, nome, apelido, age, avatar, braceletCode, timeId } = req.body || {};
+    const { eventId, nome, apelido, avatar, braceletCode, timeId, perfilCriancaId } = req.body || {};
+    const idadeInformada = req.body?.idade ?? req.body?.age;
     const codigo = normalizeUid(braceletCode);
-    const cleanName = String(nome || '').trim();
+    let cleanName = String(nome || '').trim();
     const avatarValue = getAvatarForCreate(avatar);
 
     if (!avatarValue) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
+    if (!perfilCriancaId && (idadeValida(idadeInformada) === null)) {
+      return res.status(400).json({ error: 'Idade é obrigatória' });
+    }
 
     // O time é opcional: o recreacionista define (ou sorteia) os time depois do cadastro.
-    if (!eventId || !cleanName || !codigo) {
+    if (!eventId || (!cleanName && !perfilCriancaId) || !codigo) {
       return res.status(400).json({ error: 'Evento, nome e pulseira são obrigatórios' });
     }
     if (cleanName.length > 100 || String(apelido || '').trim().length > 100) {
@@ -157,6 +187,19 @@ router.post('/participants', async (req, res) => {
       if (!event) throw httpError('Evento não encontrado', 404);
       if (!isOpenEvent(event)) throw httpError('Este evento não está aberto para cadastro', 409);
 
+      // Criança que volta: o nome vem do cadastro dela e ela não pode estar duas vezes no mesmo evento.
+      let perfilExistente = null;
+      if (perfilCriancaId) {
+        perfilExistente = await buscarPerfil(perfilCriancaId, event.empresaId);
+        if (!perfilExistente) throw httpError('Cadastro não encontrado', 404);
+        const jaNoEvento = await tx.queryOne(
+          'SELECT criancaId FROM crianca WHERE perfilCriancaId = @perfilCriancaId AND eventoId = @eventId',
+          { perfilCriancaId, eventId: event.eventoId }
+        );
+        if (jaNoEvento) throw httpError('Esta criança já está cadastrada neste evento', 409);
+        cleanName = perfilExistente.nome;
+      }
+
       let team = null;
       if (timeId) {
         team = await tx.queryOne(
@@ -170,13 +213,9 @@ router.post('/participants', async (req, res) => {
       let bracelet = await tx.queryOne(
         `SELECT codigo, status, criancaId, empresaId
          FROM pulseira
-         WHERE ${uidSqlExpression('codigo')} = @codigo`,
-        { codigo }
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
+        { codigo, empresaId: event.empresaId }
       );
-
-      if (bracelet && String(bracelet.empresaId).trim().toLowerCase() !== String(event.empresaId).trim().toLowerCase()) {
-        throw httpError('Esta pulseira pertence a outra empresa', 403);
-      }
       if (!bracelet) {
         await tx.query(
           `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
@@ -190,21 +229,36 @@ router.post('/participants', async (req, res) => {
         throw httpError('Esta pulseira não está disponível para vínculo', 409);
       }
 
+      // Quem volta mantém o apelido, a idade e o avatar do cadastro, a menos que tenha escolhido outros agora.
+      const apelidoFinal = String(apelido || '').trim() || perfilExistente?.apelido || cleanName.split(/\s+/)[0];
+      const idadeFinal = idadeValida(idadeInformada) ?? perfilExistente?.idade ?? 0;
+
+      let perfilId = perfilExistente?.perfilCriancaId;
+      if (perfilId) {
+        await registrarVolta({ perfilCriancaId: perfilId, eventoId: event.eventoId, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue });
+      } else {
+        perfilId = await criarPerfil({
+          empresaId: event.empresaId, eventoId: event.eventoId,
+          nome: cleanName, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue,
+        });
+      }
+
       const childId = uuidv4();
       await tx.query(
         `INSERT INTO crianca
-          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos)
-         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigo, 0)`,
+          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos, perfilCriancaId)
+         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigo, 0, @perfilId)`,
         {
           id: childId,
           eventId: event.eventoId,
           empresaId: event.empresaId,
           timeId: team ? team.timeId : null,
           nome: cleanName,
-          apelido: String(apelido || '').trim() || cleanName.split(/\s+/)[0],
-          age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
+          apelido: apelidoFinal,
+          age: idadeFinal,
           avatar: avatarValue,
           codigo,
+          perfilId,
         }
       );
 
@@ -221,11 +275,19 @@ router.post('/participants', async (req, res) => {
         throw httpError('Esta pulseira acabou de ser vinculada. Aproxime outra pulseira', 409);
       }
 
+      const total = await tx.queryOne(
+        'SELECT COALESCE(SUM(pontos), 0) AS pontosTotais FROM crianca WHERE perfilCriancaId = @perfilId',
+        { perfilId }
+      );
+
       return {
         id: childId,
+        perfilCriancaId: perfilId,
+        retornando: Boolean(perfilExistente),
+        pontosTotais: Number(total?.pontosTotais) || 0,
         name: cleanName,
-        nickname: String(apelido || '').trim() || cleanName.split(/\s+/)[0],
-        age: Math.max(0, Math.min(18, Number.parseInt(age, 10) || 5)),
+        nickname: apelidoFinal,
+        age: idadeFinal,
         avatar: avatarValue,
         braceletCode: codigo,
         timeId: team ? team.timeId : null,

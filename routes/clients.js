@@ -7,6 +7,9 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
 const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
 
+// Plano informado precisa existir em planDefinitions.js (ou vir vazio, para manter/usar o padrão).
+const planoInvalido = (plan) => plan !== undefined && plan !== null && plan !== '' && !PLAN_DEFINITIONS[String(plan).trim().toLowerCase()];
+
 // O mesmo cliente pode existir em `empresa` e em `cliente` com ids diferentes
 // (o cadastro cria os dois). Devolve os ids do registro legado que corresponde
 // (nome + cidade) à empresa, para editar/excluir os dois lados juntos.
@@ -201,6 +204,10 @@ router.post('/', verifyToken, async (req, res) => {
     }
 
     const { nome, cidade, estado, email, senha, telefone, plan } = req.body;
+
+    if (planoInvalido(plan)) {
+      return res.status(400).json({ error: `Plano inválido. Use: ${Object.keys(PLAN_DEFINITIONS).join(', ')}` });
+    }
     
     if (!email || !senha) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
@@ -300,7 +307,11 @@ router.put('/:id', verifyToken, async (req, res) => {
     }
 
     const { nome, cidade, estado, email, telefone, plan, status } = req.body;
-    
+
+    if (planoInvalido(plan)) {
+      return res.status(400).json({ error: `Plano inválido. Use: ${Object.keys(PLAN_DEFINITIONS).join(', ')}` });
+    }
+
     try {
       // Registro legado em `cliente`: o próprio id (cliente sem empresa) e/ou o
       // espelho da empresa. Resolvido antes do UPDATE, pois casa por nome+cidade antigos.
@@ -308,16 +319,17 @@ router.put('/:id', verifyToken, async (req, res) => {
 
       // Atualizar EMPRESA
       await query(
-        `UPDATE empresa SET nome = @nome, cidade = @cidade, estado = @estado, 
-         telefone = @telefone, plano = @plano, status = @status, dataAtualizacao = GETDATE()
+        // Atualização parcial: trocar só o plano (como a tela do master faz) não pode apagar nome, cidade ou status.
+        `UPDATE empresa SET nome = COALESCE(@nome, nome), cidade = COALESCE(@cidade, cidade), estado = COALESCE(@estado, estado),
+         telefone = COALESCE(@telefone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status), dataAtualizacao = GETDATE()
          WHERE empresaId = @id`,
         {
-          nome: nome,
-          cidade: cidade,
-          estado: estado,
-          telefone: telefone,
-          plano: plan,
-          status: status,
+          nome: nome ?? null,
+          cidade: cidade ?? null,
+          estado: estado ?? null,
+          telefone: telefone ?? null,
+          plano: plan ? String(plan).trim().toLowerCase() : null,
+          status: status ?? null,
           id: req.params.id
         }
       );

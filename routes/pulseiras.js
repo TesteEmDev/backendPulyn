@@ -48,12 +48,13 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'Código da pulseira é obrigatório' });
     }
     
+    // O código é único por buffet: outro buffet pode ter uma pulseira com o mesmo código.
     const existing = await queryOne(
-      `SELECT codigo FROM pulseira WHERE ${uidSqlExpression('codigo')} = @codigo`,
-      { codigo: codeUpper }
+      `SELECT codigo FROM pulseira WHERE ${uidSqlExpression('codigo')} = @codigo AND empresaId = @empresaId`,
+      { codigo: codeUpper, empresaId }
     );
     if (existing) {
-      return res.status(400).json({ error: 'Pulseira já cadastrada!' });
+      return res.status(400).json({ error: 'Pulseira já cadastrada neste buffet!' });
     }
     
     await query('INSERT INTO pulseira (codigo, status, empresaId, criadoEm) VALUES (@codigo, @status, @empresaId, GETDATE())', 
@@ -84,10 +85,18 @@ router.put('/:codigo/status', verifyToken, async (req, res) => {
     
     // Verificar que a pulseira pertence à empresa (ou master)
     const normalizedCode = normalizeUid(codigo);
-    const pulseira = await queryOne(
-      `SELECT empresaId, criancaId FROM pulseira WHERE ${uidSqlExpression('codigo')} = @codigo`,
-      { codigo: normalizedCode }
+    // O mesmo código pode existir em buffets diferentes: o usuário só enxerga o do próprio buffet; o master
+    // informa o buffet (?empresaId=) quando o código existe em mais de um.
+    const empresaAlvo = isMaster(req) ? (String(req.query.empresaId || req.body?.empresaId || '').trim() || null) : empresaId;
+    const candidatas = await allQuery(
+      `SELECT empresaId, criancaId FROM pulseira
+       WHERE ${uidSqlExpression('codigo')} = @codigo${empresaAlvo ? ' AND empresaId = @empresaAlvo' : ''}`,
+      empresaAlvo ? { codigo: normalizedCode, empresaAlvo } : { codigo: normalizedCode }
     );
+    if (candidatas.length > 1) {
+      return res.status(409).json({ error: 'Este código de pulseira existe em mais de um buffet: informe empresaId' });
+    }
+    const pulseira = candidatas[0];
     
     if (!pulseira) {
       return res.status(404).json({ error: 'Pulseira não encontrada' });

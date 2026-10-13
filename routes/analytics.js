@@ -238,7 +238,7 @@ router.get('/revenue-by-plan', verifyToken, requireMaster('Acesso negado: apenas
       Array.from(byPlan.entries())
         .map(([plan, clientCount]) => ({
           plan,
-          name: PLAN_DEFINITIONS[plan].nome,
+          name: PLAN_DEFINITIONS[plan].name,
           clientCount,
           price: PLAN_DEFINITIONS[plan].price,
           revenue: clientCount * PLAN_DEFINITIONS[plan].price,

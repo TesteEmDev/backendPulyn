@@ -58,7 +58,8 @@ router.post('/login', async (req, res) => {
         email: login.email,
         empresaId: login.empresaId,
         empresa_nome: login.empresa_nome,
-        role: login.perfil
+        role: login.perfil,
+        plan: login.plano   // o painel usa para mostrar os jogos do plano (o backend confere no banco)
       },
       JWT_SECRET,
       { expiresIn: '24h' }

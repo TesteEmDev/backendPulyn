@@ -37,7 +37,7 @@ async function releaseBraceletsWith(db, eventoId) {
   const byCode = await db.query(
     `UPDATE pulseira SET status = 'disponivel', criancaId = NULL
      WHERE status <> 'disponivel'
-       AND codigo IN (SELECT codigoPulseira FROM crianca
+       AND (empresaId, codigo) IN (SELECT empresaId, codigoPulseira FROM crianca
                     WHERE LOWER(eventoId) = LOWER(@eventoId) AND codigoPulseira IS NOT NULL)`,
     { eventoId }
   );

@@ -58,6 +58,17 @@ const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
+const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
+const { ensureBombaSchema } = require('./migrations/bomba');
+const { ensureRefemSchema } = require('./migrations/refem');
+const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
+const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
+const refemRoutes = require('./routes/refem');
+const refemJogo = require('./utils/refem');
+const bombaRoutes = require('./routes/bomba');
+const zonaDominioRoutes = require('./routes/zonaDominio');
+const { TIPOS_PULYNBALL } = require('./utils/planDefinitions');
+const bombaJogo = require('./utils/bomba');
 const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
 const { ensureParallelGamesSchema } = require('./migrations/parallelGames');
 const parallelGamesRoutes = require('./routes/parallelGames');
@@ -545,7 +556,9 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
 
     const gameType = game.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : game.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : game.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE
+        : game.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE
+          : game.tipo === refemJogo.REFEM_GAME_TYPE ? refemJogo.REFEM_GAME_TYPE : 'zone_conquest';
     await saveGameState({
       eventoId: evento.eventoId,
       empresaId: evento.empresaId,
@@ -640,6 +653,10 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       return res.status(400).json({ error: 'Jogo não pertence ao evento selecionado' });
     }
 
+    if (TIPOS_PULYNBALL.includes(selectedGame.tipo) && !isMaster(req) && !(await bombaJogo.empresaTemPlanoPulynBall(eventoAntes.empresaId))) {
+      return res.status(403).json({ error: 'Este jogo é exclusivo do plano PulynBall.' });
+    }
+
     // O jogo só começa se o evento tiver o mínimo de pontoVerificacao online para ele (confere antes de mexer em qualquer dado)
     const requirement = await checkGameStartRequirements(eventoId, selectedGame);
     if (!requirement.ok) {
@@ -649,7 +666,9 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
 
     const gameType = selectedGame.tipo === TREASURE_GAME_TYPE
       ? TREASURE_GAME_TYPE
-      : selectedGame.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE : 'zone_conquest';
+      : selectedGame.tipo === MONSTER_GAME_TYPE ? MONSTER_GAME_TYPE
+        : selectedGame.tipo === bombaJogo.BOMBA_GAME_TYPE ? bombaJogo.BOMBA_GAME_TYPE
+          : selectedGame.tipo === refemJogo.REFEM_GAME_TYPE ? refemJogo.REFEM_GAME_TYPE : 'zone_conquest';
     // O modo (equipe/individual) é um dado persistido em brincadeiras.type,
     // escolhido pelo admin ao criar o jogo (AdminGameForm). Nunca inferir
     // isso do nome do jogo (texto livre) ou aceitar cegamente o que o
@@ -661,6 +680,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     let treasureStart = null;
     let monsterStart = null;
     let zoneConquestStart = null;
+    if (gameType !== bombaJogo.BOMBA_GAME_TYPE) await bombaJogo.pararJogo(eventoId);
+    if (gameType !== refemJogo.REFEM_GAME_TYPE) await refemJogo.pararJogo(eventoId);
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
@@ -680,6 +701,20 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       await stopTreasureGame(eventoId);
       await stopMonsterGame(eventoId);
       console.log(`   ✓ Zona Conquest iniciado`);
+    } else if (gameType === refemJogo.REFEM_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch REFÉM (Resgate do Refém)`);
+      await refemJogo.iniciarJogo(eventoId, selectedGame.brincadeiraId);
+      await stopTreasureGame(eventoId);
+      await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
+      console.log(`   ✓ Resgate do Refém iniciado (round 1 aguardando)`);
+    } else if (gameType === bombaJogo.BOMBA_GAME_TYPE) {
+      console.log(`🎮 [INICIAR-JOGO] Entrando em branch BOMBA (Conquistar e Destruir)`);
+      await bombaJogo.iniciarJogo(eventoId, selectedGame.brincadeiraId);
+      await stopTreasureGame(eventoId);
+      await stopMonsterGame(eventoId);
+      await stopZoneConquestGame(eventoId);
+      console.log(`   ✓ Conquistar e Destruir iniciado (round 1 aguardando)`);
     } else {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch STOP_ALL (tipo desconhecido: ${gameType})`);
       await stopTreasureGame(eventoId);
@@ -993,6 +1028,8 @@ async function stopGameForEvento(eventoId) {
     await stopTreasureGame(eventoId);
     await stopMonsterGame(eventoId);
     await stopZoneConquestGame(eventoId);
+    await bombaJogo.pararJogo(eventoId);
+    await refemJogo.pararJogo(eventoId);
 
     // Finalizar encerra o domínio atual, mas preserva pontuação e histórico.
     await query(`
@@ -1225,7 +1262,9 @@ async function checkStaleTeamCheckpoints() {
          AND c."ultimoConquistadoEm" < @cutoff
          AND EXISTS (
            SELECT 1 FROM zonaConquistaPartidaTime p
+           LEFT JOIN brincadeira b ON LOWER(b.brincadeiraId) = LOWER(p.brincadeiraId)
            WHERE LOWER(p.eventoId) = LOWER(c."eventoId") AND p.status = 'active'
+             AND COALESCE(b.tipo, '') <> 'zone_domination'
          )`,
       { cutoff }
     );
@@ -1888,6 +1927,10 @@ app.use('/api/treasure', treasureRoutes);
 // Caça ao Monstro
 app.use('/api/monster', monsterRoutes);
 
+app.use('/api/bomba', bombaRoutes);
+app.use('/api/refem', refemRoutes);
+app.use('/api/zonaDominio', zonaDominioRoutes);
+
 // Zone Conquest
 app.use('/api/zone-conquest', zoneConquestRoutes);
 
@@ -1951,6 +1994,13 @@ async function startServer() {
     await ensureClienteUnidadeSchema();
     await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
+    await ensurePerfilCriancaSchema();
+    await ensureBombaSchema();
+    await ensureRefemSchema();
+    await ensureCodigoBuffetSchema();
+    await ensurePulseiraPorEmpresaSchema();
+    refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)
+    bombaJogo.iniciarRelogio();   // explosão da bomba e fim do tempo do round (Conquistar e Destruir)
     await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();
     await ensureCheckpointMapPositionSchema();

@@ -87,7 +87,7 @@ router.post('/evento/:eventoId/aplicar-padrao', verifyToken, requireRole(TEAM_MA
           // Todo time adicionado a um evento começa com 0 ponto, mesmo que o modelo tenha outro valor.
           `INSERT INTO "time" (timeId, eventoId, empresaId, nome, cor, pontos)
            VALUES (@id, @eventoId, @empresaId, @nome, @cor, 0)`,
-          { id: uuidv4(), eventoId: evento.eventoId, empresaId: evento.empresaId, nome: team.nome, cor: team.cor }
+          { id: uuidv4(), eventoId: evento.eventoId, empresaId: evento.empresaId, nome: team.name, cor: team.color }
         );
       }
       return { created: toCreate.length, skipped: templates.length - toCreate.length };

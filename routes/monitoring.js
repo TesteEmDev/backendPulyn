@@ -87,7 +87,7 @@ async function loadMonitoringData() {
     const onlineCount = checkpointItems.filter(checkpoint => checkpoint.status === 'online').length;
     const alerts = checkpointItems
       .filter(checkpoint => checkpoint.status !== 'online')
-      .map(checkpoint => `${checkpoint.nome || checkpoint.checkpointId} offline`);
+      .map(checkpoint => `${checkpoint.name || checkpoint.id} offline`);
     if (checkpointItems.length === 0) alerts.push('Nenhum checkpoint cadastrado');
     if (String(company.status || '').toLowerCase() !== 'active') alerts.push(`Empresa ${company.status || 'inativa'}`);
 
