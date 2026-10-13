@@ -275,14 +275,22 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // Verificar se checkpoint já existe
+    // O ID é único no sistema inteiro (o ESP32 se identifica só por ele e a chave primária é o próprio ID),
+    // não apenas dentro do evento: reaproveitar um ID de outro evento ou buffet violaria a chave primária.
     const existing = await queryOne(
-      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id AND eventoId = @eventoId',
-      { id, eventoId }
+      `SELECT p.checkpointId, p.empresaId, p.eventoId, e.nome AS eventoNome
+       FROM pontoVerificacao p LEFT JOIN evento e ON e.eventoId = p.eventoId
+       WHERE LOWER(p.checkpointId) = LOWER(@id)`,
+      { id }
     );
 
     if (existing) {
-      return res.status(400).json({ error: 'Checkpoint com este ID já existe' });
+      const mesmoEvento = sameId(existing.eventoId, eventoId);
+      const mesmaEmpresa = sameId(existing.empresaId, empresaId);
+      const onde = mesmoEvento ? 'neste evento'
+        : mesmaEmpresa ? `no evento "${existing.eventoNome || 'outro evento'}"`
+        : 'em outro buffet';
+      return res.status(409).json({ error: `Já existe um checkpoint com o ID "${id}" ${onde}. Use outro ID (cada checkpoint precisa de um ID único).` });
     }
 
     // ✅ Inserir novo checkpoint COM empresaId
@@ -538,32 +546,32 @@ router.post('/evento/:eventoId/config/:id', verifyToken, async (req, res) => {
     let params = { id, eventoId };
 
     if (nome !== undefined) {
-      updateFields.push('name = @name');
-      params.name = nome;
+      updateFields.push('nome = @nome');
+      params.nome = nome;
     }
     if (status !== undefined) {
       updateFields.push('status = @status');
       params.status = status;
     }
     if (location !== undefined) {
-      updateFields.push('location = @location');
-      params.location = location;
+      updateFields.push('localizacao = @localizacao');
+      params.localizacao = location;
     }
     if (tipo !== undefined) {
-      updateFields.push('type = @type');
-      params.type = tipo;
+      updateFields.push('tipo = @tipo');
+      params.tipo = tipo;
     }
     if (zone !== undefined) {
-      updateFields.push('zone = @zone');
-      params.zone = zone;
+      updateFields.push('zona = @zona');
+      params.zona = zone;
     }
     if (ip !== undefined) {
       updateFields.push('ip = @ip');
       params.ip = ip;
     }
     if (points !== undefined) {
-      updateFields.push('points = @points');
-      params.points = points;
+      updateFields.push('pontos = @pontos');
+      params.pontos = points;
     }
     if (authorizedTags !== undefined) {
       updateFields.push('tagsAutorizadas = @tagsAutorizadas');
