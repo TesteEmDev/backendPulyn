@@ -118,15 +118,12 @@ router.get('/bracelets/:codigo', async (req, res) => {
     const bracelet = await queryOne(
       `SELECT codigo, status, criancaId, empresaId
        FROM pulseira
-       WHERE ${uidSqlExpression('codigo')} = @codigo`,
-      { codigo }
+       WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
+      { codigo, empresaId: req.user.empresaId }
     );
 
     if (!bracelet) {
       return res.json({ codigo, exists: false, status: null, available: true });
-    }
-    if (String(bracelet.empresaId).trim().toLowerCase() !== String(req.user.empresaId).trim().toLowerCase()) {
-      return res.status(403).json({ error: 'Esta pulseira não pertence a esta empresa' });
     }
 
     const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.criancaId;
@@ -216,13 +213,9 @@ router.post('/participants', async (req, res) => {
       let bracelet = await tx.queryOne(
         `SELECT codigo, status, criancaId, empresaId
          FROM pulseira
-         WHERE ${uidSqlExpression('codigo')} = @codigo`,
-        { codigo }
+         WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
+        { codigo, empresaId: event.empresaId }
       );
-
-      if (bracelet && String(bracelet.empresaId).trim().toLowerCase() !== String(event.empresaId).trim().toLowerCase()) {
-        throw httpError('Esta pulseira pertence a outra empresa', 403);
-      }
       if (!bracelet) {
         await tx.query(
           `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)

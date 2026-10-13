@@ -126,8 +126,8 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     
     if (normalizedBraceletCode) {
       const existing = await queryOne(
-        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @codigo`,
-        { codigo: normalizedBraceletCode }
+        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @codigo AND empresaId = @empresaId`,
+        { codigo: normalizedBraceletCode, empresaId }
       );
       if (existing) {
         return res.status(400).json({ error: 'Pulseira já está vinculada a outra criança' });
@@ -256,8 +256,8 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
     if (normalizedBraceletCode && normalizedBraceletCode !== normalizeUid(crianca.codigoPulseira || '')) {
       // Verificar se outra criança já tem essa pulseira
       const existing = await queryOne(
-        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @codigo AND criancaId != @criancaId`, 
-        { codigo: normalizedBraceletCode, criancaId: criancaId }
+        `SELECT criancaId FROM crianca WHERE ${uidSqlExpression('codigoPulseira')} = @codigo AND criancaId != @criancaId AND empresaId = @empresaId`, 
+        { codigo: normalizedBraceletCode, criancaId: criancaId, empresaId: crianca.empresaId }
       );
       if (existing) {
         console.error(`❌ Pulseira ${normalizedBraceletCode} já vinculada a outra criança`);

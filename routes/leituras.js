@@ -347,13 +347,9 @@ router.post('/', async (req, res) => {
     const pulseira = await queryOne(
       `SELECT codigo, empresaId, status, criancaId
        FROM pulseira
-       WHERE ${uidSqlExpression('codigo')} = @uid`,
-      { uid: normalizedUid }
+       WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
+      { uid: normalizedUid, empresaId: checkpoint.empresaId }
     );
-
-    if (pulseira && String(pulseira.empresaId).trim().toLowerCase() !== String(checkpoint.empresaId).trim().toLowerCase()) {
-      return res.status(403).json({ ok: false, error: 'Pulseira não pertence a esta empresa' });
-    }
 
     if (!pulseira) {
       return res.json({

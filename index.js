@@ -62,6 +62,7 @@ const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
 const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
+const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
 const refemRoutes = require('./routes/refem');
 const refemJogo = require('./utils/refem');
 const bombaRoutes = require('./routes/bomba');
@@ -1997,6 +1998,7 @@ async function startServer() {
     await ensureBombaSchema();
     await ensureRefemSchema();
     await ensureCodigoBuffetSchema();
+    await ensurePulseiraPorEmpresaSchema();
     refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)
     bombaJogo.iniciarRelogio();   // explosão da bomba e fim do tempo do round (Conquistar e Destruir)
     await ensureParallelGamesSchema();
