@@ -807,6 +807,18 @@ router.post('/', async (req, res) => {
       }
     }
 
+    // Zona - Domínio total já decidido: a partida acabou, nenhuma leitura vale mais até o jogo ser reiniciado.
+    if (!zoneConquestTeamGame && !zoneConquestIndividualGame) {
+      const campeao = await require('../utils/zonaDominio').vencedorDaUltimaPartida(checkpoint.eventoId);
+      if (campeao) {
+        const mensagem = `A partida terminou${campeao.nome ? `: ${campeao.nome} dominou todas as zonas` : ''}`;
+        return res.json({
+          ok: true, registered: true, autorizado: false, braceletCode: normalizedUid,
+          gameMode: 'zone_domination', error: mensagem, message: mensagem,
+        });
+      }
+    }
+
     if (zoneConquestTeamGame) {
       console.log(`\n🎮 [ZONE-TEAM] Processando leitura de checkpoint...`);
       
@@ -863,7 +875,10 @@ router.post('/', async (req, res) => {
         gameMode: 'zone_conquest_team',
         pointsGained: scanResult.points,
         criancaName: crianca.nome,
-        message: `${crianca.nome} conquistou o checkpoint! +${scanResult.points}pt`,
+        dominioTotal: Boolean(scanResult.dominioTotal),
+        message: scanResult.dominioTotal
+          ? `${crianca.nome} completou o domínio de todas as zonas! Vitória!`
+          : `${crianca.nome} conquistou o checkpoint! +${scanResult.points}pt`,
       });
     }
 
