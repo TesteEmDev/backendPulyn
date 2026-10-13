@@ -3,7 +3,7 @@
 // empresa.codigo:            código curto do buffet (único), preenchido para todos os buffets existentes.
 // pontoVerificacao.codigo:   o ID que o recreacionista deu ao checkpoint; único por buffet. Nos checkpoints que já
 //                            existem vale o próprio checkpointId (nada muda para eles nem para os ESP32 já gravados).
-const { query, DB_DRIVER } = require('../database');
+const { query, allQuery, DB_DRIVER } = require('../database');
 const { preencherCodigos } = require('../utils/codigoBuffet');
 
 async function ensureCodigoBuffetSchema() {
@@ -23,6 +23,19 @@ async function ensureCodigoBuffetSchema() {
     // Já existem IDs repetidos dentro do mesmo buffet (dados antigos): avisa e segue; a checagem na criação continua valendo.
     console.warn(`⚠️ Índice de ID único por buffet não criado: ${erro.message}`);
   }
+
+  // As chaves estrangeiras para pontoVerificacao passam a acompanhar a troca da chave (ON UPDATE CASCADE),
+  // necessário para trocar o ID simples entre checkpoints (utils/chaveCheckpoint.js).
+  const fks = await allQuery(
+    `SELECT conrelid::regclass::text AS tabela, conname, pg_get_constraintdef(oid) AS def
+     FROM pg_constraint
+     WHERE contype = 'f' AND confrelid = '"pontoVerificacao"'::regclass AND confupdtype <> 'c'`
+  );
+  for (const fk of fks) {
+    await query(`ALTER TABLE ${fk.tabela} DROP CONSTRAINT "${fk.conname}"`);
+    await query(`ALTER TABLE ${fk.tabela} ADD CONSTRAINT "${fk.conname}" ${fk.def} ON UPDATE CASCADE`);
+  }
+  if (fks.length > 0) console.log(`✅ ${fks.length} chave(s) estrangeira(s) de checkpoint com ON UPDATE CASCADE`);
 }
 
 module.exports = { ensureCodigoBuffetSchema };

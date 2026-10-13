@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { garantirCodigo } = require('../utils/codigoBuffet');
+const { usarIdSimples } = require('../utils/chaveCheckpoint');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
@@ -122,6 +123,27 @@ router.get('/codigo-buffet', verifyToken, async (req, res) => {
   } catch (err) {
     console.error('❌ Erro ao obter o código do buffet:', err);
     res.status(500).json({ error: 'Não foi possível obter o código do buffet' });
+  }
+});
+
+// Passa o ID simples (o número, como o ESP32 foi gravado) para este checkpoint. Quem tinha o ID simples em outro buffet
+// passa a precisar do código do buffet no ESP32. Mexe em outro buffet, por isso só o master.
+router.post('/evento/:eventoId/:id/usar-id-simples', verifyToken, async (req, res) => {
+  try {
+    if (!isMaster(req)) return res.status(403).json({ error: 'Só o master pode passar o ID simples entre buffets' });
+    const checkpoint = await queryOne(
+      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id AND eventoId = @eventoId',
+      { id: req.params.id, eventoId: req.params.eventoId }
+    );
+    if (!checkpoint) return res.status(404).json({ error: 'Checkpoint não encontrado neste evento' });
+    const resultado = await usarIdSimples(checkpoint.checkpointId);
+    console.log(`🔁 [CHECKPOINT] ID simples ${resultado.chave} passou para "${resultado.nome}"` +
+      (resultado.donoAnterior ? ` (antigo dono agora é ${resultado.donoAnterior.chave})` : ''));
+    res.json({ success: true, ...resultado });
+  } catch (err) {
+    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
+    console.error('❌ Erro ao passar o ID simples:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
