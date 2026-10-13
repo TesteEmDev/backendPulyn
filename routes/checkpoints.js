@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
+const { garantirCodigo } = require('../utils/codigoBuffet');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
@@ -114,6 +115,16 @@ router.get('/resumo', verifyToken, async (req, res) => {
   }
 });
 
+// Código curto do buffet do usuário (o ESP32 o informa na página /config quando o ID também existe em outro buffet).
+router.get('/codigo-buffet', verifyToken, async (req, res) => {
+  try {
+    res.json({ codigo: await garantirCodigo(req.user.empresaId) });
+  } catch (err) {
+    console.error('❌ Erro ao obter o código do buffet:', err);
+    res.status(500).json({ error: 'Não foi possível obter o código do buffet' });
+  }
+});
+
 router.get('/evento/:eventoId', verifyToken, async (req, res) => {
   try {
     const { eventoId } = req.params;
@@ -148,8 +159,15 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
       { eventoId, empresaId: evento.empresaId }
     );
 
-    console.log(`📊 [CHECKPOINTS] Encontrados ${pontoVerificacao.length} checkpoints para evento ${eventoId}`);
-    res.json(pontoVerificacao || []);
+    // ID digitado (codigo) e, quando a chave interna tem prefixo, o código do buffet que o ESP32 precisa informar.
+    const empresaCodigo = await garantirCodigo(evento.empresaId);
+    const comCodigo = (pontoVerificacao || []).map((cp) => {
+      const codigo = cp.codigo || cp.checkpointId;
+      return { ...cp, codigo, empresaCodigo, prefixado: String(cp.checkpointId).toLowerCase() !== String(codigo).toLowerCase() };
+    });
+
+    console.log(`📊 [CHECKPOINTS] Encontrados ${comCodigo.length} checkpoints para evento ${eventoId}`);
+    res.json(comCodigo);
   } catch (err) {
     console.error('❌ Erro ao listar checkpoints:', err.message);
     res.status(500).json({ error: err.message || 'Erro ao consultar checkpoints' });
@@ -275,30 +293,38 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // O ID é único no sistema inteiro (o ESP32 se identifica só por ele e a chave primária é o próprio ID),
-    // não apenas dentro do evento: reaproveitar um ID de outro evento ou buffet violaria a chave primária.
+    // O ID digitado é único dentro do BUFFET (outros buffets podem usar o mesmo). A chave interna do banco continua
+    // global: vale o próprio ID quando ele está livre no sistema; se outro buffet já usa esse ID, vira
+    // "<código do buffet>-<ID>" e o ESP32 informa o código do buffet na página /config (ver utils/codigoBuffet.js).
+    const codigo = String(id).trim();
+    if (codigo.length > 40 || /[\s/\\?#%]/.test(codigo)) {
+      return res.status(400).json({ error: 'O ID do checkpoint deve ter até 40 caracteres, sem espaços nem os símbolos / \\ ? # %' });
+    }
     const existing = await queryOne(
-      `SELECT p.checkpointId, p.empresaId, p.eventoId, e.nome AS eventoNome
+      `SELECT p.eventoId, e.nome AS eventoNome
        FROM pontoVerificacao p LEFT JOIN evento e ON e.eventoId = p.eventoId
-       WHERE LOWER(p.checkpointId) = LOWER(@id)`,
-      { id }
+       WHERE p.empresaId = @empresaId AND LOWER(p.codigo) = LOWER(@codigo)`,
+      { empresaId, codigo }
     );
-
     if (existing) {
-      const mesmoEvento = sameId(existing.eventoId, eventoId);
-      const mesmaEmpresa = sameId(existing.empresaId, empresaId);
-      const onde = mesmoEvento ? 'neste evento'
-        : mesmaEmpresa ? `no evento "${existing.eventoNome || 'outro evento'}"`
-        : 'em outro buffet';
-      return res.status(409).json({ error: `Já existe um checkpoint com o ID "${id}" ${onde}. Use outro ID (cada checkpoint precisa de um ID único).` });
+      const onde = sameId(existing.eventoId, eventoId) ? 'neste evento' : `no evento "${existing.eventoNome || 'outro evento'}"`;
+      return res.status(409).json({ error: `Já existe um checkpoint com o ID "${codigo}" ${onde} do seu buffet. Use outro ID (dentro do mesmo buffet cada ID só pode ser usado uma vez).` });
+    }
+
+    const empresaCodigo = await garantirCodigo(empresaId);
+    const idLivre = !(await queryOne('SELECT checkpointId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@codigo)', { codigo }));
+    const checkpointId = idLivre ? codigo : `${empresaCodigo}-${codigo}`;
+    if (!idLivre && await queryOne('SELECT checkpointId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)', { checkpointId })) {
+      return res.status(409).json({ error: `O ID "${codigo}" não pode ser usado: já existe um checkpoint com a chave "${checkpointId}".` });
     }
 
     // ✅ Inserir novo checkpoint COM empresaId
     await query(`
-      INSERT INTO pontoVerificacao (checkpointId, eventoId, empresaId, nome, tipo, proposito, zona, ip, pontos, status, tagsAutorizadas, mapaX, mapaY)
-      VALUES (@id, @eventoId, @empresaId, @nome, @tipo, @propositoCheckpoint, @zone, @ip, @points, @status, @tagsAutorizadas, @mapaX, @mapaY)
+      INSERT INTO pontoVerificacao (checkpointId, codigo, eventoId, empresaId, nome, tipo, proposito, zona, ip, pontos, status, tagsAutorizadas, mapaX, mapaY)
+      VALUES (@id, @codigo, @eventoId, @empresaId, @nome, @tipo, @propositoCheckpoint, @zone, @ip, @points, @status, @tagsAutorizadas, @mapaX, @mapaY)
     `, {
-      id,
+      id: checkpointId,
+      codigo,
       eventoId,
       empresaId, // ✅ NOVO: Incluir empresaId
       nome,
@@ -313,8 +339,11 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
       mapaY: Number.isFinite(Number(mapY)) ? Math.round(Number(mapY)) : null
     });
 
-    console.log(`✅ Checkpoint criado: ${nome} (empresaId: ${empresaId})`);
-    res.json({ success: true, message: 'Checkpoint criado com sucesso', id, empresaId });
+    console.log(`✅ Checkpoint criado: ${nome} (ID ${codigo}, chave ${checkpointId}, empresaId: ${empresaId})`);
+    res.json({
+      success: true, message: 'Checkpoint criado com sucesso', id: checkpointId, codigo, empresaId,
+      empresaCodigo, prefixado: checkpointId !== codigo,
+    });
   } catch (err) {
     console.error('❌ Erro ao criar checkpoint:', err);
     res.status(500).json({ error: err.message });

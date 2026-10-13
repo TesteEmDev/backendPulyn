@@ -151,10 +151,17 @@ const buscarUltimoRoundFinalizado = (partidaId) => queryOne(
 // Ordem pelo id: números em ordem numérica (10, 11, 12...), ids com texto em ordem natural.
 const porIdNatural = (a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true, sensitivity: 'base' });
 
-// Checkpoints do jogo (os marcados no jogo; sem lista, todos os de jogo do evento) na ordem do id.
+// Checkpoints do jogo (os marcados no jogo; sem lista, todos os de jogo do evento) na ordem do ID que o recreacionista
+// deu a cada um (pontoVerificacao.codigo: 10, 11, 12...). A chave interna pode ter prefixo do buffet e não serve de ordem.
 async function sequenciaDoJogo(eventoId, brincadeiraId) {
   const ids = await bomba.locaisDoJogo(eventoId, brincadeiraId);
-  return [...ids].sort(porIdNatural);
+  const linhas = await allQuery(
+    `SELECT checkpointId, codigo FROM pontoVerificacao WHERE LOWER(eventoId) = LOWER(@eventoId)`,
+    { eventoId }
+  );
+  const codigoDe = new Map(linhas.map((l) => [String(l.checkpointId).toLowerCase(), l.codigo || l.checkpointId]));
+  const chave = (id) => codigoDe.get(String(id).toLowerCase()) || id;
+  return [...ids].sort((a, b) => porIdNatural(chave(a), chave(b)));
 }
 
 function idsDaSequencia(partida) {
