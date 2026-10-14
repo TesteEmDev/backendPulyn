@@ -9,10 +9,19 @@
 // Os checkpoints do jogo são os marcados no jogo (sem lista, todos os checkpoints de jogo do evento).
 const { queryOne, allQuery } = require('../database');
 const bomba = require('./bomba');
+const { criarCache } = require('./cacheCurto');
 
 const TIPO_ZONA_DOMINIO = 'zone_domination';
 const REPETICAO_MINIMA = 3;
 const ENCERRAR_APOS_MS = 20000;   // vitória na tela e nos checkpoints antes de o jogo parar
+
+// Os checkpoints perguntam o estado a cada 1,5 a 10 s (ver utils/cacheCurto.js): consultas repetidas compartilham o resultado.
+const cacheCheckpoints = criarCache(60000);   // checkpoint -> evento
+const cacheEvento = criarCache(700);          // última partida e, se já houve vencedor, a equipe dele
+
+function invalidarCache(eventoId) {
+  cacheEvento.invalidar(String(eventoId || '').toLowerCase());
+}
 
 function mesmoId(a, b) {
   return Boolean(a) && Boolean(b) && String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
@@ -168,31 +177,42 @@ async function ladoDoSomDaEquipe(eventoId, timeId) {
 }
 
 // O que um checkpoint precisa saber: jogo em andamento ou vencedor (para tocar o som da equipe e mostrar a cor).
-// Qualquer outro jogo responde ativo = false.
+// Qualquer outro jogo responde ativo = false. O que vem do banco fica em cache; o "há quanto tempo" é calculado agora.
 async function obterEstadoCheckpoint(checkpointId) {
-  const checkpoint = await queryOne(
-    'SELECT checkpointId, eventoId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)',
-    { checkpointId }
-  );
+  const checkpoint = await cacheCheckpoints.obter(String(checkpointId).toLowerCase(), async () => {
+    const linha = await queryOne(
+      'SELECT checkpointId, eventoId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)',
+      { checkpointId }
+    );
+    if (!linha) throw Object.assign(new Error('Checkpoint não encontrado'), { statusCode: 404 });
+    return linha;
+  }).catch(() => null);
   if (!checkpoint) return { ok: true, ativo: false, fase: 'sem_partida' };
 
-  const partida = await ultimaPartida(checkpoint.eventoId);
-  if (!partida || partida.tipo !== TIPO_ZONA_DOMINIO) return { ok: true, ativo: false, fase: 'sem_partida' };
-  if (!partida.vencedorTimeId) return { ok: true, ativo: partida.status === 'active', fase: 'jogo' };
+  const { partida, vencedor } = await cacheEvento.obter(String(checkpoint.eventoId).toLowerCase(), async () => {
+    const ultima = await ultimaPartida(checkpoint.eventoId);
+    if (!ultima || ultima.tipo !== TIPO_ZONA_DOMINIO) return { partida: null, vencedor: null };
+    if (!ultima.vencedorTimeId) return { partida: ultima, vencedor: null };
+    const time = await queryOne('SELECT nome, cor FROM "time" WHERE timeId = @timeId', { timeId: ultima.vencedorTimeId });
+    return {
+      partida: ultima,
+      vencedor: {
+        lado: await ladoDoSomDaEquipe(checkpoint.eventoId, ultima.vencedorTimeId),
+        cor: time?.cor || '',
+        nome: time?.nome || '',
+      },
+    };
+  });
 
-  const time = await queryOne('SELECT nome, cor FROM "time" WHERE timeId = @timeId', { timeId: partida.vencedorTimeId });
+  if (!partida) return { ok: true, ativo: false, fase: 'sem_partida' };
+  if (!vencedor) return { ok: true, ativo: partida.status === 'active', fase: 'jogo' };
+
   const haMs = partida.finalizadoEm ? Math.max(0, Date.now() - new Date(partida.finalizadoEm).getTime()) : 0;
   return {
     ok: true,
     ativo: true,
     fase: 'vencedor',
-    resultado: {
-      vencedorLado: await ladoDoSomDaEquipe(checkpoint.eventoId, partida.vencedorTimeId),
-      motivo: 'dominio',
-      haMs,
-      cor: time?.cor || '',
-      nome: time?.nome || '',
-    },
+    resultado: { vencedorLado: vencedor.lado, motivo: 'dominio', haMs, cor: vencedor.cor, nome: vencedor.nome },
   };
 }
 
@@ -242,5 +262,6 @@ module.exports = {
   vencedorDaUltimaPartida,
   estadoDoDominio,
   obterEstadoCheckpoint,
+  invalidarCache,
   iniciarRelogio,
 };
