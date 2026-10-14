@@ -67,6 +67,7 @@ const refemRoutes = require('./routes/refem');
 const refemJogo = require('./utils/refem');
 const bombaRoutes = require('./routes/bomba');
 const zonaDominioRoutes = require('./routes/zonaDominio');
+const zonaDominioJogo = require('./utils/zonaDominio');
 const { TIPOS_PULYNBALL } = require('./utils/planDefinitions');
 const bombaJogo = require('./utils/bomba');
 const { ensureCacaTesouroSchema } = require('./migrations/cacaTesouro');
@@ -2000,6 +2001,7 @@ async function startServer() {
     await ensureCodigoBuffetSchema();
     await ensurePulseiraPorEmpresaSchema();
     refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)
+    zonaDominioJogo.iniciarRelogio();   // encerra o jogo quando uma equipe vence (Zona - Domínio total)
     bombaJogo.iniciarRelogio();   // explosão da bomba e fim do tempo do round (Conquistar e Destruir)
     await ensureParallelGamesSchema();
     await ensureCheckpointPurposeSchema();

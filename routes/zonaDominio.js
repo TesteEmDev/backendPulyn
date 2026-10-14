@@ -2,7 +2,7 @@
 const express = require('express');
 const { queryOne } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
-const { estadoDoDominio } = require('../utils/zonaDominio');
+const { estadoDoDominio, obterEstadoCheckpoint } = require('../utils/zonaDominio');
 
 const router = express.Router();
 
@@ -20,6 +20,16 @@ router.get('/evento/:eventoId/estado', verifyToken, requireRole('admin', 'game_m
   } catch (erro) {
     console.error('❌ [ZONA-DOMINIO] Erro ao obter o estado:', erro);
     res.status(500).json({ error: 'Não foi possível carregar o estado do jogo' });
+  }
+});
+
+// Checkpoint (ESP32, sem login como os demais): jogo em andamento ou vencedor, para tocar o som da equipe e mostrar a cor.
+router.get('/pontoVerificacao/:checkpointId/estado', async (req, res) => {
+  try {
+    res.json(await obterEstadoCheckpoint(req.params.checkpointId));
+  } catch (erro) {
+    console.error('❌ [ZONA-DOMINIO] Erro ao consultar o estado do checkpoint:', erro);
+    res.status(500).json({ error: 'Não foi possível consultar o estado do checkpoint' });
   }
 });
 
