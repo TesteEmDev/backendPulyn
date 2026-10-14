@@ -83,7 +83,7 @@ async function updateCheckpointState(checkpointStateId, updates) {
 
     if (setClauses.length === 0) return null;
 
-    setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    setClauses.push('atualizadoEm = CURRENT_TIMESTAMP');
 
     const result = await queryOne(
       `UPDATE zonaConquistaEstadoCheckpoint
@@ -217,7 +217,7 @@ async function updateZoneState(zoneStateId, updates) {
 
     if (setClauses.length === 0) return null;
 
-    setClauses.push('updated_at = CURRENT_TIMESTAMP');
+    setClauses.push('atualizadoEm = CURRENT_TIMESTAMP');
 
     const result = await queryOne(
       `UPDATE zonaConquistaEstadoZona

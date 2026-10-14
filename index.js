@@ -521,7 +521,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     }
 
     const game = await queryOne(
-      'SELECT brincadeiraId, nome, tipo, eventoId, empresaId FROM "brincadeira" WHERE LOWER(brincadeiraId) = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
+      'SELECT brincadeiraId, nome, tipo, eventoId, empresaId FROM "brincadeira" WHERE LOWER("brincadeiraId") = LOWER(@gameId) AND LOWER(COALESCE(status, \'active\')) <> \'archived\'',
       { gameId }
     );
     if (!game) return res.status(404).json({ error: 'Jogo não encontrado' });
@@ -549,7 +549,7 @@ app.post('/api/debug/select-game', verifyToken, requireRole('admin', 'game_maste
     if (isClosedStatus(evento.status)) {
       return res.status(409).json({ error: 'Este evento já foi encerrado.' });
     }
-    const eventIsRunning = currentState?.mode === 'game';
+    const eventIsRunning = currentState?.modo === 'game';
     if (eventIsRunning) {
       return res.status(409).json({ error: 'Finalize o jogo atual antes de selecionar outro jogo' });
     }
@@ -628,7 +628,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     const selectedGame = await queryOne(
       `SELECT brincadeiraId, nome, tipo, eventoId, empresaId
        FROM "brincadeira"
-       WHERE LOWER(brincadeiraId) = LOWER(@gameId)
+       WHERE LOWER("brincadeiraId") = LOWER(@gameId)
          AND LOWER(COALESCE(status, 'active')) <> 'archived'`,
       { gameId }
     );

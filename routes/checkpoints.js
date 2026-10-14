@@ -172,11 +172,13 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
+    // Por padrão só os checkpoints de jogo; ?proposito=reception lista os de recepção.
+    const operador = String(req.query.proposito || '').toLowerCase() === 'reception' ? '=' : '<>';
     const pontoVerificacao = await allQuery(
       `SELECT * FROM pontoVerificacao
        WHERE eventoId = @eventoId
          AND empresaId = @empresaId
-         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+         AND LOWER(COALESCE(proposito, 'game')) ${operador} 'reception'
        ORDER BY nome`,
       { eventoId, empresaId: evento.empresaId }
     );
@@ -295,6 +297,11 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
     const { eventoId } = req.params;
     const empresaId = req.user.empresaId; // ✅ Pegar empresaId do token
     const { id, nome, tipo, zone, ip, points, status, authorizedTags, mapX, mapY } = req.body;
+    // Finalidade: 'game' (padrão) ou 'reception' (leitor do balcão da recepção; não entra nos jogos).
+    const propositoCheckpoint = String(req.body.proposito || 'game').trim().toLowerCase();
+    if (!['game', 'reception'].includes(propositoCheckpoint)) {
+      return res.status(400).json({ error: 'Finalidade inválida: use game ou reception' });
+    }
 
     // Validar campos obrigatórios
     if (!id || !nome) {
@@ -351,7 +358,7 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
       empresaId, // ✅ NOVO: Incluir empresaId
       nome,
       tipo: tipo || 'NFC',
-      propositoCheckpoint: 'game',
+      propositoCheckpoint,
       zone: zone || null,
       ip: ip || null,
       points: points || 10,
@@ -446,8 +453,15 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
       return res.status(404).json({ error: 'Checkpoint não encontrado' });
     }
 
-    if (String(checkpoint.proposito || 'game').toLowerCase() === 'reception') {
-      return res.status(409).json({ error: 'O checkpoint da recepção não pode ser excluído por esta tela' });
+    // Evita apagar a recepção por engano: ela só é excluída quando o pedido diz que é de recepção.
+    const ehRecepcao = String(checkpoint.proposito || 'game').toLowerCase() === 'reception';
+    const pedidoRecepcao = String(req.query.proposito || '').toLowerCase() === 'reception';
+    if (ehRecepcao !== pedidoRecepcao) {
+      return res.status(409).json({
+        error: ehRecepcao
+          ? 'Este é um checkpoint de recepção: exclua pela seção de recepção'
+          : 'Este não é um checkpoint de recepção',
+      });
     }
 
     // Não alterar a estrutura de uma partida enquanto o jogo está ativo.
@@ -490,7 +504,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
                checkpointsCompletadosIds = @completedCheckpointIds
            WHERE LOWER(partidaId) = LOWER(@partidaId)`,
           {
-            partidaId: session.id,
+            partidaId: session.partidaId,
             targetCheckpointId: targetWasDeleted ? null : session.checkpointAlvoId,
             completedCheckpointIds: completed.changed
               ? completed.value
