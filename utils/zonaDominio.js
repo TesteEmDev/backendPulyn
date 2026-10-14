@@ -18,9 +18,12 @@ const ENCERRAR_APOS_MS = 20000;   // vitória na tela e nos checkpoints antes de
 // Os checkpoints perguntam o estado a cada 1,5 a 10 s (ver utils/cacheCurto.js): consultas repetidas compartilham o resultado.
 const cacheCheckpoints = criarCache(60000);   // checkpoint -> evento
 const cacheEvento = criarCache(700);          // última partida e, se já houve vencedor, a equipe dele
+const cacheTelao = criarCache(700);           // estado completo do telão (checkpoints, equipes, vencedor)
 
 function invalidarCache(eventoId) {
-  cacheEvento.invalidar(String(eventoId || '').toLowerCase());
+  const chave = String(eventoId || '').toLowerCase();
+  cacheEvento.invalidar(chave);
+  cacheTelao.invalidar(chave);
 }
 
 function mesmoId(a, b) {
@@ -117,8 +120,12 @@ async function ultimaPartida(eventoId) {
   );
 }
 
-// Resumo para o telão e o painel: placar das equipes, checkpoints e vencedor.
-async function estadoDoDominio(eventoId) {
+// Resumo para o telão e o painel: placar das equipes, checkpoints e vencedor (com cache de 0,7 s; ver invalidarCache).
+function estadoDoDominio(eventoId) {
+  return cacheTelao.obter(String(eventoId).toLowerCase(), () => calcularEstadoDoDominio(eventoId));
+}
+
+async function calcularEstadoDoDominio(eventoId) {
   const partida = await ultimaPartida(eventoId);
   if (!partida || partida.tipo !== TIPO_ZONA_DOMINIO) return { ativo: false };
 
