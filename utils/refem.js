@@ -15,6 +15,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { normalizeUid, uidSqlExpression } = require('./uid');
 const bomba = require('./bomba');
+const { criarCache } = require('./cacheCurto');
 
 const REFEM_GAME_TYPE = 'hostage_rescue';
 
@@ -40,7 +41,19 @@ function erroHttp(mensagem, statusCode) {
   return erro;
 }
 
+// Cache das consultas de estado (ver utils/cacheCurto.js): checkpoints e telões perguntam a cada ~1 s.
+const cacheCheckpoints = criarCache(60000);   // checkpoint -> evento (quase não muda)
+const cacheContexto = criarCache(700);        // partida/round do evento, compartilhado por todos os checkpoints
+const cacheEstado = criarCache(700);          // estado completo de painéis e telões
+
+function invalidarCache(eventoId) {
+  const chave = String(eventoId || '').toLowerCase();
+  cacheContexto.invalidar(chave);
+  cacheEstado.invalidar(chave);
+}
+
 function emitir(eventoId, tipo, payload = {}) {
+  invalidarCache(eventoId);   // todo evento emitido acompanha uma mudança de estado
   if (typeof global.broadcastToEvent === 'function') {
     global.broadcastToEvent(eventoId, { type: tipo, payload: { eventoId, ...payload } });
   }
@@ -252,7 +265,7 @@ async function iniciarJogo(eventoId, brincadeiraId, opcoes = {}) {
 
   await numerarJogadores(evento.eventoId, [timeAId, timeBId]);
   await criarRound(await buscarPartida(partidaId), 1);
-  const estado = await obterEstado(evento.eventoId);
+  const estado = await calcularEstado(evento.eventoId);
   emitir(evento.eventoId, 'REFEM_ESTADO', { estado });
   return estado;
 }
@@ -293,7 +306,7 @@ async function configurarPartida(partidaId, opcoes = {}) {
     roundId: round.roundId, timeTrId, timeCtId,
   });
   await numerarJogadores(partida.eventoId, [timeAId, timeBId]);
-  const estado = await obterEstado(partida.eventoId);
+  const estado = await calcularEstado(partida.eventoId);
   emitir(partida.eventoId, 'REFEM_ESTADO', { estado });
   return estado;
 }
@@ -329,7 +342,7 @@ async function iniciarRound(partidaId) {
   if (!Number(resultado?.rowsAffected?.[0] || 0)) throw erroHttp('O round já foi iniciado', 409);
   console.log(`🎮 [REFEM] Round ${round.numero} iniciado | refém: jogador nº ${refem.numeroJogador} | duração ${partida.duracaoRoundSeg}s`);
 
-  const estado = await obterEstado(partida.eventoId);
+  const estado = await calcularEstado(partida.eventoId);
   emitir(partida.eventoId, 'REFEM_ROUND_INICIADO', { numero: round.numero, estado });
   return estado;
 }
@@ -360,7 +373,7 @@ async function finalizarRound(round, partida, vencedorLado, motivo, finalizadoEm
     await criarRound(atualizada, round.numero + 1);
   }
 
-  const estado = await obterEstado(partida.eventoId);
+  const estado = await calcularEstado(partida.eventoId);
   emitir(partida.eventoId, 'REFEM_ROUND_ENCERRADO', {
     numero: round.numero, vencedorLado, vencedorTimeId, motivo, partidaEncerrada: partidaVencida, estado,
   });
@@ -544,7 +557,12 @@ function montarPartida(partida, times) {
   };
 }
 
-async function obterEstado(eventoId) {
+// Com cache de 0,7 s: várias telas e checkpoints no mesmo instante compartilham uma consulta só.
+function obterEstado(eventoId) {
+  return cacheEstado.obter(String(eventoId).toLowerCase(), () => calcularEstado(eventoId));
+}
+
+async function calcularEstado(eventoId) {
   const agora = new Date();
   const partida = await buscarPartidaAtiva(eventoId);
   if (!partida) {
@@ -621,26 +639,48 @@ async function obterEstado(eventoId) {
   };
 }
 
-// O que um checkpoint precisa saber para acender o LED e tocar o som certo.
-async function obterEstadoCheckpoint(checkpointId) {
-  const checkpoint = await queryOne(
-    `SELECT checkpointId, eventoId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
-    { checkpointId }
-  );
-  if (!checkpoint) throw erroHttp('Checkpoint não encontrado', 404);
+function eventoDoCheckpoint(checkpointId) {
+  return cacheCheckpoints.obter(String(checkpointId).toLowerCase(), async () => {
+    const checkpoint = await queryOne(
+      `SELECT checkpointId, eventoId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
+      { checkpointId }
+    );
+    if (!checkpoint) throw erroHttp('Checkpoint não encontrado', 404);
+    return checkpoint;
+  });
+}
 
+// Partida ativa, round atual e (se o round está aguardando) o último finalizado: uma vez para todos que perguntam.
+function contextoDoEvento(eventoId) {
+  return cacheContexto.obter(String(eventoId).toLowerCase(), async () => {
+    const partida = await buscarPartidaAtiva(eventoId);
+    if (!partida) return { partida: null, round: null, anterior: null };
+    const round = await buscarRoundAtual(partida.partidaId);
+    const anterior = round && round.status === 'aguardando' && round.numero > 1
+      ? await buscarUltimoRoundFinalizado(partida.partidaId)
+      : null;
+    return { partida, round, anterior };
+  });
+}
+
+// O que um checkpoint precisa saber para acender o LED e tocar o som certo. Os tempos são calculados AGORA a partir das
+// datas do round (o cache só guarda as linhas do banco), então todos os checkpoints recebem o mesmo instante.
+async function obterEstadoCheckpoint(checkpointId) {
+  const checkpoint = await eventoDoCheckpoint(checkpointId);
   const agora = new Date();
-  const partida = await buscarPartidaAtiva(checkpoint.eventoId);
+  let { partida, round, anterior } = await contextoDoEvento(checkpoint.eventoId);
   if (!partida) return { ok: true, ativo: false, fase: 'sem_partida' };
   const indice = indiceNaSequencia(partida, checkpoint.checkpointId);
   if (indice < 0) return { ok: true, ativo: false, fase: 'fora_do_jogo' };
 
-  let round = await avaliarRound(partida, await buscarRoundAtual(partida.partidaId), agora);
-  const partidaAtual = await buscarPartida(partida.partidaId);
-  if (partidaAtual.status !== 'em_andamento') return { ok: true, ativo: false, fase: 'sem_partida' };
-  round = await buscarRoundAtual(partidaAtual.partidaId);
+  const avaliado = await avaliarRound(partida, round, agora);
+  if (avaliado !== round) {   // o round acabou agora (tempo): lê o estado novo
+    invalidarCache(checkpoint.eventoId);
+    ({ partida, round, anterior } = await contextoDoEvento(checkpoint.eventoId));
+    if (!partida) return { ok: true, ativo: false, fase: 'sem_partida' };
+  }
 
-  const base = { ok: true, ativo: true, round: round?.numero || 0, total: (idsDaSequencia(partidaAtual) || []).length, ordem: indice + 1 };
+  const base = { ok: true, ativo: true, round: round?.numero || 0, total: (idsDaSequencia(partida) || []).length, ordem: indice + 1 };
 
   if (round && round.status === 'em_andamento') {
     const posicao = Number(round.posicao) || 0;
@@ -648,11 +688,10 @@ async function obterEstadoCheckpoint(checkpointId) {
     const papel = indice === posicao ? 'proximo' : indice === posicao - 1 ? 'atual' : 'outro';
     return {
       ...base, fase: 'round', papel, posicao,
-      restanteRoundMs: restanteMs(round.iniciadoEm, partidaAtual.duracaoRoundSeg * 1000, agora),
+      restanteRoundMs: restanteMs(round.iniciadoEm, partida.duracaoRoundSeg * 1000, agora),
     };
   }
 
-  const anterior = round && round.numero > 1 ? await buscarUltimoRoundFinalizado(partidaAtual.partidaId) : null;
   if (anterior && anterior.finalizadoEm && agora.getTime() - new Date(anterior.finalizadoEm).getTime() <= MOSTRAR_RESULTADO_MS) {
     return {
       ...base, fase: 'resultado',
@@ -664,6 +703,17 @@ async function obterEstadoCheckpoint(checkpointId) {
     };
   }
   return { ...base, fase: 'aguardando_round' };
+}
+
+// Numerar/trocar o número de um jogador muda o estado sem emitir evento: invalida o cache à mão.
+async function numerarJogadoresInvalidando(eventoId, timeIds) {
+  await numerarJogadores(eventoId, timeIds);
+  invalidarCache(eventoId);
+}
+
+async function definirNumeroJogadorInvalidando(eventoId, criancaId, numero) {
+  await definirNumeroJogador(eventoId, criancaId, numero);
+  invalidarCache(eventoId);
 }
 
 module.exports = {
@@ -678,8 +728,9 @@ module.exports = {
   configurarPartida,
   iniciarRound,
   encerrarRoundManual,
-  numerarJogadores,
-  definirNumeroJogador,
+  numerarJogadores: numerarJogadoresInvalidando,
+  definirNumeroJogador: definirNumeroJogadorInvalidando,
+  invalidarCache,
   processarLeitura,
   obterEstado,
   obterEstadoCheckpoint,

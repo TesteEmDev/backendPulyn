@@ -361,6 +361,7 @@ async function verificarVitoriaPorDominio(partida, eventoId) {
     { id: partida.id, vencedor: situacao.vencedorTimeId, agora }
   );
   if (!Number(fechou?.rowsAffected?.[0] || 0)) return null;   // outra leitura já encerrou
+  dominio.invalidarCache(eventoId);   // os checkpoints passam a ver o vencedor na próxima pergunta
   console.log(`🏆 [ZONA-DOMINIO] A equipe ${situacao.vencedorTimeId} dominou todos os checkpoints e venceu a partida`);
   if (typeof global.broadcastToEvent === 'function') {
     global.broadcastToEvent(eventoId, {
