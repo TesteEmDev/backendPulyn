@@ -118,6 +118,10 @@ const {
 
 const app = express();
 const server = http.createServer(app);
+// Atrás do proxy do Render, o keep-alive do Node precisa ser maior que o do proxy (senão 502/reset em pedidos espaçados,
+// como o mode check e o heartbeat dos ESP32).
+server.keepAliveTimeout = 120 * 1000;
+server.headersTimeout = 125 * 1000;
 const WS_AUTH_PROTOCOL = 'pulyn-auth';
 
 const wss = new WebSocket.Server({ 

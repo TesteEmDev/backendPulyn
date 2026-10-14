@@ -335,6 +335,7 @@ async function processZoneConquestTeamScan({
     console.log(`   ✅ Scan processado: +${resultado.points} pontos`);
 
     if (jogoDeDominio && resultado.accepted) {
+      dominio.invalidarCache(eventoId);   // o telão vê o checkpoint trocar de cor já na próxima consulta
       const vencedorTimeId = await verificarVitoriaPorDominio(partida, eventoId);
       if (vencedorTimeId) resultado.dominioTotal = { vencedorTimeId };
     }
