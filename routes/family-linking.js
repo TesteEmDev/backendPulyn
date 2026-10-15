@@ -164,10 +164,14 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       message: 'Criança vinculada com sucesso!',
       linkedChild: {
         id: codigoVinculacao.criancaId,
+        nome: codigoVinculacao.nome,
+        apelido: codigoVinculacao.apelido,
+        idade: codigoVinculacao.idade,
+        evento: codigoVinculacao.evento_nome,
+        // Mantidos em inglês para o frontenPulyn (web) até ele migrar
         name: codigoVinculacao.nome,
         nickname: codigoVinculacao.apelido,
-        age: codigoVinculacao.idade,
-        evento: codigoVinculacao.evento_nome
+        age: codigoVinculacao.idade
       }
     });
 
@@ -277,10 +281,14 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       message: 'Criança vinculada com sucesso!',
       linkedChild: {
         id: row.criancaId,
+        nome: row.nome,
+        apelido: row.apelido,
+        idade: row.idade,
+        evento: row.evento_nome,
+        // Mantidos em inglês para o frontenPulyn (web) até ele migrar
         name: row.nome,
         nickname: row.apelido,
         age: row.idade,
-        evento: row.evento_nome,
       },
     });
   } catch (error) {

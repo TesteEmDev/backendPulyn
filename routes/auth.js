@@ -88,6 +88,9 @@ router.post('/login', async (req, res) => {
       token: token,
       user: {
         id: login.loginId,
+        nome: login.nomeFamilia || login.empresa_nome,
+        perfil: login.perfil,
+        // Mantidos em inglês para o frontenPulyn (web) até ele migrar
         name: login.nomeFamilia || login.empresa_nome,
         email: login.email,
         role: login.perfil,

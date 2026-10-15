@@ -51,8 +51,8 @@ function publicInvite(invite) {
   return {
     valid: invite.status === 'pending',
     status: invite.status,
-    event: { id: invite.eventoId, name: invite.evento_nome, date: invite.evento_data },
-    child: invite.linked_child_id ? { id: invite.linked_child_id, name: invite.linked_child_name } : null,
+    event: { id: invite.eventoId, nome: invite.evento_nome, data: invite.evento_data, name: invite.evento_nome, date: invite.evento_data },
+    child: invite.linked_child_id ? { id: invite.linked_child_id, nome: invite.linked_child_name, name: invite.linked_child_name } : null,
     email: invite.email || null,
     expiresAt: invite.expiramEm,
   };
@@ -250,6 +250,7 @@ router.post('/invites/:token/register', async (req, res) => {
 
       return res.status(201).json({
         success: true,
+        mensagem: result.message,
         message: result.message,
         status: result.status,
         childId: childIds[0],
@@ -390,7 +391,16 @@ router.get('/me', verifyToken, async (req, res) => {
       FROM login WHERE loginId = @loginId AND perfil = 'family'
     `, { loginId: req.user.id });
     if (!family) return res.status(404).json({ error: 'Conta familiar não encontrada' });
-    res.json({ id: family.loginId, name: family.nomeFamilia || family.email, email: family.email, status: family.status, empresaId: family.empresaId });
+    res.json({
+      id: family.loginId,
+      nome: family.nomeFamilia || family.email,
+      perfil: 'family',
+      email: family.email,
+      status: family.status,
+      empresaId: family.empresaId,
+      // Mantido em inglês para o frontenPulyn (web) até ele migrar
+      name: family.nomeFamilia || family.email,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -424,6 +434,10 @@ router.get('/children', verifyToken, async (req, res) => {
     const mappedChildren = children.map(child => ({
       id: child.criancaId,
       eventoId: child.eventoId,  // ✅ ADICIONADO - importante para o app mobile!
+      nome: child.nome,
+      apelido: child.apelido,
+      idade: child.idade,
+      // Mantidos em inglês para o frontenPulyn (web) até ele migrar
       name: child.nome,
       nickname: child.apelido,
       age: child.idade,
@@ -539,6 +553,8 @@ router.get('/active-event', verifyToken, async (req, res) => {
       success: true,
       activeGame: {
         id: activeEvent.eventoId,
+        nome: activeEvent.nome,
+        // Mantido em inglês para o frontenPulyn (web) até ele migrar
         name: activeEvent.nome,
         date: activeEvent.data,
         status: activeEvent.status,

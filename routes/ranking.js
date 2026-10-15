@@ -40,7 +40,12 @@ router.get('/evento/:eventoId/ranking/crianca', verifyToken, async (req, res) =>
       ORDER BY c.pontos DESC
     `, { eventoId, empresaId, isMaster: isMaster(req) ? 1 : 0 });
     
-    res.json(ranking);
+    // camelCase ao lado dos snake_case (que o web ainda lê)
+    res.json(ranking.map((row) => ({
+      ...row,
+      timeNome: row.time_nome,
+      timeCor: row.time_color,
+    })));
   } catch (err) {
     console.error('❌ Erro ao buscar ranking de crianças:', err);
     res.status(500).json({ error: err.message });
