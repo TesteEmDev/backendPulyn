@@ -303,6 +303,13 @@ router.get('/approved', verifyToken, async (req, res) => {
   }
 });
 
+// Sem aprovação da recepção (os vínculos já nascem aprovados), não existe pendência.
+// A rota continua respondendo para o painel da recepção do frontenPulyn não receber 404.
+router.get('/pending', verifyToken, async (req, res) => {
+  if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+  res.json([]);
+});
+
 async function getLinkForStaff(linkId, req) {
   const link = await queryOne(
     `SELECT l.*, c.nome as crianca_nome, c.status as crianca_status
