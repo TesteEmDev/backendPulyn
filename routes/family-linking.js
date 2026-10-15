@@ -117,12 +117,12 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       if (vinculacaoExistente) {
         // ✅ Já existe - verificar status
         if (vinculacaoExistente.status === 'inactive') {
-          console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.id}`);
+          console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.vinculoId}`);
           await tx.query(
             `UPDATE vinculoFamiliar
              SET status = 'approved', aprovadoEm = CURRENT_TIMESTAMP
              WHERE vinculoId = @linkId`,
-            { linkId: vinculacaoExistente.id }
+            { linkId: vinculacaoExistente.vinculoId }
           );
         } else {
           throw new Error('ALREADY_LINKED');
@@ -255,7 +255,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
         if (vinculacaoExistente.status === 'inactive') {
           await tx.query(
             `UPDATE vinculoFamiliar SET status = 'approved', aprovadoEm = CURRENT_TIMESTAMP WHERE vinculoId = @linkId`,
-            { linkId: vinculacaoExistente.id }
+            { linkId: vinculacaoExistente.vinculoId }
           );
         } else {
           throw new Error('ALREADY_LINKED');
