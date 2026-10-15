@@ -424,14 +424,16 @@ router.get('/children', verifyToken, async (req, res) => {
              COALESCE(c.pontos, 0) as "currentScore",
              COALESCE(c.pontos, 0) as "totalScore",
              l.relacionamento, l.status as link_status,
-             t.timeId as "teamId", t.nome as "teamName", t.cor as "teamColor", t.pontos as team_points
+             t.timeId as "teamId", t.nome as "teamName", t.cor as "teamColor", t.pontos as team_points,
+             e.nome as "eventoNome"
       FROM vinculoFamiliar l
       JOIN crianca c ON c.criancaId = l.criancaId
       LEFT JOIN "time" t ON t.timeId = c.timeId
+      LEFT JOIN evento e ON e.eventoId = c.eventoId
       WHERE l.loginId = @loginId AND (l.status = 'approved' OR l.status = 'pending')
       ORDER BY c.nome ASC
     `, { loginId: req.user.id });
-    
+
     console.log(`📊 [FAMILIAS] Crianças encontradas: ${children.length}`);
     children.forEach((c, idx) => {
       console.log(`   [${idx}] ${c.apelido || c.nome} → eventoId: ${c.eventoId} (${typeof c.eventoId})`);
@@ -441,6 +443,7 @@ router.get('/children', verifyToken, async (req, res) => {
     const mappedChildren = children.map(child => ({
       id: child.criancaId,
       eventoId: child.eventoId,  // ✅ ADICIONADO - importante para o app mobile!
+      eventoNome: child.eventoNome,  // nome do evento da criança (seletor de eventos no app)
       nome: child.nome,
       apelido: child.apelido,
       idade: child.idade,
@@ -513,15 +516,19 @@ router.get('/active-event', verifyToken, async (req, res) => {
 
     console.log(`🎮 [FAMILIAS] GET /active-event chamado para login: ${req.user.id}`);
 
-    // Buscar primeira criança vinculada (aprovada ou pendente)
+    // Evento escolhido no app (?eventoId=); sem ele, usa a primeira criança vinculada
+    const eventoEscolhido = req.query.eventoId ? String(req.query.eventoId) : null;
+
+    // Buscar a criança do evento escolhido (ou a primeira vinculada), aprovada ou pendente
     const firstChild = await queryOne(`
       SELECT c.criancaId, c.eventoId, c.nome
       FROM vinculoFamiliar l
       JOIN crianca c ON c.criancaId = l.criancaId
       WHERE l.loginId = @loginId AND (l.status = 'approved' OR l.status = 'pending')
+        ${eventoEscolhido ? 'AND LOWER(c.eventoId) = LOWER(@eventoId)' : ''}
       ORDER BY c.nome ASC
       LIMIT 1
-    `, { loginId: req.user.id });
+    `, eventoEscolhido ? { loginId: req.user.id, eventoId: eventoEscolhido } : { loginId: req.user.id });
 
     if (!firstChild || !firstChild.eventoId) {
       console.log(`⚠️ [FAMILIAS] Nenhuma criança com eventoId encontrada`);
