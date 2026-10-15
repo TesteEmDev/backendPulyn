@@ -171,7 +171,7 @@ router.post('/invites/:token/register', async (req, res) => {
     const claimed = await query(`
       UPDATE conviteFamilia SET status = 'processing'
       WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
-    `, { id: invite.id });
+    `, { id: invite.conviteId });
     if (!claimed.rowsAffected?.[0]) {
       return res.status(409).json({ error: 'Convite já está sendo utilizado ou expirou' });
     }
@@ -240,7 +240,7 @@ router.post('/invites/:token/register', async (req, res) => {
       await query(`
         UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
         WHERE conviteId = @inviteId AND status = 'processing'
-      `, { inviteId: invite.id });
+      `, { inviteId: invite.conviteId });
 
       const result = describeRegistrationResult({
         childless: plan.childless,
@@ -258,7 +258,7 @@ router.post('/invites/:token/register', async (req, res) => {
         childrenCount: childIds.length,
       });
     } catch (registrationError) {
-      await query(`UPDATE conviteFamilia SET status = 'pending' WHERE conviteId = @id AND status = 'processing'`, { id: invite.id }).catch(() => {});
+      await query(`UPDATE conviteFamilia SET status = 'pending' WHERE conviteId = @id AND status = 'processing'`, { id: invite.conviteId }).catch(() => {});
       throw registrationError;
     }
   } catch (err) {
