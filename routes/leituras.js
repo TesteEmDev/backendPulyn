@@ -562,6 +562,7 @@ router.post('/', async (req, res) => {
               timeId: crianca.timeId,
               teamColor: monsterResult.teamColor || '#FF0000',
               points: 0,
+              pontos: 0,
               lockDurationSeconds: 0,
               timestamp: now.toISOString(),
               eventoId: crianca.eventoId,
@@ -715,6 +716,7 @@ router.post('/', async (req, res) => {
               timeId: crianca.timeId,
               teamColor: treasureResult.teamColor || '#00AA00',
               points: 0,
+              pontos: 0,
               lockDurationSeconds: 0,
               timestamp: now.toISOString(),
               eventoId: checkpoint.eventoId,
@@ -1157,6 +1159,7 @@ router.post('/', async (req, res) => {
         timeId: crianca.timeId,
         teamColor,
         points: pointsAwarded,
+        pontos: pointsAwarded,
         lockDurationSeconds: 15,
         timestamp: now.toISOString(),
         eventoId: crianca.eventoId,
@@ -1350,7 +1353,17 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
       }
     }
 
-    res.json(history);
+    // Campos em camelCase (convenção do projeto) ao lado dos snake_case, que o
+    // frontenPulyn (web) ainda lê. Remover os snake_case quando o web migrar.
+    res.json(history.map((row) => ({
+      ...row,
+      childId: row.child_id,
+      childNome: row.child_nome,
+      childApelido: row.child_apelido,
+      checkpointNome: row.checkpoint_nome,
+      pontos: row.pontos ?? row.points,
+      timeCor: row.team_color,
+    })));
   } catch (error) {
     console.error('❌ Erro ao carregar histórico do evento para o telão:', error);
     res.status(500).json({ error: error.message });
