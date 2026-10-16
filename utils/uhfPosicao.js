@@ -203,8 +203,27 @@ function regioesAnonimas(posicoes, { largura, altura, tamanho = 2, minimo = 3 })
     }));
 }
 
+// Calibração de uma antena: medições { distancia (m), rssi } -> curva RSSI = rssi1m − 10·expoente·log10(d),
+// por mínimos quadrados. Precisa de pelo menos 2 distâncias diferentes. Devolve null se não der para ajustar.
+function ajustarCalibracao(medicoes) {
+  const pontos = (medicoes || [])
+    .map((m) => ({ x: Math.log10(Number(m.distancia)), y: Number(m.rssi) }))
+    .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
+  if (new Set(pontos.map((p) => p.x.toFixed(3))).size < 2) return null;
+  const mediaX = pontos.reduce((s, p) => s + p.x, 0) / pontos.length;
+  const mediaY = pontos.reduce((s, p) => s + p.y, 0) / pontos.length;
+  const inclinacao = pontos.reduce((s, p) => s + (p.x - mediaX) * (p.y - mediaY), 0)
+    / pontos.reduce((s, p) => s + (p.x - mediaX) ** 2, 0);
+  const expoente = -inclinacao / 10;
+  if (!Number.isFinite(expoente) || expoente <= 0) return null;   // o sinal precisa cair com a distância
+  return {
+    rssi1m: Math.round((mediaY - inclinacao * mediaX) * 10) / 10,
+    expoente: Math.round(limitar(expoente, 1.5, 6) * 100) / 100,
+  };
+}
+
 module.exports = {
-  RSSI_MIN_PADRAO, RSSI_REF_PADRAO, EXPOENTE_PADRAO, RAIO_PADRAO,
+  RSSI_MIN_PADRAO, RSSI_REF_PADRAO, EXPOENTE_PADRAO, RAIO_PADRAO, ajustarCalibracao,
   presenca, qualidadeRssi, forca, distancia, centroDaCobertura, centroide, trilaterar, estimarPosicao,
   sigmaDoMetodo, gradeDeCalor, suavizar, mediaDeGrades, regioesAnonimas,
 };

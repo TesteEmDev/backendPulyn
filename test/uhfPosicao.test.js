@@ -92,3 +92,11 @@ test('regiões anônimas escondem regiões com menos pulseiras que o mínimo', (
   const regioes = regioesAnonimas(posicoes, { ...limites, tamanho: 2, minimo: 3 });
   assert.deepEqual(regioes, [{ x: 0, y: 0, largura: 2, altura: 2, total: 3 }]);
 });
+
+test('calibração acha rssi1m e expoente a partir de medições a distâncias conhecidas', () => {
+  const { ajustarCalibracao } = require('../utils/uhfPosicao');
+  const medicoes = [0.5, 1, 1.5, 2].map((d) => ({ distancia: d, rssi: rssiNa(d) }));
+  assert.deepEqual(ajustarCalibracao(medicoes), { rssi1m: -50, expoente: 4 });
+  assert.equal(ajustarCalibracao([{ distancia: 1, rssi: -50 }, { distancia: 1, rssi: -52 }]), null);
+  assert.equal(ajustarCalibracao([{ distancia: 0.5, rssi: -60 }, { distancia: 2, rssi: -50 }]), null);
+});
