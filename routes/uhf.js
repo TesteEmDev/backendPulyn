@@ -1,7 +1,8 @@
 // routes/uhf.js - Leitores UHF (Chainway UR4), antenas e mapa de calor
 //
-// POST /lote é chamado pelo firmware do leitor (sem JWT): ele se identifica com X-Module-Id + X-Device-Key.
-// Não usar o header Authorization no firmware: o middleware de /api valida o JWT sempre que ele existe.
+// POST /lote é chamado pelo firmware do leitor (sem JWT): ele se identifica com X-Module-Id + a chave do leitor,
+// em "Authorization: Bearer <chave>" (como o firmware original) ou em X-Device-Key. O middleware de /api deixa
+// /uhf/lote passar sem validar JWT, como faz com /leituras.
 // O resto é para o painel (admin/master configuram; recreacionista vê o mapa; família só o agregado e o próprio filho).
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
@@ -65,8 +66,9 @@ async function limparAntigos() {
 router.post('/lote', async (req, res) => {
   try {
     const moduleId = String(req.get('X-Module-Id') || '').trim();
-    const chave = String(req.get('X-Device-Key') || '').trim();
-    if (!moduleId || !chave) return res.status(401).json({ error: 'X-Module-Id e X-Device-Key são obrigatórios' });
+    const bearer = String(req.get('Authorization') || '').match(/^Bearer\s+(.+)$/i)?.[1];
+    const chave = String(req.get('X-Device-Key') || bearer || '').trim();
+    if (!moduleId || !chave) return res.status(401).json({ error: 'X-Module-Id e a chave do leitor (Authorization: Bearer) são obrigatórios' });
 
     const candidatos = await allQuery('SELECT * FROM leitorUhf WHERE moduleId = @moduleId', { moduleId });
     if (candidatos.length === 0) return res.status(404).json({ error: 'Leitor não cadastrado' });

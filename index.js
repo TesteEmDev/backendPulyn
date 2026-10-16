@@ -258,7 +258,7 @@ setupPoolMonitoringEndpoints(app);
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
 
 app.use('/api', (req, res, next) => {
-  if (/^\/(auth|kiosk|score-kiosk|event-control|leituras)(\/|$)/i.test(req.path) || !req.headers.authorization) {
+  if (/^\/(auth|kiosk|score-kiosk|event-control|leituras|uhf\/lote)(\/|$)/i.test(req.path) || !req.headers.authorization) {
     return next();
   }
 
