@@ -16,7 +16,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { normalizeUid, uidSqlExpression } = require('./uid');
 const { criarCache } = require('./cacheCurto');
-const { explosaoDaBombaEm, restanteDaBomba } = require('./bombaTempo');
+const { explosaoDaBombaEm, restanteDaBomba, SOM_PLANTADA_MS } = require('./bombaTempo');
 
 const BOMBA_GAME_TYPE = 'bomb_defusal';
 
@@ -548,6 +548,7 @@ async function avaliarRound(partida, round, agora = new Date()) {
     // A contagem da bomba só começa depois do som de "bomba plantada" (ver utils/bombaTempo.js).
     const explosaoEm = explosaoDaBombaEm(round.plantadaEm, partida.bombaSeg);
     if (agora.getTime() >= explosaoEm) {
+      console.log(`💥 [BOMBA] Round ${round.numero}: explosão ao fim de ${(explosaoEm - new Date(round.plantadaEm).getTime()) / 1000}s depois da plantada (som ${SOM_PLANTADA_MS} ms + bomba ${partida.bombaSeg}s) | processo ${process.pid}`);
       // O fim vale o instante da explosão (não o da checagem, que pode atrasar até 1 s): todos os checkpoints
       // contam a vitória a partir dele e tocam juntos.
       await finalizarRound(round, partida, 'tr', 'explodiu', {
@@ -674,7 +675,7 @@ async function processarLeitura({ checkpointId, uid }) {
        WHERE roundId = @roundId AND status = 'em_andamento'`,
       { roundId: round.roundId, checkpointId: checkpoint.checkpointId, criancaId: crianca.criancaId, agora: new Date() }
     );
-    console.log(`💣 [BOMBA] Plantada no checkpoint ${checkpoint.checkpointId} por ${crianca.apelido || crianca.nome} | explode em ${partidaAtual.bombaSeg}s`);
+    console.log(`💣 [BOMBA] Plantada no checkpoint ${checkpoint.checkpointId} por ${crianca.apelido || crianca.nome} após ${progresso} ms de leitura contínua (plantar = ${partidaAtual.plantarMs} ms) | explode em ${SOM_PLANTADA_MS + partidaAtual.bombaSeg * 1000} ms (som ${SOM_PLANTADA_MS} ms + bomba ${partidaAtual.bombaSeg}s)`);
     leiturasEmAndamento.delete(chave(checkpoint.checkpointId));
     if (!Number(plantou?.rowsAffected?.[0] || 0)) return negado('bomba_em_outro_local', 'A bomba já foi plantada em outro local', base);
 
@@ -740,6 +741,7 @@ function avancarLeitura(checkpoint, crianca, round, tipo, agora) {
     criancaId: crianca.criancaId, roundId: round.roundId,
     inicio: agora.getTime(), ultimaLeitura: agora.getTime(),
   });
+  console.log(`📖 [BOMBA] Começou a ${tipo} no checkpoint ${checkpoint.checkpointId} (${crianca.apelido || crianca.nome}) | leitura contínua recomeçou do zero`);
   return 0;
 }
 
