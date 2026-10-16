@@ -2,8 +2,8 @@
 //
 // Regras (baseadas no Counter-Strike):
 //   - Duas equipes: os Rebeldes (lado "tr": plantam) e os Agentes (lado "ct": desarmam). Os ids internos continuam tr/ct.
-//   - O sorteio de cada round escolhe o número de um jogador da equipe dos Rebeldes: só a pulseira dele planta.
-//   - Plantar: o portador mantém a pulseira no checkpoint por `plantarMs` sem interrupção (o leitor lê a cada 500 ms).
+//   - Qualquer jogador da equipe dos Rebeldes pode plantar a bomba (não há portador sorteado).
+//   - Plantar: o jogador mantém a pulseira no checkpoint por `plantarMs` sem interrupção (o leitor lê a cada 500 ms).
 //     Se a leitura falhar por mais de TOLERANCIA_LEITURA_MS, o tempo recomeça do zero.
 //   - A bomba fica ativa por `bombaSeg`. Se explodir, os Rebeldes vencem o round.
 //   - Desarmar: qualquer pulseira da equipe dos Agentes mantém a leitura no checkpoint da bomba por `desarmarMs`.
@@ -327,19 +327,6 @@ async function definirNumeroJogador(eventoId, criancaId, numero) {
   await query('UPDATE crianca SET numeroJogador = @numero WHERE criancaId = @criancaId', { numero: valor, criancaId });
 }
 
-async function sortearPortador(round, eventoId) {
-  const candidatos = await allQuery(
-    `SELECT c.criancaId, c.numeroJogador FROM crianca c
-     WHERE LOWER(c.eventoId) = LOWER(@eventoId) AND c.timeId = @timeId
-       AND c.numeroJogador IS NOT NULL AND ${JOGADOR_ATIVO}`,
-    { eventoId, timeId: round.timeTrId }
-  );
-  if (candidatos.length === 0) {
-    throw erroHttp('A equipe dos Rebeldes não tem jogadores numerados. Numere os jogadores antes de iniciar o round.', 409);
-  }
-  return candidatos[Math.floor(Math.random() * candidatos.length)];
-}
-
 // ---------- partida ----------
 
 async function pararPartidasDoEvento(eventoId, status = 'cancelada') {
@@ -470,15 +457,14 @@ async function iniciarRound(partidaId) {
   const round = await buscarRoundAtual(partidaId);
   if (!round || round.status !== 'aguardando') throw erroHttp('Não há round aguardando para iniciar', 409);
 
-  const portador = await sortearPortador(round, partida.eventoId);
+  // Qualquer jogador dos Rebeldes pode plantar: não há portador sorteado.
   const resultado = await query(
-    `UPDATE roundBomba SET status = 'em_andamento', iniciadoEm = @agora,
-       portadorCriancaId = @portadorCriancaId, portadorNumero = @portadorNumero
+    `UPDATE roundBomba SET status = 'em_andamento', iniciadoEm = @agora
      WHERE roundId = @roundId AND status = 'aguardando'`,
-    { roundId: round.roundId, portadorCriancaId: portador.criancaId, portadorNumero: portador.numeroJogador, agora: new Date() }
+    { roundId: round.roundId, agora: new Date() }
   );
   if (!Number(resultado?.rowsAffected?.[0] || 0)) throw erroHttp('O round já foi iniciado', 409);
-  console.log(`🎮 [BOMBA] Round ${round.numero} iniciado | portador: jogador nº ${portador.numeroJogador} | duração ${partida.duracaoRoundSeg}s, bomba ${partida.bombaSeg}s`);
+  console.log(`🎮 [BOMBA] Round ${round.numero} iniciado | duração ${partida.duracaoRoundSeg}s, bomba ${partida.bombaSeg}s`);
 
   limparEmAndamentoDoEvento(partida.eventoId);
   const estado = await calcularEstado(partida.eventoId);
@@ -657,12 +643,9 @@ async function processarLeitura({ checkpointId, uid }) {
 
   const base = { round: round.numero, lado, totalBombaSeg: partidaAtual.bombaSeg };
 
-  // ----- bomba ainda não plantada: só o portador sorteado planta -----
+  // ----- bomba ainda não plantada: qualquer jogador dos Rebeldes planta -----
   if (round.status === 'em_andamento') {
     if (lado === 'ct') return negado('ct_sem_bomba', 'A bomba ainda não foi plantada', base);
-    if (!mesmoId(crianca.criancaId, round.portadorCriancaId)) {
-      return negado('nao_e_portador', `Só o jogador nº ${round.portadorNumero} pode plantar a bomba`, base);
-    }
     const progresso = avancarLeitura(checkpoint, crianca, round, 'plantar', agora);
     if (progresso < partidaAtual.plantarMs) {
       registrarFimDaLeitura(checkpoint.checkpointId);
