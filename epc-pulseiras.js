@@ -1,12 +1,11 @@
-// epc-pulseiras.js - Lista o EPC que deve ser gravado em cada pulseira (para regravar as tags UHF)
+// epc-pulseiras.js - Lista qual EPC (tag UHF) está vinculado a cada pulseira da empresa
 //
-// Padrão: EPC = código da pulseira em hex, completado com zeros à esquerda até 24 caracteres (96 bits).
+// O vínculo é feito na tela /admin/uhf (Pulseiras UHF). Pulseiras sem EPC aparecem com a coluna vazia.
 // Uso: node epc-pulseiras.js <empresaId> [arquivo.csv]
-//   Sem arquivo, imprime o CSV na tela. Códigos que não cabem no padrão aparecem com o motivo.
+//   Sem arquivo, imprime o CSV na tela.
 require('dotenv').config();
 const fs = require('fs');
 const { allQuery } = require('./database');
-const { epcDoCodigo, codigoDoEpc } = require('./utils/uhfLote');
 
 async function main() {
   const [empresaId, arquivo] = process.argv.slice(2);
@@ -14,21 +13,13 @@ async function main() {
     console.log('Uso: node epc-pulseiras.js <empresaId> [arquivo.csv]');
     process.exit(1);
   }
-  const pulseiras = await allQuery('SELECT codigo, status FROM pulseira WHERE empresaId = @empresaId ORDER BY codigo', { empresaId });
-  const linhas = ['codigo;epc;status;observacao'];
-  const vistos = new Map();
-  for (const p of pulseiras) {
-    const epc = epcDoCodigo(p.codigo);
-    let observacao = '';
-    if (!epc) observacao = 'código inválido para EPC (só 0-9/A-F, até 24 caracteres)';
-    else if (vistos.has(codigoDoEpc(epc))) observacao = `mesmo EPC da pulseira ${vistos.get(codigoDoEpc(epc))}`;
-    if (epc) vistos.set(codigoDoEpc(epc), p.codigo);
-    linhas.push([p.codigo, epc, p.status, observacao].join(';'));
-  }
+  const pulseiras = await allQuery('SELECT codigo, epc, status FROM pulseira WHERE empresaId = @empresaId ORDER BY epc NULLS LAST, codigo', { empresaId });
+  const linhas = ['codigo;epc;status', ...pulseiras.map((p) => [p.codigo, p.epc || '', p.status].join(';'))];
   const csv = linhas.join('\n') + '\n';
   if (arquivo) {
     fs.writeFileSync(arquivo, csv);
-    console.log(`✅ ${pulseiras.length} pulseira(s) em ${arquivo}`);
+    const vinculadas = pulseiras.filter((p) => p.epc).length;
+    console.log(`✅ ${pulseiras.length} pulseira(s), ${vinculadas} com EPC, em ${arquivo}`);
   } else {
     process.stdout.write(csv);
   }

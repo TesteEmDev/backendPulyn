@@ -2,8 +2,9 @@
 //
 // Cada leitor lê a cada 1,2 s (um ciclo) e, a cada 16 ciclos (~20 s), manda um lote com o resumo por (pulseira, porta):
 // em quantos ciclos ela apareceu (n), a média do melhor RSSI de cada ciclo e o maior RSSI da janela.
-// O EPC gravado na pulseira é o código dela completado com zeros à esquerda até 24 caracteres hex; aqui o EPC volta a
-// ser o código (sem os zeros), que é como a pulseira está na tabela `pulseira`.
+// A tag é guardada como o EPC sem zeros à esquerda (codigoDoEpc). Qual pulseira ela é vem de `pulseira.epc`
+// (vínculo feito em /admin/uhf, ex.: ABCABC000000000000000010) ou, no padrão antigo, do próprio código NFC
+// completado com zeros à esquerda até 24 hex.
 // Funções puras: o acesso ao banco fica em routes/uhf.js.
 const crypto = require('crypto');
 const { normalizeUid } = require('./uid');

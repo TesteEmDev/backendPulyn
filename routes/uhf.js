@@ -10,10 +10,11 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const {
-  validarLote, baldeDe, momentoDoLote, gerarChave, hashChave, chaveConfere, CICLO_MS, CICLOS_POR_JANELA, PORTAS,
+  validarLote, baldeDe, momentoDoLote, gerarChave, hashChave, chaveConfere, codigoDoEpc, epcDoCodigo,
+  CICLO_MS, CICLOS_POR_JANELA, PORTAS,
 } = require('../utils/uhfLote');
 const { ajustarCalibracao } = require('../utils/uhfPosicao');
-const { montarMapa, invalidarMapa, LEITOR_ONLINE_MS } = require('../utils/uhfMapa');
+const { montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras, LEITOR_ONLINE_MS } = require('../utils/uhfMapa');
 
 const ADMIN = ['admin', 'master'];
 const VER_MAPA = ['admin', 'master', 'game_master'];
@@ -394,6 +395,92 @@ router.post('/antenas/:id/calibrar', verifyToken, requireRole(...ADMIN), async (
     res.json(resultado);
   } catch (err) {
     responderErro(res, err, 'Erro ao calibrar antena');
+  }
+});
+
+// ---------- vínculo pulseira <-> EPC ----------
+
+// Tags lidas pelos leitores nos últimos 2 minutos (uma por tag, a mais recente primeiro), com a pulseira já vinculada.
+router.get('/tags-vistas', verifyToken, requireRole(...ADMIN), async (req, res) => {
+  try {
+    const empresaId = resolveEmpresaId(req);
+    const [amostras, antenas, pulseiras] = await Promise.all([
+      allQuery(
+        'SELECT balde, antenaId, codigo, n, rssiMax FROM amostraUhf WHERE empresaId = @empresaId AND balde > @desde',
+        { empresaId, desde: new Date(Date.now() - 2 * 60 * 1000) }
+      ),
+      buscarAntenas(empresaId),
+      buscarPulseiras(empresaId),
+    ]);
+    const nomeDaAntena = new Map(antenas.map((a) => [String(a.antenaId).toLowerCase(), a.nome || `${a.leitorNome} · porta ${a.porta}`]));
+    const porTag = new Map();
+    for (const s of amostras) {
+      const atual = porTag.get(s.codigo) || { tag: s.codigo, ultimaVez: s.balde, rssiMax: -Infinity, n: 0, antenas: new Set() };
+      if (new Date(s.balde) > new Date(atual.ultimaVez)) atual.ultimaVez = s.balde;
+      atual.rssiMax = Math.max(atual.rssiMax, Number(s.rssiMax));
+      atual.n += Number(s.n);
+      atual.antenas.add(nomeDaAntena.get(String(s.antenaId).toLowerCase()) || 'antena removida');
+      porTag.set(s.codigo, atual);
+    }
+    const tags = [...porTag.values()]
+      .sort((a, b) => new Date(b.ultimaVez) - new Date(a.ultimaVez) || b.rssiMax - a.rssiMax)
+      .slice(0, 50)
+      .map((t) => {
+        const pulseira = pulseiras.get(t.tag);
+        return {
+          tag: t.tag, epc: epcDoCodigo(t.tag), ultimaVez: new Date(t.ultimaVez).toISOString(), rssiMax: t.rssiMax, n: t.n,
+          antenas: [...t.antenas],
+          pulseira: pulseira ? { codigo: pulseira.codigo, nome: pulseira.apelido || pulseira.nome || null } : null,
+        };
+      });
+    res.json(tags);
+  } catch (err) {
+    responderErro(res, err, 'Erro ao buscar tags vistas');
+  }
+});
+
+router.get('/pulseiras', verifyToken, requireRole(...ADMIN), async (req, res) => {
+  try {
+    const linhas = await allQuery(
+      `SELECT p.codigo, p.epc, p.status, c.nome, c.apelido
+         FROM pulseira p LEFT JOIN crianca c ON c.criancaId = p.criancaId
+        WHERE p.empresaId = @empresaId
+        ORDER BY p.codigo`,
+      { empresaId: resolveEmpresaId(req) }
+    );
+    res.json(linhas.map((l) => ({ codigo: l.codigo, epc: l.epc || null, status: l.status, crianca: l.apelido || l.nome || null })));
+  } catch (err) {
+    responderErro(res, err, 'Erro ao listar pulseiras');
+  }
+});
+
+// { epc: 'ABCABC000000000000000010' } vincula; { epc: null } desvincula.
+router.put('/pulseiras/:codigo/epc', verifyToken, requireRole(...ADMIN), async (req, res) => {
+  try {
+    const empresaId = resolveEmpresaId(req);
+    const pulseira = await queryOne(
+      'SELECT codigo FROM pulseira WHERE empresaId = @empresaId AND UPPER(codigo) = UPPER(@codigo)',
+      { empresaId, codigo: String(req.params.codigo || '') }
+    );
+    if (!pulseira) throw erroHttp('Pulseira não encontrada', 404);
+
+    let epc = null;
+    if (req.body?.epc) {
+      epc = epcDoCodigo(req.body.epc);
+      if (!epc || !codigoDoEpc(epc)) throw erroHttp('EPC inválido: use até 24 caracteres hexadecimais (0-9, A-F)', 400);
+      const outra = await queryOne(
+        'SELECT codigo FROM pulseira WHERE empresaId = @empresaId AND epc = @epc AND codigo <> @codigo',
+        { empresaId, epc, codigo: pulseira.codigo }
+      );
+      if (outra) throw erroHttp(`Este EPC já está vinculado à pulseira ${outra.codigo}`, 409);
+    }
+
+    await query('UPDATE pulseira SET epc = @epc WHERE empresaId = @empresaId AND codigo = @codigo', { epc, empresaId, codigo: pulseira.codigo });
+    invalidarMapa(empresaId);
+    res.json({ codigo: pulseira.codigo, epc });
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Este EPC já está vinculado a outra pulseira' });
+    responderErro(res, err, 'Erro ao vincular EPC');
   }
 });
 

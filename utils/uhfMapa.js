@@ -133,16 +133,24 @@ async function buscarEscala(empresaId) {
   return escalaValida(empresa?.mapaMetrosPorUnidade);
 }
 
-// Pulseiras da empresa com a criança vinculada, indexadas pelo código sem zeros à esquerda (como vem do EPC).
+// Pulseiras da empresa com a criança vinculada, indexadas pela tag como ela vem do lote (EPC sem zeros à esquerda):
+// pelo EPC vinculado em /admin/uhf e também pelo código NFC (padrão antigo: EPC = código com zeros à esquerda).
 async function buscarPulseiras(empresaId) {
   const linhas = await allQuery(
-    `SELECT p.codigo, c.criancaId, c.nome, c.apelido, c.avatar, c.timeId, c.eventoId
+    `SELECT p.codigo, p.epc, c.criancaId, c.nome, c.apelido, c.avatar, c.timeId, c.eventoId
        FROM pulseira p LEFT JOIN crianca c ON c.criancaId = p.criancaId
       WHERE p.empresaId = @empresaId`,
     { empresaId }
   );
   const mapa = new Map();
-  for (const linha of linhas) mapa.set(codigoDoEpc(linha.codigo), linha);
+  for (const linha of linhas) {
+    const pelaTag = codigoDoEpc(linha.codigo);
+    if (pelaTag && !mapa.has(pelaTag)) mapa.set(pelaTag, linha);
+  }
+  for (const linha of linhas) {
+    const pelaTag = linha.epc ? codigoDoEpc(linha.epc) : '';
+    if (pelaTag) mapa.set(pelaTag, linha);   // o vínculo explícito ganha do padrão antigo
+  }
   return mapa;
 }
 
@@ -230,7 +238,7 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
     criancas: atual.posicoes.map((p) => {
       const pulseira = pulseiras.get(p.codigo);
       return {
-        codigo: p.codigo, criancaId: pulseira?.criancaId || null, nome: pulseira?.apelido || pulseira?.nome || null,
+        codigo: pulseira?.codigo || p.codigo, tag: p.codigo, criancaId: pulseira?.criancaId || null, nome: pulseira?.apelido || pulseira?.nome || null,
         avatar: pulseira?.avatar || null, timeId: pulseira?.timeId || null, eventoId: pulseira?.eventoId || null,
         x: Math.round(p.x * 10) / 10, y: Math.round(p.y * 10) / 10, metodo: p.metodo, confianca: p.confianca, antenas: p.antenas,
       };

@@ -5,6 +5,7 @@
 // loteUhf:    cada lote recebido (leitor + seq), para não gravar o mesmo lote duas vezes.
 // amostraUhf: resumo de uma pulseira numa antena numa janela de 20 s (balde). Fica 7 dias.
 // empresa.mapaMetrosPorUnidade: escala da planta, para os cálculos em metros.
+// pulseira.epc: EPC gravado na tag UHF da pulseira (24 hex), vinculado na tela /admin/uhf.
 const { query, DB_DRIVER } = require('../database');
 
 async function ensureUhfSchema() {
@@ -12,6 +13,8 @@ async function ensureUhfSchema() {
   if (!isPostgres) return;   // só o PostgreSQL/Supabase usa os leitores UHF
 
   await query('ALTER TABLE empresa ADD COLUMN IF NOT EXISTS mapaMetrosPorUnidade numeric');
+  await query('ALTER TABLE pulseira ADD COLUMN IF NOT EXISTS epc varchar(24)');
+  await query('CREATE UNIQUE INDEX IF NOT EXISTS ux_pulseira_empresa_epc ON pulseira (empresaId, epc) WHERE epc IS NOT NULL');
 
   await query(`
     CREATE TABLE IF NOT EXISTS leitorUhf (
