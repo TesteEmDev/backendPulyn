@@ -35,6 +35,16 @@ function baldeDe(data, janelaMs = JANELA_MS) {
   return new Date(Math.floor(ms / janelaMs) * janelaMs);
 }
 
+// Momento do lote: o fim da janela informado pelo leitor (fimEm, epoch ms pelo relógio do servidor, que o leitor
+// aprende na resposta) ou a hora da chegada. Assim um lote que ficou no SD sem rede cai na janela em que foi lido.
+// fimEm fora de [agora - 24 h, agora + 1 min] é ignorado.
+function momentoDoLote(fimEm, agora = new Date()) {
+  const ms = Number(fimEm);
+  const agoraMs = agora.getTime();
+  if (!Number.isFinite(ms) || ms < agoraMs - 24 * 60 * 60 * 1000 || ms > agoraMs + 60 * 1000) return agora;
+  return new Date(Math.min(ms, agoraMs));
+}
+
 const inteiro = (valor) => (Number.isInteger(Number(valor)) ? Number(valor) : NaN);
 const numero = (valor) => (valor === null || valor === '' || valor === undefined ? NaN : Number(valor));
 
@@ -99,5 +109,5 @@ function chaveConfere(chave, hashGuardado) {
 
 module.exports = {
   EPC_TAMANHO, JANELA_MS, CICLO_MS, CICLOS_POR_JANELA, LIMITE_LEITURAS, PORTAS,
-  codigoDoEpc, epcDoCodigo, baldeDe, validarLote, gerarChave, hashChave, chaveConfere,
+  codigoDoEpc, epcDoCodigo, baldeDe, momentoDoLote, validarLote, gerarChave, hashChave, chaveConfere,
 };

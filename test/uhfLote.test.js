@@ -1,8 +1,19 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  codigoDoEpc, epcDoCodigo, baldeDe, validarLote, gerarChave, hashChave, chaveConfere, LIMITE_LEITURAS,
+  codigoDoEpc, epcDoCodigo, baldeDe, momentoDoLote, validarLote, gerarChave, hashChave, chaveConfere, LIMITE_LEITURAS,
 } = require('../utils/uhfLote');
+
+test('momento do lote: usa o fimEm do leitor só se for plausível', () => {
+  const agora = new Date('2026-10-16T18:10:00.000Z');
+  const fimEm = Date.parse('2026-10-16T18:02:19.500Z');   // lote que ficou no SD por 8 min
+  assert.equal(momentoDoLote(fimEm, agora).toISOString(), '2026-10-16T18:02:19.500Z');
+  assert.equal(momentoDoLote(agora.getTime() + 30000, agora).toISOString(), agora.toISOString());   // relógio adiantado: limita em agora
+  assert.equal(momentoDoLote(agora.getTime() + 5 * 60000, agora), agora);
+  assert.equal(momentoDoLote(agora.getTime() - 25 * 60 * 60000, agora), agora);
+  assert.equal(momentoDoLote(undefined, agora), agora);
+  assert.equal(momentoDoLote('abc', agora), agora);
+});
 
 test('EPC de 24 hex volta a ser o código da pulseira sem os zeros', () => {
   assert.equal(codigoDoEpc('0000000000040FE75ABB2191'), '40FE75ABB2191');

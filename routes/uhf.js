@@ -9,7 +9,7 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const {
-  validarLote, baldeDe, gerarChave, hashChave, chaveConfere, CICLO_MS, CICLOS_POR_JANELA, PORTAS,
+  validarLote, baldeDe, momentoDoLote, gerarChave, hashChave, chaveConfere, CICLO_MS, CICLOS_POR_JANELA, PORTAS,
 } = require('../utils/uhfLote');
 const { ajustarCalibracao } = require('../utils/uhfPosicao');
 const { montarMapa, invalidarMapa, LEITOR_ONLINE_MS } = require('../utils/uhfMapa');
@@ -78,7 +78,7 @@ router.post('/lote', async (req, res) => {
     if (lote.erro) return res.status(lote.status || 400).json({ error: lote.erro });
 
     const agora = new Date();
-    const balde = baldeDe(agora);
+    const balde = baldeDe(momentoDoLote(req.body.fimEm, agora));
     const antenas = await allQuery('SELECT antenaId, porta, ativa FROM antenaUhf WHERE leitorId = @leitorId', { leitorId: leitor.leitorId });
     const antenaPorPorta = new Map(antenas.filter((a) => a.ativa).map((a) => [Number(a.porta), a.antenaId]));
     const leituras = lote.leituras.filter((l) => antenaPorPorta.has(l.porta));
@@ -138,6 +138,7 @@ router.post('/lote', async (req, res) => {
     res.json({
       ok: true, seq: lote.seq, duplicado, aceitas: duplicado ? 0 : leituras.length,
       ignoradas: lote.ignoradas + semAntena, config: configDoLeitor(leitor),
+      agoraMs: Date.now(),   // o leitor acerta o relógio por aqui e manda o fimEm dos próximos lotes
     });
   } catch (err) {
     responderErro(res, err, 'Erro ao receber lote');
