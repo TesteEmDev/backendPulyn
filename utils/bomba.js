@@ -16,6 +16,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { normalizeUid, uidSqlExpression } = require('./uid');
 const { criarCache } = require('./cacheCurto');
+const { explosaoDaBombaEm, restanteDaBomba } = require('./bombaTempo');
 
 const BOMBA_GAME_TYPE = 'bomb_defusal';
 
@@ -544,11 +545,13 @@ async function avaliarRound(partida, round, agora = new Date()) {
   if (!round || !partida || partida.status !== 'em_andamento') return round;
 
   if (round.status === 'bomba_plantada' && round.plantadaEm) {
-    if (agora.getTime() >= new Date(round.plantadaEm).getTime() + partida.bombaSeg * 1000) {
+    // A contagem da bomba só começa depois do som de "bomba plantada" (ver utils/bombaTempo.js).
+    const explosaoEm = explosaoDaBombaEm(round.plantadaEm, partida.bombaSeg);
+    if (agora.getTime() >= explosaoEm) {
       // O fim vale o instante da explosão (não o da checagem, que pode atrasar até 1 s): todos os checkpoints
       // contam a vitória a partir dele e tocam juntos.
       await finalizarRound(round, partida, 'tr', 'explodiu', {
-        finalizadoEm: new Date(new Date(round.plantadaEm).getTime() + partida.bombaSeg * 1000),
+        finalizadoEm: new Date(explosaoEm),
       });
       return buscarRoundAtual(partida.partidaId);
     }
@@ -688,7 +691,7 @@ async function processarLeitura({ checkpointId, uid }) {
   if (!mesmoId(checkpoint.checkpointId, round.localCheckpointId)) {
     return negado('bomba_em_outro_local', 'A bomba foi plantada em outro local', base);
   }
-  const restante = restanteMs(round.plantadaEm, partidaAtual.bombaSeg * 1000, agora);
+  const restante = restanteDaBomba(round.plantadaEm, partidaAtual.bombaSeg, agora);
   if (lado === 'tr') return negado('tr_no_local', 'Defenda a bomba: sua equipe não pode desarmá-la', { ...base, restanteBombaMs: restante });
 
   const progresso = avancarLeitura(checkpoint, crianca, round, 'desarmar', agora);
@@ -814,7 +817,7 @@ async function calcularEstado(eventoId) {
       localCheckpointId: round.localCheckpointId,
       local: localPor(round.localCheckpointId),
       restanteRoundMs: round.status === 'em_andamento' ? restanteMs(round.iniciadoEm, partida.duracaoRoundSeg * 1000, agora) : null,
-      restanteBombaMs: round.status === 'bomba_plantada' ? restanteMs(round.plantadaEm, partida.bombaSeg * 1000, agora) : null,
+      restanteBombaMs: round.status === 'bomba_plantada' ? restanteDaBomba(round.plantadaEm, partida.bombaSeg, agora) : null,
       vencedorTimeId: round.vencedorTimeId,
       motivo: round.motivo,
     } : null,
@@ -902,7 +905,7 @@ async function obterEstadoCheckpoint(checkpointId) {
   }
   if (round && round.status === 'bomba_plantada') {
     const ehLocal = mesmoId(checkpoint.checkpointId, round.localCheckpointId);
-    return { ...base, fase: ehLocal ? 'plantada' : 'bloqueado', ehLocal, restanteBombaMs: restanteMs(round.plantadaEm, partida.bombaSeg * 1000, agora) };
+    return { ...base, fase: ehLocal ? 'plantada' : 'bloqueado', ehLocal, restanteBombaMs: restanteDaBomba(round.plantadaEm, partida.bombaSeg, agora) };
   }
 
   // Round aguardando: mostra por alguns segundos como o round anterior terminou.
