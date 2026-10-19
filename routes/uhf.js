@@ -11,10 +11,12 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const {
   validarLote, baldeDe, momentoDoLote, gerarChave, hashChave, chaveConfere, codigoDoEpc, epcDoCodigo,
-  CICLO_MS, CICLOS_POR_JANELA, PORTAS,
+  CICLO_MS, CICLOS_POR_LOTE, PORTAS,
 } = require('../utils/uhfLote');
 const { ajustarCalibracao } = require('../utils/uhfPosicao');
-const { montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras, LEITOR_ONLINE_MS } = require('../utils/uhfMapa');
+const {
+  montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras, buscarCiclos, chaveCiclos, LEITOR_ONLINE_MS,
+} = require('../utils/uhfMapa');
 
 const ADMIN = ['admin', 'master'];
 const VER_MAPA = ['admin', 'master', 'game_master'];
@@ -43,7 +45,7 @@ function moduleIdValido(valor) {
 }
 
 function configDoLeitor(leitor) {
-  return { cicloMs: CICLO_MS, janelaCiclos: CICLOS_POR_JANELA, potenciaDbm: Number(leitor.potenciaDbm), rssiMin: Number(leitor.rssiMin) };
+  return { cicloMs: CICLO_MS, janelaCiclos: CICLOS_POR_LOTE, potenciaDbm: Number(leitor.potenciaDbm), rssiMin: Number(leitor.rssiMin) };
 }
 
 // ---------- firmware ----------
@@ -89,30 +91,31 @@ router.post('/lote', async (req, res) => {
 
     const duplicado = await withTransaction(async (tx) => {
       const novo = await tx.query(
-        `INSERT INTO loteUhf (leitorId, seq, recebidoEm, balde, total) VALUES (@leitorId, @seq, @agora, @balde, @total)
+        `INSERT INTO loteUhf (leitorId, seq, recebidoEm, balde, total, ciclos) VALUES (@leitorId, @seq, @agora, @balde, @total, @ciclos)
          ON CONFLICT (leitorId, seq) DO NOTHING`,
-        { leitorId: leitor.leitorId, seq: lote.seq, agora, balde, total: leituras.length }
+        { leitorId: leitor.leitorId, seq: lote.seq, agora, balde, total: leituras.length, ciclos: lote.ciclos }
       );
       if (!Number(novo?.rowsAffected?.[0] || 0)) return true;
 
       if (leituras.length) {
-        const params = { balde, empresaId: leitor.empresaId };
+        const params = { balde, empresaId: leitor.empresaId, agora };
         const valores = leituras.map((l, i) => {
           Object.assign(params, {
             [`a${i}`]: antenaPorPorta.get(l.porta), [`c${i}`]: l.codigo, [`n${i}`]: l.n,
             [`m${i}`]: l.rssiMed, [`x${i}`]: l.rssiMax,
           });
-          return `(@balde, @a${i}, @c${i}, @empresaId, @n${i}, ${lote.ciclos}, @m${i}, @x${i})`;
+          return `(@balde, @a${i}, @c${i}, @empresaId, @n${i}, ${lote.ciclos}, @m${i}, @x${i}, @agora)`;
         });
-        // Dois lotes do mesmo leitor na mesma janela: soma os ciclos e faz a média do RSSI ponderada por n.
+        // Vários lotes do mesmo leitor na mesma janela: soma n e os ciclos e faz a média do RSSI ponderada por n.
         await tx.query(
-          `INSERT INTO amostraUhf (balde, antenaId, codigo, empresaId, n, ciclos, rssiMed, rssiMax)
+          `INSERT INTO amostraUhf (balde, antenaId, codigo, empresaId, n, ciclos, rssiMed, rssiMax, vistoEm)
            VALUES ${valores.join(', ')}
            ON CONFLICT (balde, antenaId, codigo) DO UPDATE SET
              rssiMed = (amostraUhf.rssiMed * amostraUhf.n + EXCLUDED.rssiMed * EXCLUDED.n) / (amostraUhf.n + EXCLUDED.n),
              n = amostraUhf.n + EXCLUDED.n,
              ciclos = amostraUhf.ciclos + EXCLUDED.ciclos,
-             rssiMax = GREATEST(amostraUhf.rssiMax, EXCLUDED.rssiMax)`,
+             rssiMax = GREATEST(amostraUhf.rssiMax, EXCLUDED.rssiMax),
+             vistoEm = GREATEST(amostraUhf.vistoEm, EXCLUDED.vistoEm)`,
           params
         );
       }
@@ -369,12 +372,19 @@ router.get('/antenas/:id/leituras', verifyToken, requireRole(...ADMIN), async (r
   try {
     const empresaId = resolveEmpresaId(req);
     const antena = await buscarAntenaDaEmpresa(req.params.id, empresaId);
-    const leituras = await allQuery(
-      `SELECT balde, codigo, n, ciclos, rssiMed, rssiMax FROM amostraUhf
-        WHERE antenaId = @antenaId AND balde > @desde ORDER BY balde DESC, rssiMed DESC LIMIT 20`,
-      { antenaId: antena.antenaId, desde: new Date(Date.now() - 60 * 1000) }
-    );
-    res.json(leituras.map((l) => ({ ...l, n: Number(l.n), ciclos: Number(l.ciclos), rssiMed: Number(l.rssiMed), rssiMax: Number(l.rssiMax) })));
+    const desde = new Date(Date.now() - 60 * 1000);
+    const [leituras, ciclos] = await Promise.all([
+      allQuery(
+        `SELECT balde, codigo, n, ciclos, rssiMed, rssiMax FROM amostraUhf
+          WHERE antenaId = @antenaId AND balde > @desde ORDER BY balde DESC, rssiMed DESC LIMIT 20`,
+        { antenaId: antena.antenaId, desde }
+      ),
+      buscarCiclos(empresaId, desde, new Date()),
+    ]);
+    res.json(leituras.map((l) => ({
+      ...l, n: Number(l.n), rssiMed: Number(l.rssiMed), rssiMax: Number(l.rssiMax),
+      ciclos: Math.max(Number(l.ciclos), ciclos.get(chaveCiclos(antena.leitorId, l.balde)) || 0),
+    })));
   } catch (err) {
     responderErro(res, err, 'Erro ao buscar leituras da antena');
   }
@@ -406,7 +416,8 @@ router.get('/tags-vistas', verifyToken, requireRole(...ADMIN), async (req, res) 
     const empresaId = resolveEmpresaId(req);
     const [amostras, antenas, pulseiras] = await Promise.all([
       allQuery(
-        'SELECT balde, antenaId, codigo, n, rssiMax FROM amostraUhf WHERE empresaId = @empresaId AND balde > @desde',
+        `SELECT COALESCE(vistoEm, balde) AS balde, antenaId, codigo, n, rssiMax FROM amostraUhf
+          WHERE empresaId = @empresaId AND balde > @desde`,
         { empresaId, desde: new Date(Date.now() - 2 * 60 * 1000) }
       ),
       buscarAntenas(empresaId),

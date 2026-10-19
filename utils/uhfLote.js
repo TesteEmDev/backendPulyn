@@ -1,7 +1,10 @@
 // utils/uhfLote.js - Lote de leituras enviado pelos leitores UHF (Chainway UR4)
 //
-// Cada leitor lê a cada 1,2 s (um ciclo) e, a cada 16 ciclos (~20 s), manda um lote com o resumo por (pulseira, porta):
-// em quantos ciclos ela apareceu (n), a média do melhor RSSI de cada ciclo e o maior RSSI da janela.
+// Cada leitor fecha um ciclo a cada 0,5 s e manda um lote por ciclo (2 por segundo) com o resumo por (pulseira, porta):
+// em quantos ciclos ela apareceu (n), a média do melhor RSSI de cada ciclo e o maior RSSI. Sem rede (ou com o envio
+// atrasado) o leitor junta mais ciclos num lote só; `ciclos` diz quantos.
+// O servidor soma os lotes em janelas de 20 s (balde): amostraUhf por (pulseira, antena) e loteUhf.ciclos por leitor,
+// que é o total de ciclos da janela (a presença é n / esse total).
 // A tag é guardada como o EPC sem zeros à esquerda (codigoDoEpc). Qual pulseira ela é vem de `pulseira.epc`
 // (vínculo feito em /admin/uhf, ex.: ABCABC000000000000000010) ou, no padrão antigo, do próprio código NFC
 // completado com zeros à esquerda até 24 hex.
@@ -11,8 +14,8 @@ const { normalizeUid } = require('./uid');
 
 const EPC_TAMANHO = 24;
 const JANELA_MS = 20000;          // o mapa é recalculado a cada 20 s
-const CICLO_MS = 1200;            // uma leitura a cada 1,2 s
-const CICLOS_POR_JANELA = 16;     // 16 x 1,2 s = 19,2 s
+const CICLO_MS = 500;             // um ciclo a cada 0,5 s
+const CICLOS_POR_LOTE = 1;        // um lote por ciclo = 2 lotes por segundo
 const LIMITE_LEITURAS = 300;      // leituras por lote
 const PORTAS = [1, 2, 3, 4];
 
@@ -59,7 +62,7 @@ function validarLote(corpo, { rssiMin = -Infinity } = {}) {
   const seq = inteiro(corpo.seq);
   if (!Number.isFinite(seq) || seq < 0) return { erro: 'seq deve ser um inteiro >= 0' };
 
-  const ciclos = inteiro(corpo.ciclos ?? CICLOS_POR_JANELA);
+  const ciclos = inteiro(corpo.ciclos ?? CICLOS_POR_LOTE);
   if (!Number.isFinite(ciclos) || ciclos < 1 || ciclos > 100) return { erro: 'ciclos deve estar entre 1 e 100' };
 
   const lista = corpo.leituras ?? [];
@@ -109,6 +112,6 @@ function chaveConfere(chave, hashGuardado) {
 }
 
 module.exports = {
-  EPC_TAMANHO, JANELA_MS, CICLO_MS, CICLOS_POR_JANELA, LIMITE_LEITURAS, PORTAS,
+  EPC_TAMANHO, JANELA_MS, CICLO_MS, CICLOS_POR_LOTE, LIMITE_LEITURAS, PORTAS,
   codigoDoEpc, epcDoCodigo, baldeDe, momentoDoLote, validarLote, gerarChave, hashChave, chaveConfere,
 };

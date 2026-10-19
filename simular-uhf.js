@@ -5,10 +5,10 @@
 //
 // Cadastre os leitores em /admin/uhf, posicione as antenas e copie o ID do módulo e a chave mostrados ao criar.
 // O simulador lê do banco (mesmo .env do backend) a posição das antenas e as pulseiras da empresa, faz as crianças
-// andarem pela planta e manda um lote por leitor a cada 20 s (ou a cada 2 s com --rapido), como o firmware faria.
+// andarem pela planta e manda um lote por leitor a cada 0,5 s (10 vezes mais rápido com --rapido), como o firmware faria.
 require('dotenv').config();
 const { allQuery, queryOne } = require('./database');
-const { epcDoCodigo, CICLOS_POR_JANELA, JANELA_MS } = require('./utils/uhfLote');
+const { epcDoCodigo, CICLO_MS, CICLOS_POR_LOTE } = require('./utils/uhfLote');
 const { ESCALA_PADRAO } = require('./utils/uhfMapa');
 
 function argumentos() {
@@ -62,7 +62,7 @@ async function main() {
   });
   console.log(`👧 ${criancas.length} pulseira(s) andando numa planta de ${largura.toFixed(1)} x ${altura.toFixed(1)} m`);
 
-  const intervaloCiclo = (opcoes.rapido ? 2000 : JANELA_MS) / CICLOS_POR_JANELA;
+  const intervaloCiclo = opcoes.rapido ? CICLO_MS / 10 : CICLO_MS;
   const acumulado = new Map(leitores.map((l) => [l.modulo, new Map()]));
 
   for (let ciclo = 1; ; ciclo += 1) {
@@ -86,7 +86,7 @@ async function main() {
       }
     }
 
-    if (ciclo % CICLOS_POR_JANELA === 0) {
+    if (ciclo % CICLOS_POR_LOTE === 0) {
       for (const leitor of leitores) {
         const porChave = acumulado.get(leitor.modulo);
         const leituras = [...porChave.values()].map((l) => ({ epc: l.epc, ant: l.ant, n: l.n, rssiMed: Math.round((l.soma / l.n) * 10) / 10, rssiMax: l.rssiMax }));
@@ -96,7 +96,7 @@ async function main() {
           const resposta = await fetch(`${opcoes.url}/api/uhf/lote`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-Module-Id': leitor.modulo, 'X-Device-Key': leitor.chave },
-            body: JSON.stringify({ seq: leitor.seq, fw: 'simulador', ciclos: CICLOS_POR_JANELA, portas: [1, 2, 3, 4], leituras }),
+            body: JSON.stringify({ seq: leitor.seq, fw: 'simulador', ciclos: CICLOS_POR_LOTE, portas: [1, 2, 3, 4], leituras }),
           });
           const corpo = await resposta.json();
           console.log(`${new Date().toLocaleTimeString()} ${leitor.modulo} seq ${leitor.seq}: ${resposta.status} aceitas ${corpo.aceitas ?? '-'} ${corpo.error || ''}`);

@@ -17,6 +17,7 @@ const CELULAS_MAX = 150000;
 const VALOR_MINIMO = 0.02;         // pulseiras/m² abaixo disso não vão para a resposta
 
 const emMs = (data) => new Date(data).getTime();
+const chaveCiclos = (leitorId, balde) => `${String(leitorId).toLowerCase()}|${emMs(balde)}`;
 
 function escalaValida(escala) {
   const valor = Number(escala);
@@ -39,9 +40,11 @@ function ultimoBaldeFechado(agora = new Date()) {
  * (os leitores não são sincronizados), do balde anterior.
  *   antenas:  [{ antenaId, leitorId, mapaX, mapaY, direcaoGraus, raioMetros, rssi1m, expoente, ativa }]
  *   amostras: [{ balde, antenaId, codigo, n, ciclos, rssiMed }]
+ *   ciclos:   Map chaveCiclos(leitorId, balde) -> total de ciclos do leitor no balde (buscarCiclos). A amostra só soma
+ *             os lotes em que a pulseira apareceu; sem este total, uma pulseira lida em 1 de 40 lotes teria presença 1.
  *   incluir(codigo) -> boolean: filtro opcional (evento, time)
  */
-function calcularBalde({ antenas, amostras, balde, escala, incluir = () => true }) {
+function calcularBalde({ antenas, amostras, balde, escala, ciclos = new Map(), incluir = () => true }) {
   const escalaM = escalaValida(escala) || ESCALA_PADRAO;
   const larguraM = LARGURA_MAPA * escalaM;
   const alturaM = ALTURA_MAPA * escalaM;
@@ -77,7 +80,7 @@ function calcularBalde({ antenas, amostras, balde, escala, incluir = () => true 
       rssi1m: antena.rssi1m === null || antena.rssi1m === undefined ? null : Number(antena.rssi1m),
       expoente: Number(antena.expoente) || undefined,
       n: Number(s.n),
-      ciclos: Number(s.ciclos),
+      ciclos: Math.max(Number(s.ciclos), ciclos.get(chaveCiclos(antena.leitorId, s.balde)) || 0),
       rssiMed: Number(s.rssiMed),
     });
   }
@@ -163,6 +166,18 @@ async function buscarAmostras(empresaId, desde, ate) {
   );
 }
 
+// Total de ciclos de cada leitor em cada balde (soma dos lotes), indexado por chaveCiclos.
+async function buscarCiclos(empresaId, desde, ate) {
+  const linhas = await allQuery(
+    `SELECT l.leitorId, l.balde, SUM(l.ciclos) AS ciclos
+       FROM loteUhf l JOIN leitorUhf r ON r.leitorId = l.leitorId
+      WHERE r.empresaId = @empresaId AND l.balde >= @desde AND l.balde <= @ate AND l.ciclos IS NOT NULL
+      GROUP BY l.leitorId, l.balde`,
+    { empresaId, desde, ate }
+  );
+  return new Map(linhas.map((l) => [chaveCiclos(l.leitorId, l.balde), Number(l.ciclos)]));
+}
+
 // Cache: chave -> { expiraEm, valor }. Um lote novo da empresa apaga o cache dela (invalidarMapa).
 const cache = new Map();
 const CACHE_MS = 5000;
@@ -188,8 +203,9 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
   if (emCache && emCache.expiraEm > Date.now()) return emCache.valor;
 
   const desde = new Date(alvo.getTime() - quantos * JANELA_MS);   // um balde a mais para o "anterior" de cada leitor
-  const [antenas, escala, pulseiras, amostras] = await Promise.all([
+  const [antenas, escala, pulseiras, amostras, ciclos] = await Promise.all([
     buscarAntenas(empresaId), buscarEscala(empresaId), buscarPulseiras(empresaId), buscarAmostras(empresaId, desde, alvo),
+    buscarCiclos(empresaId, desde, alvo),
   ]);
 
   const mesmoId = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
@@ -203,7 +219,7 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
   // Do balde mais antigo para o mais novo.
   const resultados = [];
   for (let i = quantos - 1; i >= 0; i -= 1) {
-    resultados.push(calcularBalde({ antenas, amostras, balde: new Date(alvo.getTime() - i * JANELA_MS), escala, incluir }));
+    resultados.push(calcularBalde({ antenas, amostras, ciclos, balde: new Date(alvo.getTime() - i * JANELA_MS), escala, incluir }));
   }
   const atual = resultados[resultados.length - 1];
   const grade = modo === '5min'
@@ -257,4 +273,5 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
 module.exports = {
   LARGURA_MAPA, ALTURA_MAPA, ESCALA_PADRAO, TOLERANCIA_MS, LEITOR_ONLINE_MS,
   ultimoBaldeFechado, calcularBalde, celulasDaGrade, montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras,
+  buscarCiclos, chaveCiclos,
 };

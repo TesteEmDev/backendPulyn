@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calcularBalde, celulasDaGrade, ultimoBaldeFechado } = require('../utils/uhfMapa');
+const { calcularBalde, celulasDaGrade, ultimoBaldeFechado, chaveCiclos } = require('../utils/uhfMapa');
 
 const balde = new Date('2026-10-16T18:00:00.000Z');
 const anterior = new Date('2026-10-16T17:59:40.000Z');
@@ -27,6 +27,18 @@ test('pulseira vista por duas antenas fica entre elas; leitor sem lote no balde 
   assert.ok(Math.abs(porCodigo['40FE75ABB2191'].x - 120) < 0.01);
   assert.equal(porCodigo.ABC.metodo, 'antena');
   assert.deepEqual([porCodigo.ABC.x, porCodigo.ABC.y], [300, 200]);
+});
+
+test('lotes de 0,5 s: a presença usa o total de ciclos do leitor no balde, não só os lotes em que a pulseira apareceu', () => {
+  const amostras = [
+    { balde, antenaId: 'a1', codigo: 'F1', n: 2, ciclos: 2, rssiMed: -60 },     // lida em 2 dos 40 lotes
+    { balde, antenaId: 'a2', codigo: 'F1', n: 40, ciclos: 40, rssiMed: -60 },   // lida em todos
+  ];
+  const semTotal = calcularBalde({ antenas, balde, escala: 0.05, amostras });
+  assert.ok(Math.abs(semTotal.posicoes[0].x - 120) < 0.01, 'sem o total as duas parecem 100% presentes');
+  const ciclos = new Map([[chaveCiclos('L1', balde), 40]]);
+  const comTotal = calcularBalde({ antenas, balde, escala: 0.05, amostras, ciclos });
+  assert.ok(comTotal.posicoes[0].x > 135, `x ${comTotal.posicoes[0].x}`);
 });
 
 test('ignora antenas sem posição, amostras velhas e o que o filtro exclui', () => {

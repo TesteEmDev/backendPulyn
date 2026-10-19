@@ -4,7 +4,7 @@
 //   { x, y, direcaoGraus, raioMetros, rssi1m, expoente, n, ciclos, rssiMed }
 //   x, y          posição da antena em metros (o mapa converte as unidades da planta com a escala da empresa)
 //   direcaoGraus  para onde a antena aponta no mapa (0 = para cima, 90 = direita); null = teto, apontando para baixo
-//   n / ciclos    em quantos ciclos de 1,2 s a pulseira apareceu nessa antena (taxa de presença)
+//   n / ciclos    em quantos ciclos de 0,5 s da janela a pulseira apareceu nessa antena (taxa de presença)
 // O RSSI de uma pulseira no pulso varia muito com a orientação; por isso a taxa de presença pesa tanto quanto o RSSI.
 //
 // Níveis de estimativa:

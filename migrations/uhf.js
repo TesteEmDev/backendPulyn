@@ -2,7 +2,7 @@
 //
 // leitorUhf:  um UR4 da empresa. O firmware se identifica pelo moduleId + chave (só o hash fica no banco).
 // antenaUhf:  as 4 portas de cada leitor, com a posição na planta (mesmo espaço 450 x 320 dos checkpoints).
-// loteUhf:    cada lote recebido (leitor + seq), para não gravar o mesmo lote duas vezes.
+// loteUhf:    cada lote recebido (leitor + seq), para não gravar o mesmo lote duas vezes, com os ciclos que ele cobre.
 // amostraUhf: resumo de uma pulseira numa antena numa janela de 20 s (balde). Fica 7 dias.
 // empresa.mapaMetrosPorUnidade: escala da planta, para os cálculos em metros.
 // pulseira.epc: EPC gravado na tag UHF da pulseira (24 hex), vinculado na tela /admin/uhf.
@@ -78,6 +78,12 @@ async function ensureUhfSchema() {
   `);
   await query('CREATE INDEX IF NOT EXISTS idx_amostrauhf_empresa_balde ON amostraUhf (empresaId, balde)');
   await query('CREATE INDEX IF NOT EXISTS idx_loteuhf_recebido ON loteUhf (recebidoEm)');
+
+  // Lotes de 0,5 s: o total de ciclos da janela vem da soma dos lotes do leitor (a amostra só soma os lotes em que a
+  // pulseira apareceu). vistoEm = último lote em que a pulseira foi lida, para as telas ao vivo.
+  await query('ALTER TABLE loteUhf ADD COLUMN IF NOT EXISTS ciclos integer');
+  await query('CREATE INDEX IF NOT EXISTS idx_loteuhf_leitor_balde ON loteUhf (leitorId, balde)');
+  await query('ALTER TABLE amostraUhf ADD COLUMN IF NOT EXISTS vistoEm timestamptz');
 }
 
 module.exports = { ensureUhfSchema };
