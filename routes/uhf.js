@@ -512,12 +512,13 @@ router.get('/mapa-calor', verifyToken, requireRole(...VER_MAPA), async (req, res
 
 // ---------- família (app dos pais) ----------
 
-// Crianças aprovadas para este responsável.
+// Crianças aprovadas para este responsável, com o buffet de cada uma. Não filtra pela empresa do login: a conta
+// criada pelo cadastro aberto tem uma "empresa" própria, diferente da do buffet (utils/empresaFamilia.js).
 async function criancasDoResponsavel(req) {
   return allQuery(
-    `SELECT v.criancaId, c.eventoId FROM vinculoFamiliar v JOIN crianca c ON c.criancaId = v.criancaId
-      WHERE v.loginId = @loginId AND v.empresaId = @empresaId AND v.status = 'approved'`,
-    { loginId: req.user.id, empresaId: req.user.empresaId }
+    `SELECT v.criancaId, v.empresaId, c.eventoId FROM vinculoFamiliar v JOIN crianca c ON c.criancaId = v.criancaId
+      WHERE v.loginId = @loginId AND v.status = 'approved'`,
+    { loginId: req.user.id }
   );
 }
 
@@ -526,10 +527,9 @@ router.get('/familia/agregado', verifyToken, requireRole('family'), async (req, 
   try {
     const criancas = await criancasDoResponsavel(req);
     const eventoId = req.query.eventoId || criancas[0]?.eventoId;
-    if (!eventoId || !criancas.some((c) => String(c.eventoId).toLowerCase() === String(eventoId).toLowerCase())) {
-      return res.status(403).json({ error: 'Nenhuma criança sua está neste evento' });
-    }
-    const mapa = await montarMapa(req.user.empresaId, { modo: 'agora', eventoId });
+    const doEvento = eventoId && criancas.find((c) => String(c.eventoId).toLowerCase() === String(eventoId).toLowerCase());
+    if (!doEvento) return res.status(403).json({ error: 'Nenhuma criança sua está neste evento' });
+    const mapa = await montarMapa(doEvento.empresaId, { modo: 'agora', eventoId });
     res.json({ geradoEm: mapa.geradoEm, balde: mapa.balde, proximaAtualizacaoEm: mapa.proximaAtualizacaoEm, largura: mapa.largura, altura: mapa.altura, regioes: mapa.regioes });
   } catch (err) {
     responderErro(res, err, 'Erro ao montar mapa da família');
@@ -544,7 +544,7 @@ router.get('/familia/crianca/:criancaId', verifyToken, requireRole('family'), as
     const vinculo = criancas.find((c) => String(c.criancaId).toLowerCase() === String(req.params.criancaId).toLowerCase());
     if (!vinculo) return res.status(403).json({ error: 'Criança não vinculada a você' });
     const modo = req.query.modo === '5min' ? '5min' : 'agora';
-    const mapa = await montarMapa(req.user.empresaId, { modo, eventoId: vinculo.eventoId, criancaId: vinculo.criancaId });
+    const mapa = await montarMapa(vinculo.empresaId, { modo, eventoId: vinculo.eventoId, criancaId: vinculo.criancaId });
     const posicao = mapa.criancas.find((c) => String(c.criancaId).toLowerCase() === String(vinculo.criancaId).toLowerCase());
     res.json({
       geradoEm: mapa.geradoEm, balde: mapa.balde, modo, proximaAtualizacaoEm: mapa.proximaAtualizacaoEm, largura: mapa.largura, altura: mapa.altura,
