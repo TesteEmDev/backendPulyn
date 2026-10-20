@@ -536,16 +536,19 @@ router.get('/familia/agregado', verifyToken, requireRole('family'), async (req, 
   }
 });
 
-// Posição do próprio filho (só com vínculo aprovado).
+// Posição e calor do próprio filho (só com vínculo aprovado). O calor considera só a pulseira dele:
+// ?modo=agora (último minuto, suavizado) ou ?modo=5min (por onde ele andou nos últimos 5 minutos).
 router.get('/familia/crianca/:criancaId', verifyToken, requireRole('family'), async (req, res) => {
   try {
     const criancas = await criancasDoResponsavel(req);
     const vinculo = criancas.find((c) => String(c.criancaId).toLowerCase() === String(req.params.criancaId).toLowerCase());
     if (!vinculo) return res.status(403).json({ error: 'Criança não vinculada a você' });
-    const mapa = await montarMapa(req.user.empresaId, { modo: 'agora', eventoId: vinculo.eventoId });
+    const modo = req.query.modo === '5min' ? '5min' : 'agora';
+    const mapa = await montarMapa(req.user.empresaId, { modo, eventoId: vinculo.eventoId, criancaId: vinculo.criancaId });
     const posicao = mapa.criancas.find((c) => String(c.criancaId).toLowerCase() === String(vinculo.criancaId).toLowerCase());
     res.json({
-      geradoEm: mapa.geradoEm, balde: mapa.balde, proximaAtualizacaoEm: mapa.proximaAtualizacaoEm, largura: mapa.largura, altura: mapa.altura,
+      geradoEm: mapa.geradoEm, balde: mapa.balde, modo, proximaAtualizacaoEm: mapa.proximaAtualizacaoEm, largura: mapa.largura, altura: mapa.altura,
+      celulaUnidades: mapa.celulaUnidades, valorMax: mapa.valorMax, celulas: mapa.celulas,
       posicao: posicao ? { x: posicao.x, y: posicao.y, metodo: posicao.metodo, confianca: posicao.confianca } : null,
     });
   } catch (err) {

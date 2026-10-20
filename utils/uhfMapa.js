@@ -178,6 +178,19 @@ async function buscarCiclos(empresaId, desde, ate) {
   return new Map(linhas.map((l) => [chaveCiclos(l.leitorId, l.balde), Number(l.ciclos)]));
 }
 
+const mesmoId = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
+
+// Filtro das tags pelo vínculo pulseira -> criança (evento, time ou uma criança só). Sem filtro, entra tudo.
+function filtroDePulseiras(pulseiras, { eventoId, timeId, criancaId } = {}) {
+  return (codigo) => {
+    if (!eventoId && !timeId && !criancaId) return true;
+    const p = pulseiras.get(codigo);
+    if (!p || !p.criancaId) return false;
+    return (!eventoId || mesmoId(p.eventoId, eventoId)) && (!timeId || mesmoId(p.timeId, timeId))
+      && (!criancaId || mesmoId(p.criancaId, criancaId));
+  };
+}
+
 // Cache: chave -> { expiraEm, valor }. Um lote novo da empresa apaga o cache dela (invalidarMapa).
 const cache = new Map();
 const CACHE_MS = 5000;
@@ -191,14 +204,14 @@ function invalidarMapa(empresaId) {
  * Mapa da empresa.
  *   modo: 'agora' (último balde fechado, suavizado com os 2 anteriores) | '5min' (média dos últimos 15 baldes)
  *   balde: ISO opcional, para rever um momento passado (replay)
- *   eventoId / timeId: mostra só as pulseiras dessas crianças
+ *   eventoId / timeId / criancaId: mostra só as pulseiras dessas crianças (criancaId = o calor de uma criança só)
  */
-async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, agora = new Date() } = {}) {
+async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, criancaId, agora = new Date() } = {}) {
   const alvo = balde ? new Date(Math.floor(emMs(balde) / JANELA_MS) * JANELA_MS) : ultimoBaldeFechado(agora);
   if (!Number.isFinite(alvo.getTime())) throw Object.assign(new Error('balde inválido'), { statusCode: 400 });
   const quantos = modo === '5min' ? 15 : 3;
 
-  const chave = `${String(empresaId).toLowerCase()}|${modo}|${alvo.toISOString()}|${eventoId || ''}|${timeId || ''}`;
+  const chave = `${String(empresaId).toLowerCase()}|${modo}|${alvo.toISOString()}|${eventoId || ''}|${timeId || ''}|${criancaId || ''}`;
   const emCache = cache.get(chave);
   if (emCache && emCache.expiraEm > Date.now()) return emCache.valor;
 
@@ -208,13 +221,7 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
     buscarCiclos(empresaId, desde, alvo),
   ]);
 
-  const mesmoId = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
-  const incluir = (codigo) => {
-    if (!eventoId && !timeId) return true;
-    const p = pulseiras.get(codigo);
-    if (!p || !p.criancaId) return false;
-    return (!eventoId || mesmoId(p.eventoId, eventoId)) && (!timeId || mesmoId(p.timeId, timeId));
-  };
+  const incluir = filtroDePulseiras(pulseiras, { eventoId, timeId, criancaId });
 
   // Do balde mais antigo para o mais novo.
   const resultados = [];
@@ -272,6 +279,6 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
 
 module.exports = {
   LARGURA_MAPA, ALTURA_MAPA, ESCALA_PADRAO, TOLERANCIA_MS, LEITOR_ONLINE_MS,
-  ultimoBaldeFechado, calcularBalde, celulasDaGrade, montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras,
+  ultimoBaldeFechado, calcularBalde, celulasDaGrade, filtroDePulseiras, montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras,
   buscarCiclos, chaveCiclos,
 };

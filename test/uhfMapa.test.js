@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calcularBalde, celulasDaGrade, ultimoBaldeFechado, chaveCiclos } = require('../utils/uhfMapa');
+const { calcularBalde, celulasDaGrade, ultimoBaldeFechado, chaveCiclos, filtroDePulseiras } = require('../utils/uhfMapa');
 
 const balde = new Date('2026-10-16T18:00:00.000Z');
 const anterior = new Date('2026-10-16T17:59:40.000Z');
@@ -59,4 +59,16 @@ test('a grade soma o número de pulseiras e as células vêm na unidade da plant
   assert.equal(celulaUnidades, 5);
   const maisQuente = celulas.reduce((a, b) => (b.valor > a.valor ? b : a));
   assert.ok(Math.abs(maisQuente.x - 100) <= 5 || Math.abs(maisQuente.x - 300) <= 5);
+});
+
+test('filtro por criança: só a pulseira dela entra (o calor dos pais é só do próprio filho)', () => {
+  const pulseiras = new Map([
+    ['AAA', { criancaId: 'C1', eventoId: 'E1', timeId: 'T1' }],
+    ['BBB', { criancaId: 'C2', eventoId: 'E1', timeId: 'T1' }],
+    ['CCC', { criancaId: null }],
+  ]);
+  const daC1 = filtroDePulseiras(pulseiras, { eventoId: 'e1', criancaId: 'c1' });
+  assert.deepEqual(['AAA', 'BBB', 'CCC', 'ZZZ'].map(daC1), [true, false, false, false]);
+  assert.deepEqual(['AAA', 'BBB'].map(filtroDePulseiras(pulseiras, { eventoId: 'E2', criancaId: 'C1' })), [false, false]);
+  assert.equal(filtroDePulseiras(pulseiras)('ZZZ'), true);
 });
