@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calcularBalde, juntarBaldes, celulasDaGrade, ultimoBaldeFechado, chaveCiclos, filtroDePulseiras } = require('../utils/uhfMapa');
+const {
+  calcularBalde, juntarBaldes, pesoDaIdade, celulasDaGrade, ultimoBaldeFechado, chaveCiclos, filtroDePulseiras,
+} = require('../utils/uhfMapa');
 
 const balde = new Date('2026-10-16T18:00:00.000Z');
 const anterior = new Date('2026-10-16T17:59:40.000Z');
@@ -81,31 +83,55 @@ const somaPerto = (grade, x, y) => {
   return grade.valores[l * grade.colunas + c];
 };
 
+const total = (grade) => grade.valores.reduce((soma, v) => soma + v, 0) * grade.celula ** 2;
+const iso = (ms) => new Date(ms).toISOString();
+
+test('peso do rastro: metade a cada 20 min, nunca abaixo de 10%', () => {
+  assert.equal(pesoDaIdade(0), 1);
+  assert.ok(Math.abs(pesoDaIdade(20 * 60000) - 0.5) < 1e-9);
+  assert.ok(Math.abs(pesoDaIdade(60 * 60000) - 0.125) < 1e-9);
+  assert.equal(pesoDaIdade(3 * 3600000), 0.1);
+});
+
 test('modos de período somam o tempo: o lugar por onde a pulseira passou continua no mapa (rastro)', () => {
   const r = juntarBaldes({ antenas, amostras: rastro, escala: 0.05, alvo: balde, modo: '5min' });
   assert.equal(r.acumulado, true);
   const naA1 = somaPerto(r.grade, 5, 5);     // a1 em (100,100) x 0,05 m
-  const naA2 = somaPerto(r.grade, 7, 5);    // a2 em (140,100)
+  const naA2 = somaPerto(r.grade, 7, 5);     // a2 em (140,100)
   assert.ok(naA2 > 0, 'onde está agora');
-  assert.ok(Math.abs(naA1 / naA2 - 4) < 0.01, `ficou 4x mais tempo na a1: ${naA1 / naA2}`);
-  // Tempo em minutos: a grade soma pulseira x minuto (5 baldes de 20 s = 1,67 min).
-  const total = r.grade.valores.reduce((s, v) => s + v, 0) * r.grade.celula ** 2;
-  assert.ok(Math.abs(total - 5 / 3) < 0.05, `total ${total}`);
-  assert.deepEqual(r.trajeto.map((p) => [p.x, p.y]), [[100, 100], [100, 100], [100, 100], [100, 100], [140, 100]]);
-  assert.equal(r.trajeto[4].balde, balde.toISOString());
+  const pesosA1 = [80, 60, 40, 20].reduce((soma, seg) => soma + pesoDaIdade(seg * 1000), 0);
+  assert.ok(Math.abs(naA1 / naA2 - pesosA1) < 0.01, `4 baldes na a1 (um pouco mais antigos): ${naA1 / naA2}`);
+  // Tempo em minutos: 5 baldes de 20 s = 1,67 min, cada um com o peso da idade.
+  assert.ok(Math.abs(total(r.grade) - (pesosA1 + 1) / 3) < 0.05, `total ${total(r.grade)}`);
+  // Baldes seguidos no mesmo lugar viram um ponto só.
+  assert.deepEqual(r.trajeto, [
+    { balde: iso(balde.getTime() - 80000), ate: iso(balde.getTime() - 20000), x: 100, y: 100 },
+    { balde: balde.toISOString(), ate: balde.toISOString(), x: 140, y: 100 },
+  ]);
   assert.deepEqual(r.atual.posicoes.map((p) => p.codigo), ['AB1']);
 });
 
 test('no período, balde sem lote não repete as leituras do anterior', () => {
   const r = juntarBaldes({ antenas, amostras: [amostra('a1', 'AB2', anterior)], escala: 0.05, alvo: balde, modo: '5min' });
-  const total = r.grade.valores.reduce((s, v) => s + v, 0) * r.grade.celula ** 2;
-  assert.ok(Math.abs(total - 1 / 3) < 0.02, `total ${total}`);
+  assert.ok(Math.abs(total(r.grade) - pesoDaIdade(20000) / 3) < 0.02, `total ${total(r.grade)}`);
   assert.equal(r.trajeto.length, 1);
+});
+
+test('"evento": a passagem de 3 h atrás continua no mapa, com 10% do peso', () => {
+  const tresHoras = new Date(balde.getTime() - 3 * 3600000);
+  const amostras = [amostra('b1', 'AB3', tresHoras), amostra('a1', 'AB3')];   // antenas longe uma da outra
+  const r = juntarBaldes({ antenas, amostras, escala: 0.05, alvo: balde, modo: 'evento', desde: new Date(balde.getTime() - 4 * 3600000) });
+  assert.ok(Math.abs(somaPerto(r.grade, 15, 10) / somaPerto(r.grade, 5, 5) - 0.1) < 0.001);
+  assert.deepEqual(r.trajeto.map((p) => [p.x, p.y]), [[300, 200], [100, 100]]);
+  // Antes do início do evento não entra.
+  const depois = juntarBaldes({ antenas, amostras, escala: 0.05, alvo: balde, modo: 'evento', desde: new Date(balde.getTime() - 3600000) });
+  assert.equal(somaPerto(depois.grade, 15, 10), 0);
+  assert.equal(depois.trajeto.length, 1);
 });
 
 test('"agora" mostra onde a pulseira está: só o último minuto, com mais peso no balde atual', () => {
   const r = juntarBaldes({ antenas, amostras: rastro, escala: 0.05, alvo: balde, modo: 'agora' });
   assert.equal(r.acumulado, false);
-  assert.equal(r.trajeto.length, 3);
+  assert.deepEqual(r.trajeto.map((p) => [p.x, p.y]), [[100, 100], [140, 100]]);
   assert.ok(somaPerto(r.grade, 7, 5) > somaPerto(r.grade, 5, 5));
 });

@@ -537,7 +537,8 @@ router.get('/familia/agregado', verifyToken, requireRole('family'), async (req, 
 });
 
 // Posição e calor do próprio filho (só com vínculo aprovado). O calor considera só a pulseira dele:
-// ?modo=agora (último minuto, suavizado), ?modo=5min ou ?modo=30min (tempo em cada lugar no período, com o trajeto).
+// ?modo=agora (último minuto, suavizado), ?modo=5min, ?modo=30min ou ?modo=evento (tempo em cada lugar no período,
+// o mais antigo com a cor mais fraca, com o trajeto).
 router.get('/familia/crianca/:criancaId', verifyToken, requireRole('family'), async (req, res) => {
   try {
     const criancas = await criancasDoResponsavel(req);
@@ -549,7 +550,7 @@ router.get('/familia/crianca/:criancaId', verifyToken, requireRole('family'), as
     res.json({
       geradoEm: mapa.geradoEm, balde: mapa.balde, modo, proximaAtualizacaoEm: mapa.proximaAtualizacaoEm, largura: mapa.largura, altura: mapa.altura,
       celulaUnidades: mapa.celulaUnidades, valorMax: mapa.valorMax, celulas: mapa.celulas, acumulado: mapa.acumulado,
-      trajeto: mapa.trajeto || [],
+      trajeto: mapa.trajeto || [], desde: mapa.desde || null,
       posicao: posicao ? { x: posicao.x, y: posicao.y, metodo: posicao.metodo, confianca: posicao.confianca } : null,
     });
   } catch (err) {
