@@ -27,6 +27,9 @@ const MODOS_MAPA = Object.keys(BALDES_DO_MODO);
 const RASTRO_MEIA_VIDA_MIN = 20;
 const RASTRO_PISO = 0.1;
 const RASTRO_MAX_HORAS = 12;
+// Corredor entre antenas: cada mancha do caminho vale meio balde. Duas posições com mais de 3 min entre elas não ligam.
+const PESO_CORREDOR = 0.5;
+const CORREDOR_MAX_MS = 3 * 60000;
 
 const emMs = (data) => new Date(data).getTime();
 const chaveCiclos = (leitorId, balde) => `${String(leitorId).toLowerCase()}|${emMs(balde)}`;
@@ -146,11 +149,39 @@ function adicionarAoTrajeto(trajeto, balde, posicoes) {
   else trajeto.push({ balde: balde.toISOString(), ate: balde.toISOString(), x, y });
 }
 
+// Corredor entre duas posições seguidas da mesma pulseira: a criança andou de uma antena até a outra, então o caminho
+// entre elas também ganha calor (sem ele, ela parece se teletransportar). Manchas a cada 3/4 de sigma, sem as pontas.
+function manchasDoCorredor(de, para, peso) {
+  const sigma = Math.min(de.sigma, para.sigma);
+  const distancia = Math.hypot(para.x - de.x, para.y - de.y);
+  const n = Math.ceil(distancia / (sigma * 0.75));
+  const manchas = [];
+  for (let k = 1; k < n; k += 1) {
+    manchas.push({ x: de.x + ((para.x - de.x) * k) / n, y: de.y + ((para.y - de.y) * k) / n, sigma, peso });
+  }
+  return manchas;
+}
+
+// Manchas de um balde com o `peso` dele, mais os corredores desde a última posição de cada pulseira (`ultimas`, que
+// é atualizado). Vista de novo depois de CORREDOR_MAX_MS, não dá para saber por onde ela foi: sem corredor.
+function manchasComCorredores(r, balde, ultimas, peso) {
+  const manchas = [];
+  r.manchas.forEach((m, i) => {
+    manchas.push({ ...m, peso: m.peso * peso });
+    const codigo = r.posicoes[i].codigo;
+    const anterior = ultimas.get(codigo);
+    if (anterior && balde - anterior.balde <= CORREDOR_MAX_MS) manchas.push(...manchasDoCorredor(anterior, m, peso * PESO_CORREDOR));
+    ultimas.set(codigo, { ...m, balde });
+  });
+  return manchas;
+}
+
 /**
  * Junta os baldes que terminam em `alvo` (Date) conforme o modo:
  *   'agora': média móvel exponencial dos 3 últimos (onde as pulseiras estão, sem piscar a cada 20 s);
  *   período: soma do tempo de cada balde desde `desde` (modo "evento") ou dos últimos N baldes, em minutos, com o peso
  *   da idade (pesoDaIdade). Sem o "balde anterior" de calcularBalde, que contaria a mesma leitura duas vezes.
+ * Nos dois, o caminho entre duas posições seguidas da mesma pulseira também esquenta (manchasComCorredores).
  * Devolve a grade, o balde mais recente (posições atuais) e o trajeto: por onde a pulseira passou, do mais antigo para
  * o mais novo (só faz sentido filtrando uma criança).
  */
@@ -165,6 +196,8 @@ function juntarBaldes({ antenas, amostras, ciclos, escala, incluir, alvo, modo =
   const doBalde = (b, comAnterior) => [...(porBalde.get(b) || []), ...(comAnterior ? porBalde.get(b - JANELA_MS) || [] : [])];
   const atual = calcularBalde({ antenas, amostras: doBalde(fim, true), ciclos, balde: alvo, escala, incluir });
   const trajeto = [];
+  const ultimas = new Map();
+  const dimensoes = { largura: atual.larguraM, altura: atual.alturaM, celula: tamanhoDaCelula(atual.larguraM, atual.alturaM) };
 
   if (!BALDES_DO_MODO[modo] && modo !== 'evento') modo = 'agora';
   if (modo === 'agora') {
@@ -172,7 +205,8 @@ function juntarBaldes({ antenas, amostras, ciclos, escala, incluir, alvo, modo =
     for (let i = BALDES_DO_MODO.agora - 1; i >= 0; i -= 1) {
       const b = fim - i * JANELA_MS;
       const r = i === 0 ? atual : calcularBalde({ antenas, amostras: doBalde(b, true), ciclos, balde: new Date(b), escala, incluir });
-      grade = suavizar(r.grade, grade);
+      const manchas = manchasComCorredores(r, b, ultimas, 1);
+      grade = suavizar(manchas.length > r.manchas.length ? gradeDeCalor(manchas, dimensoes) : r.grade, grade);
       adicionarAoTrajeto(trajeto, new Date(b), r.posicoes);
     }
     return { grade, atual, trajeto, acumulado: false };
@@ -185,11 +219,10 @@ function juntarBaldes({ antenas, amostras, ciclos, escala, incluir, alvo, modo =
   const manchas = [];
   for (const b of baldes) {
     const r = calcularBalde({ antenas, amostras: doBalde(b, false), ciclos, balde: new Date(b), escala, incluir, aceitarAnterior: false, comGrade: false });
-    const peso = (JANELA_MS / 60000) * pesoDaIdade(fim - b);
-    for (const m of r.manchas) manchas.push({ ...m, peso: m.peso * peso });
+    manchas.push(...manchasComCorredores(r, b, ultimas, (JANELA_MS / 60000) * pesoDaIdade(fim - b)));
     adicionarAoTrajeto(trajeto, new Date(b), r.posicoes);
   }
-  const grade = gradeDeCalor(manchas, { largura: atual.larguraM, altura: atual.alturaM, celula: tamanhoDaCelula(atual.larguraM, atual.alturaM) });
+  const grade = gradeDeCalor(manchas, dimensoes);
   return { grade, atual, trajeto, acumulado: true };
 }
 

@@ -99,16 +99,34 @@ test('modos de período somam o tempo: o lugar por onde a pulseira passou contin
   const naA1 = somaPerto(r.grade, 5, 5);     // a1 em (100,100) x 0,05 m
   const naA2 = somaPerto(r.grade, 7, 5);     // a2 em (140,100)
   assert.ok(naA2 > 0, 'onde está agora');
+  assert.ok(naA1 > naA2, 'ficou mais tempo na a1');
+  // Tempo em minutos: 5 baldes de 20 s = 1,67 min, cada um com o peso da idade, mais o corredor da a1 até a a2
+  // (2 m, 4 manchas de meio balde).
   const pesosA1 = [80, 60, 40, 20].reduce((soma, seg) => soma + pesoDaIdade(seg * 1000), 0);
-  assert.ok(Math.abs(naA1 / naA2 - pesosA1) < 0.01, `4 baldes na a1 (um pouco mais antigos): ${naA1 / naA2}`);
-  // Tempo em minutos: 5 baldes de 20 s = 1,67 min, cada um com o peso da idade.
-  assert.ok(Math.abs(total(r.grade) - (pesosA1 + 1) / 3) < 0.05, `total ${total(r.grade)}`);
+  assert.ok(Math.abs(total(r.grade) - (pesosA1 + 1 + 4 * 0.5) / 3) < 0.05, `total ${total(r.grade)}`);
   // Baldes seguidos no mesmo lugar viram um ponto só.
   assert.deepEqual(r.trajeto, [
     { balde: iso(balde.getTime() - 80000), ate: iso(balde.getTime() - 20000), x: 100, y: 100 },
     { balde: balde.toISOString(), ate: balde.toISOString(), x: 140, y: 100 },
   ]);
   assert.deepEqual(r.atual.posicoes.map((p) => p.codigo), ['AB1']);
+});
+
+test('o vão entre duas antenas esquenta quando a pulseira vai de uma para a outra (sem teletransporte)', () => {
+  // a1 em (5,5) m e b1 em (15,10) m; o meio do caminho fica em (10; 7,5) m, longe das duas.
+  const meio = (r) => somaPerto(r.grade, 10, 7.5);
+  const seguidas = [amostra('a1', 'AB4', anterior), amostra('b1', 'AB4')];
+  for (const modo of ['agora', '5min', 'evento']) {
+    const r = juntarBaldes({ antenas, amostras: seguidas, escala: 0.05, alvo: balde, modo, desde: new Date(balde.getTime() - 3600000) });
+    assert.ok(meio(r) > 0.01, `${modo}: corredor ${meio(r)}`);
+  }
+  // Vista de novo só 5 min depois: não dá para saber por onde foi, sem corredor.
+  const longe = [amostra('a1', 'AB4', new Date(balde.getTime() - 300000)), amostra('b1', 'AB4')];
+  const r = juntarBaldes({ antenas, amostras: longe, escala: 0.05, alvo: balde, modo: '30min' });
+  assert.ok(meio(r) < 1e-6, `sem corredor: ${meio(r)}`);
+  // Pulseiras diferentes não se ligam.
+  const outras = [amostra('a1', 'AB5', anterior), amostra('b1', 'AB6')];
+  assert.ok(meio(juntarBaldes({ antenas, amostras: outras, escala: 0.05, alvo: balde, modo: '5min' })) < 1e-6);
 });
 
 test('no período, balde sem lote não repete as leituras do anterior', () => {
