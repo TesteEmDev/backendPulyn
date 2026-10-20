@@ -176,12 +176,13 @@ function suavizar(atual, anterior, alpha = 0.6) {
   return { ...atual, valores: atual.valores.map((v, i) => alpha * v + (1 - alpha) * anterior.valores[i]) };
 }
 
-// Média de várias grades do mesmo tamanho (ex.: últimos 5 minutos).
-function mediaDeGrades(grades) {
+// Soma de várias grades do mesmo tamanho, cada uma multiplicada por `peso` (ex.: minutos de cada janela).
+function somarGrades(grades, peso = 1) {
   const validas = grades.filter(Boolean);
   if (validas.length === 0) return null;
   const base = validas[0];
-  const valores = base.valores.map((_, i) => validas.reduce((soma, g) => soma + (g.valores[i] || 0), 0) / validas.length);
+  const valores = new Array(base.valores.length).fill(0);
+  for (const g of validas) g.valores.forEach((v, i) => { valores[i] += v * peso; });
   return { ...base, valores };
 }
 
@@ -225,5 +226,5 @@ function ajustarCalibracao(medicoes) {
 module.exports = {
   RSSI_MIN_PADRAO, RSSI_REF_PADRAO, EXPOENTE_PADRAO, RAIO_PADRAO, ajustarCalibracao,
   presenca, qualidadeRssi, forca, distancia, centroDaCobertura, centroide, trilaterar, estimarPosicao,
-  sigmaDoMetodo, gradeDeCalor, suavizar, mediaDeGrades, regioesAnonimas,
+  sigmaDoMetodo, gradeDeCalor, suavizar, somarGrades, regioesAnonimas,
 };

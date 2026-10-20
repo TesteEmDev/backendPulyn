@@ -1,12 +1,13 @@
 // utils/uhfMapa.js - Monta o mapa de calor de uma empresa a partir das amostras UHF
 //
 // `calcularBalde` é puro (testável): recebe antenas e amostras e devolve as posições e a grade de calor.
-// `montarMapa` busca no banco e junta os baldes: "agora" suaviza os 3 últimos baldes de 20 s; "5min" faz a média dos
-// últimos 15. Não existe relógio varrendo o banco: o mapa é calculado quando alguém pede, com cache em memória.
+// `montarMapa` busca no banco e junta os baldes (`juntarBaldes`): "agora" suaviza os 3 últimos baldes de 20 s (onde as
+// pulseiras estão); "5min" e "30min" SOMAM o tempo de cada balde, então um lugar por onde a pulseira só passou continua
+// no mapa, mais fraco que onde ela ficou (o rastro). Não existe relógio varrendo o banco: o mapa é calculado quando alguém pede, com cache em memória.
 // Assim várias instâncias do backend ligadas ao mesmo banco não repetem trabalho nem disputam nada.
 const { queryOne, allQuery } = require('../database');
 const { codigoDoEpc, JANELA_MS } = require('./uhfLote');
-const { estimarPosicao, sigmaDoMetodo, gradeDeCalor, suavizar, mediaDeGrades, regioesAnonimas, RAIO_PADRAO } = require('./uhfPosicao');
+const { estimarPosicao, sigmaDoMetodo, gradeDeCalor, suavizar, somarGrades, regioesAnonimas, RAIO_PADRAO } = require('./uhfPosicao');
 
 const LARGURA_MAPA = 450;          // mesmo espaço da planta dos checkpoints (components/display/posicaoNoMapa.ts)
 const ALTURA_MAPA = 320;
@@ -14,7 +15,10 @@ const ESCALA_PADRAO = 0.05;        // sem escala configurada: 450 unidades = 22,
 const TOLERANCIA_MS = 3000;        // espera lotes atrasados antes de considerar a janela fechada
 const LEITOR_ONLINE_MS = 60000;    // sem lote há mais de 60 s = offline
 const CELULAS_MAX = 150000;
-const VALOR_MINIMO = 0.02;         // pulseiras/m² abaixo disso não vão para a resposta
+const VALOR_MINIMO = 0.02;         // pulseiras/m² (ou minutos/m² nos modos de período) abaixo disso não vão para a resposta
+// Baldes de 20 s de cada modo. "agora" = onde estão; os outros = tempo somado no período (minutos de pulseira por m²).
+const BALDES_DO_MODO = { agora: 3, '5min': 15, '30min': 90 };
+const MODOS_MAPA = Object.keys(BALDES_DO_MODO);
 
 const emMs = (data) => new Date(data).getTime();
 const chaveCiclos = (leitorId, balde) => `${String(leitorId).toLowerCase()}|${emMs(balde)}`;
@@ -44,7 +48,7 @@ function ultimoBaldeFechado(agora = new Date()) {
  *             os lotes em que a pulseira apareceu; sem este total, uma pulseira lida em 1 de 40 lotes teria presença 1.
  *   incluir(codigo) -> boolean: filtro opcional (evento, time)
  */
-function calcularBalde({ antenas, amostras, balde, escala, ciclos = new Map(), incluir = () => true }) {
+function calcularBalde({ antenas, amostras, balde, escala, ciclos = new Map(), incluir = () => true, aceitarAnterior = true }) {
   const escalaM = escalaValida(escala) || ESCALA_PADRAO;
   const larguraM = LARGURA_MAPA * escalaM;
   const alturaM = ALTURA_MAPA * escalaM;
@@ -61,7 +65,7 @@ function calcularBalde({ antenas, amostras, balde, escala, ciclos = new Map(), i
   for (const s of amostras) {
     const antena = antenaPorId.get(String(s.antenaId));
     const b = emMs(s.balde);
-    if (!antena || b > alvo || b < alvo - JANELA_MS) continue;
+    if (!antena || b > alvo || b < alvo - (aceitarAnterior ? JANELA_MS : 0)) continue;
     baldesPorLeitor.set(antena.leitorId, Math.max(baldesPorLeitor.get(antena.leitorId) ?? -Infinity, b));
   }
 
@@ -116,6 +120,39 @@ function celulasDaGrade(grade, escalaM) {
     valorMax = Math.max(valorMax, valor);
   });
   return { celulas, valorMax: Math.round(valorMax * 1000) / 1000, celulaUnidades: Math.round((grade.celula / escalaM) * 100) / 100 };
+}
+
+/**
+ * Junta os `quantos` baldes que terminam em `alvo` (Date) conforme o modo:
+ *   'agora': média móvel exponencial (onde as pulseiras estão, sem piscar a cada 20 s);
+ *   período: soma do tempo de cada balde, em minutos. Sem o "balde anterior" de calcularBalde, que contaria a mesma
+ *   leitura duas vezes.
+ * Devolve a grade, o balde mais recente (posições atuais) e o trajeto: a posição de cada balde em que a pulseira foi
+ * vista, do mais antigo para o mais novo (só faz sentido filtrando uma criança).
+ */
+function juntarBaldes({ antenas, amostras, ciclos, escala, incluir, alvo, modo = 'agora' }) {
+  const quantos = BALDES_DO_MODO[modo] || BALDES_DO_MODO.agora;
+  const acumular = modo !== 'agora';
+  const porBalde = new Map();
+  for (const s of amostras) {
+    const b = emMs(s.balde);
+    if (!porBalde.has(b)) porBalde.set(b, []);
+    porBalde.get(b).push(s);
+  }
+
+  const resultados = [];
+  for (let i = quantos - 1; i >= 0; i -= 1) {
+    const b = alvo.getTime() - i * JANELA_MS;
+    const doBalde = [...(porBalde.get(b) || []), ...(acumular ? [] : porBalde.get(b - JANELA_MS) || [])];
+    resultados.push({ balde: new Date(b), ...calcularBalde({ antenas, amostras: doBalde, ciclos, balde: new Date(b), escala, incluir, aceitarAnterior: !acumular }) });
+  }
+  const grade = acumular
+    ? somarGrades(resultados.map((r) => r.grade), JANELA_MS / 60000)
+    : resultados.reduce((anterior, r) => suavizar(r.grade, anterior), null);
+  const trajeto = resultados
+    .filter((r) => r.posicoes.length > 0)
+    .map((r) => ({ balde: r.balde.toISOString(), x: Math.round(r.posicoes[0].x * 10) / 10, y: Math.round(r.posicoes[0].y * 10) / 10 }));
+  return { grade, atual: resultados[resultados.length - 1], trajeto, acumulado: acumular };
 }
 
 // ---------- banco ----------
@@ -202,14 +239,15 @@ function invalidarMapa(empresaId) {
 
 /**
  * Mapa da empresa.
- *   modo: 'agora' (último balde fechado, suavizado com os 2 anteriores) | '5min' (média dos últimos 15 baldes)
+ *   modo: 'agora' (último balde fechado, suavizado com os 2 anteriores) | '5min' | '30min' (tempo somado no período)
  *   balde: ISO opcional, para rever um momento passado (replay)
  *   eventoId / timeId / criancaId: mostra só as pulseiras dessas crianças (criancaId = o calor de uma criança só)
  */
 async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, criancaId, agora = new Date() } = {}) {
   const alvo = balde ? new Date(Math.floor(emMs(balde) / JANELA_MS) * JANELA_MS) : ultimoBaldeFechado(agora);
   if (!Number.isFinite(alvo.getTime())) throw Object.assign(new Error('balde inválido'), { statusCode: 400 });
-  const quantos = modo === '5min' ? 15 : 3;
+  if (!BALDES_DO_MODO[modo]) modo = 'agora';
+  const quantos = BALDES_DO_MODO[modo];
 
   const chave = `${String(empresaId).toLowerCase()}|${modo}|${alvo.toISOString()}|${eventoId || ''}|${timeId || ''}|${criancaId || ''}`;
   const emCache = cache.get(chave);
@@ -223,15 +261,7 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
 
   const incluir = filtroDePulseiras(pulseiras, { eventoId, timeId, criancaId });
 
-  // Do balde mais antigo para o mais novo.
-  const resultados = [];
-  for (let i = quantos - 1; i >= 0; i -= 1) {
-    resultados.push(calcularBalde({ antenas, amostras, ciclos, balde: new Date(alvo.getTime() - i * JANELA_MS), escala, incluir }));
-  }
-  const atual = resultados[resultados.length - 1];
-  const grade = modo === '5min'
-    ? mediaDeGrades(resultados.map((r) => r.grade))
-    : resultados.reduce((anterior, r) => suavizar(r.grade, anterior), null);
+  const { grade, atual, trajeto, acumulado } = juntarBaldes({ antenas, amostras, ciclos, escala, incluir, alvo, modo });
 
   const agoraMs = emMs(agora);
   const { celulas, valorMax, celulaUnidades } = celulasDaGrade(grade, atual.escalaM);
@@ -242,6 +272,7 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
     balde: alvo.toISOString(),
     janelaSeg: JANELA_MS / 1000,
     modo,
+    acumulado,   // true: o valor das células é tempo (minutos de pulseira por m²), não pulseiras/m²
     proximaAtualizacaoEm: new Date(alvo.getTime() + 2 * JANELA_MS + TOLERANCIA_MS).toISOString(),
     largura: LARGURA_MAPA,
     altura: ALTURA_MAPA,
@@ -270,6 +301,8 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
     regioes: regioesAnonimas(atual.posicoes.map((p) => ({ x: p.xM, y: p.yM })), { largura: atual.larguraM, altura: atual.alturaM })
       .map((r) => ({ x: r.x / atual.escalaM, y: r.y / atual.escalaM, largura: r.largura / atual.escalaM, altura: r.altura / atual.escalaM, total: r.total })),
     totais: { pulseirasVistas: atual.posicoes.length, porMetodo: contagemMetodos },
+    // Por onde a criança andou no período (só com criancaId: as outras rotas não expõem trajetos).
+    ...(criancaId ? { trajeto } : {}),
   };
 
   cache.set(chave, { expiraEm: Date.now() + CACHE_MS, valor });
@@ -278,7 +311,7 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
 }
 
 module.exports = {
-  LARGURA_MAPA, ALTURA_MAPA, ESCALA_PADRAO, TOLERANCIA_MS, LEITOR_ONLINE_MS,
-  ultimoBaldeFechado, calcularBalde, celulasDaGrade, filtroDePulseiras, montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras,
+  LARGURA_MAPA, ALTURA_MAPA, ESCALA_PADRAO, TOLERANCIA_MS, LEITOR_ONLINE_MS, MODOS_MAPA,
+  ultimoBaldeFechado, calcularBalde, juntarBaldes, celulasDaGrade, filtroDePulseiras, montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras,
   buscarCiclos, chaveCiclos,
 };

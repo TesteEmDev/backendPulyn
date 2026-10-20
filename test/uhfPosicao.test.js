@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  presenca, distancia, centroDaCobertura, estimarPosicao, gradeDeCalor, suavizar, mediaDeGrades, regioesAnonimas,
+  presenca, distancia, centroDaCobertura, estimarPosicao, gradeDeCalor, suavizar, somarGrades, regioesAnonimas,
 } = require('../utils/uhfPosicao');
 
 const limites = { largura: 20, altura: 10 };
@@ -78,13 +78,14 @@ test('grade de calor: a soma da densidade x área da célula é o número de pul
   assert.ok(perto(total, 2, 0.02), `total ${total}`);
 });
 
-test('suavização e média de grades', () => {
+test('suavização e soma de grades', () => {
   const a = { colunas: 2, linhas: 1, celula: 1, valores: [1, 0] };
   const b = { colunas: 2, linhas: 1, celula: 1, valores: [0, 1] };
   assert.deepEqual(suavizar(a, b, 0.6).valores, [0.6, 0.4]);
   assert.equal(suavizar(a, null), a);
-  assert.deepEqual(mediaDeGrades([a, b, null]).valores, [0.5, 0.5]);
-  assert.equal(mediaDeGrades([]), null);
+  assert.deepEqual(somarGrades([a, b, null], 0.5).valores, [0.5, 0.5]);
+  assert.deepEqual(somarGrades([a, a]).valores, [2, 0]);
+  assert.equal(somarGrades([]), null);
 });
 
 test('regiões anônimas escondem regiões com menos pulseiras que o mínimo', () => {

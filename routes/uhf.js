@@ -15,7 +15,7 @@ const {
 } = require('../utils/uhfLote');
 const { ajustarCalibracao } = require('../utils/uhfPosicao');
 const {
-  montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras, buscarCiclos, chaveCiclos, LEITOR_ONLINE_MS,
+  montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras, buscarCiclos, chaveCiclos, LEITOR_ONLINE_MS, MODOS_MAPA,
 } = require('../utils/uhfMapa');
 
 const ADMIN = ['admin', 'master'];
@@ -498,7 +498,7 @@ router.put('/pulseiras/:codigo/epc', verifyToken, requireRole(...ADMIN), async (
 // ---------- mapa ----------
 
 function opcoesDoMapa(req) {
-  const modo = req.query.modo === '5min' ? '5min' : 'agora';
+  const modo = MODOS_MAPA.includes(req.query.modo) ? req.query.modo : 'agora';
   return { modo, balde: req.query.balde || undefined, eventoId: req.query.eventoId || undefined, timeId: req.query.timeId || undefined };
 }
 
@@ -537,18 +537,19 @@ router.get('/familia/agregado', verifyToken, requireRole('family'), async (req, 
 });
 
 // Posição e calor do próprio filho (só com vínculo aprovado). O calor considera só a pulseira dele:
-// ?modo=agora (último minuto, suavizado) ou ?modo=5min (por onde ele andou nos últimos 5 minutos).
+// ?modo=agora (último minuto, suavizado), ?modo=5min ou ?modo=30min (tempo em cada lugar no período, com o trajeto).
 router.get('/familia/crianca/:criancaId', verifyToken, requireRole('family'), async (req, res) => {
   try {
     const criancas = await criancasDoResponsavel(req);
     const vinculo = criancas.find((c) => String(c.criancaId).toLowerCase() === String(req.params.criancaId).toLowerCase());
     if (!vinculo) return res.status(403).json({ error: 'Criança não vinculada a você' });
-    const modo = req.query.modo === '5min' ? '5min' : 'agora';
+    const modo = MODOS_MAPA.includes(req.query.modo) ? req.query.modo : 'agora';
     const mapa = await montarMapa(vinculo.empresaId, { modo, eventoId: vinculo.eventoId, criancaId: vinculo.criancaId });
     const posicao = mapa.criancas.find((c) => String(c.criancaId).toLowerCase() === String(vinculo.criancaId).toLowerCase());
     res.json({
       geradoEm: mapa.geradoEm, balde: mapa.balde, modo, proximaAtualizacaoEm: mapa.proximaAtualizacaoEm, largura: mapa.largura, altura: mapa.altura,
-      celulaUnidades: mapa.celulaUnidades, valorMax: mapa.valorMax, celulas: mapa.celulas,
+      celulaUnidades: mapa.celulaUnidades, valorMax: mapa.valorMax, celulas: mapa.celulas, acumulado: mapa.acumulado,
+      trajeto: mapa.trajeto || [],
       posicao: posicao ? { x: posicao.x, y: posicao.y, metodo: posicao.metodo, confianca: posicao.confianca } : null,
     });
   } catch (err) {
