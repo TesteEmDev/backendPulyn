@@ -1,8 +1,8 @@
 // utils/uhfMapa.js - Monta o mapa de calor de uma empresa a partir das amostras UHF
 //
 // `calcularBalde` é puro (testável): recebe antenas e amostras e devolve as posições e a grade de calor.
-// `montarMapa` busca no banco e junta os baldes (`juntarBaldes`): "agora" suaviza os 3 últimos baldes de 20 s (onde as
-// pulseiras estão); "5min", "30min" e "evento" SOMAM o tempo de cada balde, então um lugar por onde a pulseira só passou
+// `montarMapa` busca no banco e junta os baldes (`juntarBaldes`): "agora" suaviza os baldes de 5 s dos últimos 20 s
+// (onde as pulseiras estão); "5min", "30min" e "evento" SOMAM o tempo de cada balde, então um lugar por onde a pulseira só passou
 // continua no mapa (o rastro). Cada balde pesa menos quanto mais antigo ele é (pesoDaIdade), mas nunca some: o rastro
 // de horas atrás fica com a cor fraca. Não existe relógio varrendo o banco: o mapa é calculado quando alguém pede, com
 // cache em memória.
@@ -19,16 +19,20 @@ const LEITOR_ONLINE_MS = 60000;    // sem lote há mais de 60 s = offline
 const CELULAS_MAX = 150000;
 const VALOR_MINIMO = 0.02;         // pulseiras/m² abaixo disso não vão para a resposta
 const VALOR_MINIMO_RASTRO = 0.002; // minutos/m² nos modos de período: baixo para uma passagem antiga não sumir
-// Baldes de 20 s de cada modo. "agora" = onde estão; os outros = tempo somado no período (minutos de pulseira por m²).
-// "evento" vai do início do evento (ou RASTRO_MAX_HORAS sem evento iniciado) até agora.
-const BALDES_DO_MODO = { agora: 3, '5min': 15, '30min': 90, evento: null };
+// Baldes (JANELA_MS) de cada modo. "agora" = onde estão (últimos 20 s); os outros = tempo somado no período (minutos de
+// pulseira por m²). "evento" vai do início do evento (ou RASTRO_MAX_HORAS sem evento iniciado) até agora.
+const BALDES_DO_MODO = {
+  agora: Math.round(20000 / JANELA_MS), '5min': Math.round(300000 / JANELA_MS), '30min': Math.round(1800000 / JANELA_MS), evento: null,
+};
 const MODOS_MAPA = Object.keys(BALDES_DO_MODO);
 // Peso de um balde do rastro pela idade: cai pela metade a cada RASTRO_MEIA_VIDA_MIN, mas nunca abaixo de RASTRO_PISO.
 const RASTRO_MEIA_VIDA_MIN = 20;
 const RASTRO_PISO = 0.1;
 const RASTRO_MAX_HORAS = 12;
-// Corredor entre antenas: cada mancha do caminho vale meio balde. Duas posições com mais de 3 min entre elas não ligam.
+// Corredor entre antenas: no "agora", cada mancha do caminho vale meia pulseira; nos períodos, 10 s de tempo (não
+// depende do tamanho do balde). Duas posições com mais de 3 min entre elas não ligam.
 const PESO_CORREDOR = 0.5;
+const SEGUNDOS_CORREDOR = 10;
 const CORREDOR_MAX_MS = 3 * 60000;
 
 const emMs = (data) => new Date(data).getTime();
@@ -162,15 +166,16 @@ function manchasDoCorredor(de, para, peso) {
   return manchas;
 }
 
-// Manchas de um balde com o `peso` dele, mais os corredores desde a última posição de cada pulseira (`ultimas`, que
-// é atualizado). Vista de novo depois de CORREDOR_MAX_MS, não dá para saber por onde ela foi: sem corredor.
-function manchasComCorredores(r, balde, ultimas, peso) {
+// Manchas de um balde com o `peso` dele, mais os corredores (com `pesoCorredor`) desde a última posição de cada
+// pulseira (`ultimas`, que é atualizado). Vista de novo depois de CORREDOR_MAX_MS, não dá para saber por onde ela foi:
+// sem corredor.
+function manchasComCorredores(r, balde, ultimas, peso, pesoCorredor) {
   const manchas = [];
   r.manchas.forEach((m, i) => {
     manchas.push({ ...m, peso: m.peso * peso });
     const codigo = r.posicoes[i].codigo;
     const anterior = ultimas.get(codigo);
-    if (anterior && balde - anterior.balde <= CORREDOR_MAX_MS) manchas.push(...manchasDoCorredor(anterior, m, peso * PESO_CORREDOR));
+    if (anterior && balde - anterior.balde <= CORREDOR_MAX_MS) manchas.push(...manchasDoCorredor(anterior, m, pesoCorredor));
     ultimas.set(codigo, { ...m, balde });
   });
   return manchas;
@@ -178,7 +183,7 @@ function manchasComCorredores(r, balde, ultimas, peso) {
 
 /**
  * Junta os baldes que terminam em `alvo` (Date) conforme o modo:
- *   'agora': média móvel exponencial dos 3 últimos (onde as pulseiras estão, sem piscar a cada 20 s);
+ *   'agora': média móvel exponencial dos últimos 20 s (onde as pulseiras estão, sem piscar a cada balde);
  *   período: soma do tempo de cada balde desde `desde` (modo "evento") ou dos últimos N baldes, em minutos, com o peso
  *   da idade (pesoDaIdade). Sem o "balde anterior" de calcularBalde, que contaria a mesma leitura duas vezes.
  * Nos dois, o caminho entre duas posições seguidas da mesma pulseira também esquenta (manchasComCorredores).
@@ -205,7 +210,7 @@ function juntarBaldes({ antenas, amostras, ciclos, escala, incluir, alvo, modo =
     for (let i = BALDES_DO_MODO.agora - 1; i >= 0; i -= 1) {
       const b = fim - i * JANELA_MS;
       const r = i === 0 ? atual : calcularBalde({ antenas, amostras: doBalde(b, true), ciclos, balde: new Date(b), escala, incluir });
-      const manchas = manchasComCorredores(r, b, ultimas, 1);
+      const manchas = manchasComCorredores(r, b, ultimas, 1, PESO_CORREDOR);
       grade = suavizar(manchas.length > r.manchas.length ? gradeDeCalor(manchas, dimensoes) : r.grade, grade);
       adicionarAoTrajeto(trajeto, new Date(b), r.posicoes);
     }
@@ -219,7 +224,8 @@ function juntarBaldes({ antenas, amostras, ciclos, escala, incluir, alvo, modo =
   const manchas = [];
   for (const b of baldes) {
     const r = calcularBalde({ antenas, amostras: doBalde(b, false), ciclos, balde: new Date(b), escala, incluir, aceitarAnterior: false, comGrade: false });
-    manchas.push(...manchasComCorredores(r, b, ultimas, (JANELA_MS / 60000) * pesoDaIdade(fim - b)));
+    const idade = pesoDaIdade(fim - b);
+    manchas.push(...manchasComCorredores(r, b, ultimas, (JANELA_MS / 60000) * idade, (SEGUNDOS_CORREDOR / 60) * idade));
     adicionarAoTrajeto(trajeto, new Date(b), r.posicoes);
   }
   const grade = gradeDeCalor(manchas, dimensoes);
@@ -406,7 +412,7 @@ async function montarMapa(empresaId, { modo = 'agora', balde, eventoId, timeId, 
 }
 
 module.exports = {
-  LARGURA_MAPA, ALTURA_MAPA, ESCALA_PADRAO, TOLERANCIA_MS, LEITOR_ONLINE_MS, MODOS_MAPA, pesoDaIdade,
+  BALDES_DO_MODO, SEGUNDOS_CORREDOR, LARGURA_MAPA, ALTURA_MAPA, ESCALA_PADRAO, TOLERANCIA_MS, LEITOR_ONLINE_MS, MODOS_MAPA, pesoDaIdade,
   ultimoBaldeFechado, calcularBalde, juntarBaldes, celulasDaGrade, filtroDePulseiras, montarMapa, invalidarMapa, buscarAntenas, buscarPulseiras,
   buscarCiclos, chaveCiclos,
 };

@@ -3,7 +3,7 @@
 // leitorUhf:  um UR4 da empresa. O firmware se identifica pelo moduleId + chave (só o hash fica no banco).
 // antenaUhf:  as 4 portas de cada leitor, com a posição na planta (mesmo espaço 450 x 320 dos checkpoints).
 // loteUhf:    cada lote recebido (leitor + seq), para não gravar o mesmo lote duas vezes, com os ciclos que ele cobre.
-// amostraUhf: resumo de uma pulseira numa antena numa janela de 20 s (balde). Fica 7 dias.
+// amostraUhf: resumo de uma pulseira numa antena numa janela de 5 s (balde; até out/2026 eram 20 s). Fica 7 dias.
 // empresa.mapaMetrosPorUnidade: escala da planta, para os cálculos em metros.
 // pulseira.epc: EPC gravado na tag UHF da pulseira (24 hex), vinculado na tela /admin/uhf.
 const { query, DB_DRIVER } = require('../database');

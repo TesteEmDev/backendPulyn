@@ -2,10 +2,13 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   calcularBalde, juntarBaldes, pesoDaIdade, celulasDaGrade, ultimoBaldeFechado, chaveCiclos, filtroDePulseiras,
+  SEGUNDOS_CORREDOR,
 } = require('../utils/uhfMapa');
+const { JANELA_MS } = require('../utils/uhfLote');
 
 const balde = new Date('2026-10-16T18:00:00.000Z');
-const anterior = new Date('2026-10-16T17:59:40.000Z');
+const anterior = new Date(balde.getTime() - JANELA_MS);
+const minutosDoBalde = JANELA_MS / 60000;
 const antenas = [
   { antenaId: 'a1', leitorId: 'L1', mapaX: 100, mapaY: 100, direcaoGraus: null, raioMetros: 1.2, ativa: true },
   { antenaId: 'a2', leitorId: 'L1', mapaX: 140, mapaY: 100, direcaoGraus: null, raioMetros: 1.2, ativa: true },
@@ -14,9 +17,10 @@ const antenas = [
 ];
 const amostra = (antenaId, codigo, b = balde, rssiMed = -60) => ({ balde: b, antenaId, codigo, n: 12, ciclos: 16, rssiMed });
 
-test('último balde fechado espera a tolerância de 3 s', () => {
-  assert.equal(ultimoBaldeFechado(new Date('2026-10-16T18:00:22.000Z')).toISOString(), '2026-10-16T17:59:40.000Z');
-  assert.equal(ultimoBaldeFechado(new Date('2026-10-16T18:00:23.500Z')).toISOString(), '2026-10-16T18:00:00.000Z');
+test('último balde fechado (janelas de 5 s) espera a tolerância de 3 s', () => {
+  assert.equal(JANELA_MS, 5000);
+  assert.equal(ultimoBaldeFechado(new Date('2026-10-16T18:00:07.000Z')).toISOString(), '2026-10-16T17:59:55.000Z');
+  assert.equal(ultimoBaldeFechado(new Date('2026-10-16T18:00:08.500Z')).toISOString(), '2026-10-16T18:00:00.000Z');
 });
 
 test('pulseira vista por duas antenas fica entre elas; leitor sem lote no balde usa o anterior', () => {
@@ -44,7 +48,7 @@ test('lotes de 0,5 s: a presença usa o total de ciclos do leitor no balde, não
 });
 
 test('ignora antenas sem posição, amostras velhas e o que o filtro exclui', () => {
-  const velho = new Date(balde.getTime() - 40000);
+  const velho = new Date(balde.getTime() - 2 * JANELA_MS);
   const r = calcularBalde({
     antenas, balde, escala: 0.05,
     amostras: [amostra('sem', 'AAA'), amostra('a1', 'BBB', velho), amostra('a1', 'CCC'), amostra('a1', 'DDD')],
@@ -75,8 +79,8 @@ test('filtro por criança: só a pulseira dela entra (o calor dos pais é só do
   assert.equal(filtroDePulseiras(pulseiras)('ZZZ'), true);
 });
 
-// Pulseira 4 baldes na antena a1 e depois 1 balde na a2 (mesmo leitor) (os baldes de 20 s terminando em `balde`).
-const rastro = [0, 1, 2, 3].map((i) => amostra('a1', 'AB1', new Date(balde.getTime() - (4 - i) * 20000))).concat(amostra('a2', 'AB1'));
+// Pulseira 4 baldes na antena a1 e depois 1 balde na a2 (mesmo leitor) (os baldes terminando em `balde`).
+const rastro = [0, 1, 2, 3].map((i) => amostra('a1', 'AB1', new Date(balde.getTime() - (4 - i) * JANELA_MS))).concat(amostra('a2', 'AB1'));
 const somaPerto = (grade, x, y) => {
   const c = Math.floor(x / grade.celula);
   const l = Math.floor(y / grade.celula);
@@ -100,13 +104,14 @@ test('modos de período somam o tempo: o lugar por onde a pulseira passou contin
   const naA2 = somaPerto(r.grade, 7, 5);     // a2 em (140,100)
   assert.ok(naA2 > 0, 'onde está agora');
   assert.ok(naA1 > naA2, 'ficou mais tempo na a1');
-  // Tempo em minutos: 5 baldes de 20 s = 1,67 min, cada um com o peso da idade, mais o corredor da a1 até a a2
-  // (2 m, 4 manchas de meio balde).
-  const pesosA1 = [80, 60, 40, 20].reduce((soma, seg) => soma + pesoDaIdade(seg * 1000), 0);
-  assert.ok(Math.abs(total(r.grade) - (pesosA1 + 1 + 4 * 0.5) / 3) < 0.05, `total ${total(r.grade)}`);
+  // Tempo em minutos: 5 baldes, cada um com o peso da idade, mais o corredor da a1 até a a2 (2 m, 4 manchas de
+  // SEGUNDOS_CORREDOR cada).
+  const pesosA1 = [4, 3, 2, 1].reduce((soma, i) => soma + pesoDaIdade(i * JANELA_MS), 0);
+  const esperado = (pesosA1 + 1) * minutosDoBalde + (4 * SEGUNDOS_CORREDOR) / 60;
+  assert.ok(Math.abs(total(r.grade) - esperado) < 0.02, `total ${total(r.grade)} (esperado ${esperado})`);
   // Baldes seguidos no mesmo lugar viram um ponto só.
   assert.deepEqual(r.trajeto, [
-    { balde: iso(balde.getTime() - 80000), ate: iso(balde.getTime() - 20000), x: 100, y: 100 },
+    { balde: iso(balde.getTime() - 4 * JANELA_MS), ate: iso(balde.getTime() - JANELA_MS), x: 100, y: 100 },
     { balde: balde.toISOString(), ate: balde.toISOString(), x: 140, y: 100 },
   ]);
   assert.deepEqual(r.atual.posicoes.map((p) => p.codigo), ['AB1']);
@@ -131,7 +136,7 @@ test('o vão entre duas antenas esquenta quando a pulseira vai de uma para a out
 
 test('no período, balde sem lote não repete as leituras do anterior', () => {
   const r = juntarBaldes({ antenas, amostras: [amostra('a1', 'AB2', anterior)], escala: 0.05, alvo: balde, modo: '5min' });
-  assert.ok(Math.abs(total(r.grade) - pesoDaIdade(20000) / 3) < 0.02, `total ${total(r.grade)}`);
+  assert.ok(Math.abs(total(r.grade) - pesoDaIdade(JANELA_MS) * minutosDoBalde) < 0.005, `total ${total(r.grade)}`);
   assert.equal(r.trajeto.length, 1);
 });
 

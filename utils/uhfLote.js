@@ -3,7 +3,7 @@
 // Cada leitor fecha um ciclo a cada 1 s e manda um lote por ciclo (1 por segundo) com o resumo por (pulseira, porta):
 // em quantos ciclos ela apareceu (n), a média do melhor RSSI de cada ciclo e o maior RSSI. Sem rede (ou com o envio
 // atrasado) o leitor junta mais ciclos num lote só; `ciclos` diz quantos.
-// O servidor soma os lotes em janelas de 20 s (balde): amostraUhf por (pulseira, antena) e loteUhf.ciclos por leitor,
+// O servidor soma os lotes em janelas de 5 s (balde): amostraUhf por (pulseira, antena) e loteUhf.ciclos por leitor,
 // que é o total de ciclos da janela (a presença é n / esse total).
 // A tag é guardada como o EPC sem zeros à esquerda (codigoDoEpc). Qual pulseira ela é vem de `pulseira.epc`
 // (vínculo feito em /admin/uhf, ex.: ABCABC000000000000000010) ou, no padrão antigo, do próprio código NFC
@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const { normalizeUid } = require('./uid');
 
 const EPC_TAMANHO = 24;
-const JANELA_MS = 20000;          // o mapa é recalculado a cada 20 s
+const JANELA_MS = 5000;           // o mapa é recalculado a cada 5 s
 const CICLO_MS = 1000;            // um ciclo a cada 1 s
 const CICLOS_POR_LOTE = 1;        // um lote por ciclo = 1 lote por segundo
 const LIMITE_LEITURAS = 300;      // leituras por lote
@@ -33,7 +33,7 @@ function epcDoCodigo(codigo) {
   return hex.padStart(EPC_TAMANHO, '0');
 }
 
-// Início da janela de 20 s que contém `data`.
+// Início da janela de 5 s que contém `data`.
 function baldeDe(data, janelaMs = JANELA_MS) {
   const ms = new Date(data).getTime();
   return new Date(Math.floor(ms / janelaMs) * janelaMs);

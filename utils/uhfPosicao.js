@@ -1,6 +1,6 @@
 // utils/uhfPosicao.js - Da leitura UHF à posição e ao mapa de calor (funções puras, tudo em METROS)
 //
-// Uma observação é o resumo de uma pulseira numa antena durante uma janela de 20 s:
+// Uma observação é o resumo de uma pulseira numa antena durante uma janela de 5 s:
 //   { x, y, direcaoGraus, raioMetros, rssi1m, expoente, n, ciclos, rssiMed }
 //   x, y          posição da antena em metros (o mapa converte as unidades da planta com a escala da empresa)
 //   direcaoGraus  para onde a antena aponta no mapa (0 = para cima, 90 = direita); null = teto, apontando para baixo
@@ -170,7 +170,7 @@ function gradeDeCalor(manchas, { largura, altura, celula = 0.25 }) {
   return { colunas, linhas, celula, valores };
 }
 
-// Média móvel exponencial entre duas grades do mesmo tamanho (evita o mapa "piscar" a cada 20 s).
+// Média móvel exponencial entre duas grades do mesmo tamanho (evita o mapa "piscar" a cada balde).
 function suavizar(atual, anterior, alpha = 0.6) {
   if (!anterior || anterior.valores.length !== atual.valores.length) return atual;
   return { ...atual, valores: atual.valores.map((v, i) => alpha * v + (1 - alpha) * anterior.valores[i]) };

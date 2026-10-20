@@ -28,9 +28,9 @@ test('código da pulseira vira EPC de 24 hex e o caminho de volta compara igual'
   assert.equal(epcDoCodigo('x'.repeat(3)), '');
 });
 
-test('balde é o início da janela de 20 s', () => {
-  assert.equal(baldeDe('2026-10-16T18:00:19.999Z').toISOString(), '2026-10-16T18:00:00.000Z');
-  assert.equal(baldeDe('2026-10-16T18:00:20.000Z').toISOString(), '2026-10-16T18:00:20.000Z');
+test('balde é o início da janela de 5 s', () => {
+  assert.equal(baldeDe('2026-10-16T18:00:04.999Z').toISOString(), '2026-10-16T18:00:00.000Z');
+  assert.equal(baldeDe('2026-10-16T18:00:05.000Z').toISOString(), '2026-10-16T18:00:05.000Z');
 });
 
 test('lote válido: limita n aos ciclos, junta repetidos e conta ignoradas', () => {
