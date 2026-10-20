@@ -5,7 +5,7 @@
 //
 // Cadastre os leitores em /admin/uhf, posicione as antenas e copie o ID do módulo e a chave mostrados ao criar.
 // O simulador lê do banco (mesmo .env do backend) a posição das antenas e as pulseiras da empresa, faz as crianças
-// andarem pela planta e manda um lote por leitor a cada 0,5 s (10 vezes mais rápido com --rapido), como o firmware faria.
+// andarem pela planta e manda um lote por leitor a cada 1 s (10 vezes mais rápido com --rapido), como o firmware faria.
 require('dotenv').config();
 const { allQuery, queryOne } = require('./database');
 const { epcDoCodigo, CICLO_MS, CICLOS_POR_LOTE } = require('./utils/uhfLote');

@@ -1,6 +1,6 @@
 // utils/uhfLote.js - Lote de leituras enviado pelos leitores UHF (Chainway UR4)
 //
-// Cada leitor fecha um ciclo a cada 0,5 s e manda um lote por ciclo (2 por segundo) com o resumo por (pulseira, porta):
+// Cada leitor fecha um ciclo a cada 1 s e manda um lote por ciclo (1 por segundo) com o resumo por (pulseira, porta):
 // em quantos ciclos ela apareceu (n), a média do melhor RSSI de cada ciclo e o maior RSSI. Sem rede (ou com o envio
 // atrasado) o leitor junta mais ciclos num lote só; `ciclos` diz quantos.
 // O servidor soma os lotes em janelas de 20 s (balde): amostraUhf por (pulseira, antena) e loteUhf.ciclos por leitor,
@@ -14,8 +14,8 @@ const { normalizeUid } = require('./uid');
 
 const EPC_TAMANHO = 24;
 const JANELA_MS = 20000;          // o mapa é recalculado a cada 20 s
-const CICLO_MS = 500;             // um ciclo a cada 0,5 s
-const CICLOS_POR_LOTE = 1;        // um lote por ciclo = 2 lotes por segundo
+const CICLO_MS = 1000;            // um ciclo a cada 1 s
+const CICLOS_POR_LOTE = 1;        // um lote por ciclo = 1 lote por segundo
 const LIMITE_LEITURAS = 300;      // leituras por lote
 const PORTAS = [1, 2, 3, 4];
 
