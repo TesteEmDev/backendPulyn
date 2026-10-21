@@ -8,15 +8,17 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
+const { empresaDaFamilia } = require('../utils/empresaFamilia');
 
-function resolveEmpresaId(req) {
+// Família: a planta e as zonas são as do buffet das crianças vinculadas, não a da "empresa" da própria conta.
+async function resolveEmpresaId(req) {
   if (isMaster(req) && req.query.empresaId) return String(req.query.empresaId);
-  return req.user.empresaId;
+  return empresaDaFamilia(req, { eventoId: req.query.eventoId });
 }
 
 router.get('/floor-plan', verifyToken, async (req, res) => {
   try {
-    const empresaId = resolveEmpresaId(req);
+    const empresaId = await resolveEmpresaId(req);
     const empresa = await queryOne(
       'SELECT empresaId, dadosPlanoPiso, nomePlanoPiso, tipoPlanoPiso FROM empresa WHERE empresaId = @id',
       { id: empresaId }
@@ -52,7 +54,7 @@ router.post('/floor-plan', verifyToken, requireRole('admin', 'master'), async (r
       return res.status(413).json({ error: 'A planta é muito grande. Reduza o tamanho da imagem e tente novamente.' });
     }
 
-    const empresaId = resolveEmpresaId(req);
+    const empresaId = await resolveEmpresaId(req);
     await query(
       `UPDATE empresa
        SET dadosPlanoPiso = @dataUrl,
@@ -76,7 +78,7 @@ router.post('/floor-plan', verifyToken, requireRole('admin', 'master'), async (r
 
 router.delete('/floor-plan', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
-    const empresaId = resolveEmpresaId(req);
+    const empresaId = await resolveEmpresaId(req);
     await query(
       `UPDATE empresa
        SET dadosPlanoPiso = NULL,
@@ -94,7 +96,7 @@ router.delete('/floor-plan', verifyToken, requireRole('admin', 'master'), async 
 
 router.get('/zones', verifyToken, async (req, res) => {
   try {
-    const empresaId = resolveEmpresaId(req);
+    const empresaId = await resolveEmpresaId(req);
     const empresa = await queryOne('SELECT dadosZonas FROM empresa WHERE empresaId = @id', { id: empresaId });
 
     if (!empresa || !empresa.dadosZonas) {
@@ -120,7 +122,7 @@ router.post('/zones', verifyToken, requireRole('admin', 'master'), async (req, r
       return res.status(400).json({ error: 'Zonas deve ser um array' });
     }
 
-    const empresaId = resolveEmpresaId(req);
+    const empresaId = await resolveEmpresaId(req);
     await query('UPDATE empresa SET dadosZonas = @dadosZonas WHERE empresaId = @id', {
       dadosZonas: JSON.stringify(zones),
       id: empresaId,

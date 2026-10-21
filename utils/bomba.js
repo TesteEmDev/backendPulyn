@@ -2,8 +2,8 @@
 //
 // Regras (baseadas no Counter-Strike):
 //   - Duas equipes: os Rebeldes (lado "tr": plantam) e os Agentes (lado "ct": desarmam). Os ids internos continuam tr/ct.
-//   - O sorteio de cada round escolhe o número de um jogador da equipe dos Rebeldes: só a pulseira dele planta.
-//   - Plantar: o portador mantém a pulseira no checkpoint por `plantarMs` sem interrupção (o leitor lê a cada 500 ms).
+//   - Qualquer jogador da equipe dos Rebeldes pode plantar a bomba (não há portador sorteado).
+//   - Plantar: o jogador mantém a pulseira no checkpoint por `plantarMs` sem interrupção (o leitor lê a cada 500 ms).
 //     Se a leitura falhar por mais de TOLERANCIA_LEITURA_MS, o tempo recomeça do zero.
 //   - A bomba fica ativa por `bombaSeg`. Se explodir, os Rebeldes vencem o round.
 //   - Desarmar: qualquer pulseira da equipe dos Agentes mantém a leitura no checkpoint da bomba por `desarmarMs`.
@@ -16,6 +16,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { normalizeUid, uidSqlExpression } = require('./uid');
 const { criarCache } = require('./cacheCurto');
+const { explosaoDaBombaEm, restanteDaBomba, SOM_PLANTADA_MS } = require('./bombaTempo');
 
 const BOMBA_GAME_TYPE = 'bomb_defusal';
 
@@ -326,19 +327,6 @@ async function definirNumeroJogador(eventoId, criancaId, numero) {
   await query('UPDATE crianca SET numeroJogador = @numero WHERE criancaId = @criancaId', { numero: valor, criancaId });
 }
 
-async function sortearPortador(round, eventoId) {
-  const candidatos = await allQuery(
-    `SELECT c.criancaId, c.numeroJogador FROM crianca c
-     WHERE LOWER(c.eventoId) = LOWER(@eventoId) AND c.timeId = @timeId
-       AND c.numeroJogador IS NOT NULL AND ${JOGADOR_ATIVO}`,
-    { eventoId, timeId: round.timeTrId }
-  );
-  if (candidatos.length === 0) {
-    throw erroHttp('A equipe dos Rebeldes não tem jogadores numerados. Numere os jogadores antes de iniciar o round.', 409);
-  }
-  return candidatos[Math.floor(Math.random() * candidatos.length)];
-}
-
 // ---------- partida ----------
 
 async function pararPartidasDoEvento(eventoId, status = 'cancelada') {
@@ -469,15 +457,14 @@ async function iniciarRound(partidaId) {
   const round = await buscarRoundAtual(partidaId);
   if (!round || round.status !== 'aguardando') throw erroHttp('Não há round aguardando para iniciar', 409);
 
-  const portador = await sortearPortador(round, partida.eventoId);
+  // Qualquer jogador dos Rebeldes pode plantar: não há portador sorteado.
   const resultado = await query(
-    `UPDATE roundBomba SET status = 'em_andamento', iniciadoEm = @agora,
-       portadorCriancaId = @portadorCriancaId, portadorNumero = @portadorNumero
+    `UPDATE roundBomba SET status = 'em_andamento', iniciadoEm = @agora
      WHERE roundId = @roundId AND status = 'aguardando'`,
-    { roundId: round.roundId, portadorCriancaId: portador.criancaId, portadorNumero: portador.numeroJogador, agora: new Date() }
+    { roundId: round.roundId, agora: new Date() }
   );
   if (!Number(resultado?.rowsAffected?.[0] || 0)) throw erroHttp('O round já foi iniciado', 409);
-  console.log(`🎮 [BOMBA] Round ${round.numero} iniciado | portador: jogador nº ${portador.numeroJogador} | duração ${partida.duracaoRoundSeg}s, bomba ${partida.bombaSeg}s`);
+  console.log(`🎮 [BOMBA] Round ${round.numero} iniciado | duração ${partida.duracaoRoundSeg}s, bomba ${partida.bombaSeg}s`);
 
   limparEmAndamentoDoEvento(partida.eventoId);
   const estado = await calcularEstado(partida.eventoId);
@@ -544,11 +531,14 @@ async function avaliarRound(partida, round, agora = new Date()) {
   if (!round || !partida || partida.status !== 'em_andamento') return round;
 
   if (round.status === 'bomba_plantada' && round.plantadaEm) {
-    if (agora.getTime() >= new Date(round.plantadaEm).getTime() + partida.bombaSeg * 1000) {
+    // A contagem da bomba só começa depois do som de "bomba plantada" (ver utils/bombaTempo.js).
+    const explosaoEm = explosaoDaBombaEm(round.plantadaEm, partida.bombaSeg);
+    if (agora.getTime() >= explosaoEm) {
+      console.log(`💥 [BOMBA] Round ${round.numero}: explosão ao fim de ${(explosaoEm - new Date(round.plantadaEm).getTime()) / 1000}s depois da plantada (som ${SOM_PLANTADA_MS} ms + bomba ${partida.bombaSeg}s) | processo ${process.pid}`);
       // O fim vale o instante da explosão (não o da checagem, que pode atrasar até 1 s): todos os checkpoints
       // contam a vitória a partir dele e tocam juntos.
       await finalizarRound(round, partida, 'tr', 'explodiu', {
-        finalizadoEm: new Date(new Date(round.plantadaEm).getTime() + partida.bombaSeg * 1000),
+        finalizadoEm: new Date(explosaoEm),
       });
       return buscarRoundAtual(partida.partidaId);
     }
@@ -653,12 +643,9 @@ async function processarLeitura({ checkpointId, uid }) {
 
   const base = { round: round.numero, lado, totalBombaSeg: partidaAtual.bombaSeg };
 
-  // ----- bomba ainda não plantada: só o portador sorteado planta -----
+  // ----- bomba ainda não plantada: qualquer jogador dos Rebeldes planta -----
   if (round.status === 'em_andamento') {
     if (lado === 'ct') return negado('ct_sem_bomba', 'A bomba ainda não foi plantada', base);
-    if (!mesmoId(crianca.criancaId, round.portadorCriancaId)) {
-      return negado('nao_e_portador', `Só o jogador nº ${round.portadorNumero} pode plantar a bomba`, base);
-    }
     const progresso = avancarLeitura(checkpoint, crianca, round, 'plantar', agora);
     if (progresso < partidaAtual.plantarMs) {
       registrarFimDaLeitura(checkpoint.checkpointId);
@@ -671,7 +658,7 @@ async function processarLeitura({ checkpointId, uid }) {
        WHERE roundId = @roundId AND status = 'em_andamento'`,
       { roundId: round.roundId, checkpointId: checkpoint.checkpointId, criancaId: crianca.criancaId, agora: new Date() }
     );
-    console.log(`💣 [BOMBA] Plantada no checkpoint ${checkpoint.checkpointId} por ${crianca.apelido || crianca.nome} | explode em ${partidaAtual.bombaSeg}s`);
+    console.log(`💣 [BOMBA] Plantada no checkpoint ${checkpoint.checkpointId} por ${crianca.apelido || crianca.nome} após ${progresso} ms de leitura contínua (plantar = ${partidaAtual.plantarMs} ms) | explode em ${SOM_PLANTADA_MS + partidaAtual.bombaSeg * 1000} ms (som ${SOM_PLANTADA_MS} ms + bomba ${partidaAtual.bombaSeg}s)`);
     leiturasEmAndamento.delete(chave(checkpoint.checkpointId));
     if (!Number(plantou?.rowsAffected?.[0] || 0)) return negado('bomba_em_outro_local', 'A bomba já foi plantada em outro local', base);
 
@@ -688,7 +675,7 @@ async function processarLeitura({ checkpointId, uid }) {
   if (!mesmoId(checkpoint.checkpointId, round.localCheckpointId)) {
     return negado('bomba_em_outro_local', 'A bomba foi plantada em outro local', base);
   }
-  const restante = restanteMs(round.plantadaEm, partidaAtual.bombaSeg * 1000, agora);
+  const restante = restanteDaBomba(round.plantadaEm, partidaAtual.bombaSeg, agora);
   if (lado === 'tr') return negado('tr_no_local', 'Defenda a bomba: sua equipe não pode desarmá-la', { ...base, restanteBombaMs: restante });
 
   const progresso = avancarLeitura(checkpoint, crianca, round, 'desarmar', agora);
@@ -737,6 +724,7 @@ function avancarLeitura(checkpoint, crianca, round, tipo, agora) {
     criancaId: crianca.criancaId, roundId: round.roundId,
     inicio: agora.getTime(), ultimaLeitura: agora.getTime(),
   });
+  console.log(`📖 [BOMBA] Começou a ${tipo} no checkpoint ${checkpoint.checkpointId} (${crianca.apelido || crianca.nome}) | leitura contínua recomeçou do zero`);
   return 0;
 }
 
@@ -814,7 +802,7 @@ async function calcularEstado(eventoId) {
       localCheckpointId: round.localCheckpointId,
       local: localPor(round.localCheckpointId),
       restanteRoundMs: round.status === 'em_andamento' ? restanteMs(round.iniciadoEm, partida.duracaoRoundSeg * 1000, agora) : null,
-      restanteBombaMs: round.status === 'bomba_plantada' ? restanteMs(round.plantadaEm, partida.bombaSeg * 1000, agora) : null,
+      restanteBombaMs: round.status === 'bomba_plantada' ? restanteDaBomba(round.plantadaEm, partida.bombaSeg, agora) : null,
       vencedorTimeId: round.vencedorTimeId,
       motivo: round.motivo,
     } : null,
@@ -902,7 +890,7 @@ async function obterEstadoCheckpoint(checkpointId) {
   }
   if (round && round.status === 'bomba_plantada') {
     const ehLocal = mesmoId(checkpoint.checkpointId, round.localCheckpointId);
-    return { ...base, fase: ehLocal ? 'plantada' : 'bloqueado', ehLocal, restanteBombaMs: restanteMs(round.plantadaEm, partida.bombaSeg * 1000, agora) };
+    return { ...base, fase: ehLocal ? 'plantada' : 'bloqueado', ehLocal, restanteBombaMs: restanteDaBomba(round.plantadaEm, partida.bombaSeg, agora) };
   }
 
   // Round aguardando: mostra por alguns segundos como o round anterior terminou.

@@ -50,6 +50,7 @@ const qrcodeRoutes = require('./routes/qrcode');
 const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
 const companyMapRoutes = require('./routes/companyMap');
+const uhfRoutes = require('./routes/uhf');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -63,6 +64,7 @@ const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
 const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
+const { ensureUhfSchema } = require('./migrations/uhf');
 const refemRoutes = require('./routes/refem');
 const refemJogo = require('./utils/refem');
 const bombaRoutes = require('./routes/bomba');
@@ -256,7 +258,7 @@ setupPoolMonitoringEndpoints(app);
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
 
 app.use('/api', (req, res, next) => {
-  if (/^\/(auth|kiosk|score-kiosk|event-control|leituras)(\/|$)/i.test(req.path) || !req.headers.authorization) {
+  if (/^\/(auth|kiosk|score-kiosk|event-control|leituras|uhf\/lote)(\/|$)/i.test(req.path) || !req.headers.authorization) {
     return next();
   }
 
@@ -1885,6 +1887,7 @@ app.use('/api/clientes', clientRoutes);
 // Eventos
 app.use('/api/eventos', eventRoutes);
 app.use('/api/company-map', companyMapRoutes);
+app.use('/api/uhf', uhfRoutes);   // leitores UHF (UR4) e mapa de calor
 
 // Brincadeiras
 app.use('/api/brincadeiras', brincadeirasRoutes);
@@ -2004,6 +2007,7 @@ async function startServer() {
     await ensureRefemSchema();
     await ensureCodigoBuffetSchema();
     await ensurePulseiraPorEmpresaSchema();
+    await ensureUhfSchema();
     refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)
     zonaDominioJogo.iniciarRelogio();   // encerra o jogo quando uma equipe vence (Zona - Domínio total)
     bombaJogo.iniciarRelogio();   // explosão da bomba e fim do tempo do round (Conquistar e Destruir)

@@ -34,7 +34,7 @@ function nomeParaExibir(nome) {
 
 function idadeValida(idade) {
   const valor = Number.parseInt(idade, 10);
-  return Number.isFinite(valor) ? Math.max(0, Math.min(18, valor)) : null;
+  return Number.isFinite(valor) ? Math.max(0, valor) : null;
 }
 
 // Cria o perfil de uma criança nova e já aponta o último evento para o evento atual.

@@ -343,6 +343,13 @@ router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 
 
     const requestedIds = Array.isArray(req.body?.checkpoints) ? req.body.checkpoints.map(idOf).filter(Boolean) : [];
     if (requestedIds.length === 0) return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });
+    // Mesmos mínimos da criação do jogo: dois locais de bomba (A e B) e início + fim da sequência do refém.
+    if (game.tipo === 'bomb_defusal' && new Set(requestedIds.map(id => id.toLowerCase())).size < 2) {
+      return res.status(400).json({ error: 'O Conquistar e Destruir precisa de 2 checkpoints: os locais A e B da bomba.' });
+    }
+    if (game.tipo === 'hostage_rescue' && new Set(requestedIds.map(id => id.toLowerCase())).size < 2) {
+      return res.status(400).json({ error: 'O Resgate do Refém precisa de pelo menos 2 checkpoints: o início e o fim da sequência.' });
+    }
 
     // Vale o evento de origem do jogo e também os eventos aos quais ele foi ligado depois (eventoBrincadeira):
     // um jogo reaproveitado em outro evento continua com o eventoId antigo na própria linha.

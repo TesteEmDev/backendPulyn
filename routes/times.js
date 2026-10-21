@@ -301,4 +301,54 @@ router.post(
   }
 );
 
+// Coloca um participante em um time (ou tira do time, com timeId nulo), um a um. Muda só o time:
+// pulseira, nome e demais dados do participante ficam como estão.
+router.put(
+  '/evento/:eventoId/crianca/:criancaId/time',
+  verifyToken,
+  requireRole(TEAM_MANAGER_ROLES),
+  async (req, res) => {
+    try {
+      const { eventoId, criancaId } = req.params;
+      const timeId = req.body?.timeId || null;
+
+      const crianca = await queryOne(
+        `SELECT criancaId, timeId, empresaId FROM crianca
+         WHERE criancaId = @criancaId AND eventoId = @eventoId AND (empresaId = @empresaId OR @isMaster = 1)`,
+        { criancaId, eventoId, empresaId: req.user.empresaId, isMaster: isMaster(req) ? 1 : 0 }
+      );
+      if (!crianca) return res.status(404).json({ error: 'Participante não encontrado neste evento' });
+
+      if (timeId) {
+        const time = await queryOne(
+          'SELECT timeId FROM "time" WHERE timeId = @timeId AND eventoId = @eventoId AND empresaId = @empresaId',
+          { timeId, eventoId, empresaId: crianca.empresaId }
+        );
+        if (!time) return res.status(400).json({ error: 'Time não pertence ao evento selecionado' });
+      }
+
+      await withTransaction(async (tx) => {
+        await tx.query(
+          'UPDATE crianca SET timeId = @timeId WHERE criancaId = @criancaId AND eventoId = @eventoId',
+          { timeId, criancaId, eventoId }
+        );
+        // A pontuação do time é a soma das crianças: recalcula o time de origem e o de destino.
+        for (const afetado of [...new Set([crianca.timeId, timeId].filter(Boolean))]) {
+          await tx.query(
+            `UPDATE "time"
+             SET pontos = (SELECT ISNULL(SUM(pontos), 0) FROM crianca WHERE timeId = @timeId)
+             WHERE timeId = @timeId`,
+            { timeId: afetado }
+          );
+        }
+      });
+
+      return res.json({ ok: true, criancaId, timeId });
+    } catch (err) {
+      console.error('❌ Erro ao mover participante de time:', err);
+      return res.status(500).json({ error: err.message });
+    }
+  }
+);
+
 module.exports = router;
