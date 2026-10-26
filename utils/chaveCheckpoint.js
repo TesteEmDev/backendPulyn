@@ -10,6 +10,7 @@
 //   - listas em texto JSON dos jogos e partidas (brincadeira.checkpoints, partidaBomba.locaisIds, partidaRefem.sequenciaIds)
 const { withTransaction } = require('../database');
 const { garantirCodigo } = require('./codigoBuffet');
+const { chaveComCodigoDoBuffet, cabeNoEsp32 } = require('./idCheckpoint');
 
 function erroHttp(mensagem, statusCode) {
   const erro = new Error(mensagem);
@@ -102,7 +103,10 @@ async function usarIdSimples(chave) {
         throw erroHttp('O ID simples já pertence a outro checkpoint do mesmo buffet', 409);
       }
       const codigoDoDono = await garantirCodigo(dono.empresaId);
-      const novaChaveDoDono = `${codigoDoDono}-${dono.codigo || dono.checkpointId}`;
+      const novaChaveDoDono = chaveComCodigoDoBuffet(dono.codigo || dono.checkpointId, codigoDoDono);
+      if (!cabeNoEsp32(novaChaveDoDono)) {
+        throw erroHttp(`A chave "${novaChaveDoDono}" ficaria longa demais para o ESP32 (máximo 16 caracteres)`, 409);
+      }
       const ocupada = await tx.queryOne('SELECT checkpointId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@chave)', { chave: novaChaveDoDono });
       if (ocupada) throw erroHttp(`A chave "${novaChaveDoDono}" já está em uso`, 409);
       await renomearChave(tx, dono.empresaId, dono.checkpointId, novaChaveDoDono);

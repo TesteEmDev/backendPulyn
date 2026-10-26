@@ -4,6 +4,7 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { garantirCodigo } = require('../utils/codigoBuffet');
 const { usarIdSimples } = require('../utils/chaveCheckpoint');
+const { validarCodigoCheckpoint, chaveComCodigoDoBuffet, cabeNoEsp32, tamanhoMaximoComCodigoDoBuffet } = require('../utils/idCheckpoint');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
@@ -35,13 +36,26 @@ function removeCheckpointFromJson(value, checkpointId) {
   }
 }
 
+// IP que a placa informa no heartbeat. Só aceita IPv4 válido; qualquer outra coisa é ignorado.
+function ipDoCheckpoint(valor) {
+  if (typeof valor !== 'string') return null;
+  const ip = valor.trim();
+  const partes = ip.split('.');
+  const valido = partes.length === 4 && partes.every(p => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+  return valido ? ip : null;
+}
+
 // ✨ NOVO: Heartbeat - Checkpoint registra que está online
 // SEM autenticação: Arduino envia heartbeat sem token
+// O corpo pode trazer o IP da placa ({"ip":"192.168.0.50"}). Placas antigas mandam "{}" e o IP fica como está.
 router.post('/:checkpointId/heartbeat', async (req, res) => {
   try {
     const { checkpointId } = req.params;
     const now = new Date();
-    
+    const ip = ipDoCheckpoint(req.body?.ip);
+    const campoIp = ip ? ', ip = @ip' : '';
+    const extra = ip ? { ip } : {};
+
     const checkpoint = await queryOne(
       'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
@@ -54,15 +68,15 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
     // validada para não aceitar IDs arbitrários.
     try {
       await query(
-        `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now WHERE checkpointId = @id`,
-        { id: checkpointId, now }
+        `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now${campoIp} WHERE checkpointId = @id`,
+        { id: checkpointId, now, ...extra }
       );
     } catch (err) {
       // Se coluna ultimoVisto não existe, só atualiza o status
       if (err.message.includes('ultimoVisto')) {
         await query(
-          `UPDATE pontoVerificacao SET status = 'online' WHERE checkpointId = @id`,
-          { id: checkpointId }
+          `UPDATE pontoVerificacao SET status = 'online'${campoIp} WHERE checkpointId = @id`,
+          { id: checkpointId, ...extra }
         );
       } else {
         throw err;
@@ -116,7 +130,8 @@ router.get('/resumo', verifyToken, async (req, res) => {
   }
 });
 
-// Código curto do buffet do usuário (o ESP32 o informa na página /config quando o ID também existe em outro buffet).
+// Código curto do buffet do usuário. Quando o ID também existe em outro buffet, a chave do checkpoint leva esse código na frente
+// e é ela que se digita no ESP32 (página /config).
 router.get('/codigo-buffet', verifyToken, async (req, res) => {
   try {
     res.json({ codigo: await garantirCodigo(req.user.empresaId) });
@@ -324,11 +339,10 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
 
     // O ID digitado é único dentro do BUFFET (outros buffets podem usar o mesmo). A chave interna do banco continua
     // global: vale o próprio ID quando ele está livre no sistema; se outro buffet já usa esse ID, vira
-    // "<código do buffet>-<ID>" e o ESP32 informa o código do buffet na página /config (ver utils/codigoBuffet.js).
+    // "<código do buffet>-<ID>" (ver utils/codigoBuffet.js). Os dois casos precisam caber no ESP32 (utils/idCheckpoint.js).
     const codigo = String(id).trim();
-    if (codigo.length > 40 || /[\s/\\?#%]/.test(codigo)) {
-      return res.status(400).json({ error: 'O ID do checkpoint deve ter até 40 caracteres, sem espaços nem os símbolos / \\ ? # %' });
-    }
+    const erroCodigo = validarCodigoCheckpoint(codigo);
+    if (erroCodigo) return res.status(400).json({ error: erroCodigo });
     const existing = await queryOne(
       `SELECT p.eventoId, e.nome AS eventoNome
        FROM pontoVerificacao p LEFT JOIN evento e ON e.eventoId = p.eventoId
@@ -342,7 +356,12 @@ router.post('/evento/:eventoId', verifyToken, async (req, res) => {
 
     const empresaCodigo = await garantirCodigo(empresaId);
     const idLivre = !(await queryOne('SELECT checkpointId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@codigo)', { codigo }));
-    const checkpointId = idLivre ? codigo : `${empresaCodigo}-${codigo}`;
+    const checkpointId = idLivre ? codigo : chaveComCodigoDoBuffet(codigo, empresaCodigo);
+    if (!idLivre && !cabeNoEsp32(checkpointId)) {
+      return res.status(409).json({
+        error: `O ID "${codigo}" já é usado em outro buffet e, com o código do buffet, a chave "${checkpointId}" ficaria longa demais para o ESP32 (máximo 16 caracteres). Use um ID de até ${tamanhoMaximoComCodigoDoBuffet(empresaCodigo)} caracteres.`,
+      });
+    }
     if (!idLivre && await queryOne('SELECT checkpointId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)', { checkpointId })) {
       return res.status(409).json({ error: `O ID "${codigo}" não pode ser usado: já existe um checkpoint com a chave "${checkpointId}".` });
     }
