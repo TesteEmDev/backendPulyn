@@ -91,8 +91,8 @@ router.post('/login', async (req, res) => {
       { id: login.loginId }
     );
 
-    // Conta com mais de uma área: o front mostra a escolha de área antes de seguir
-    const redirect = papeis.length > 1 ? '/escolher-area' : (ROLE_REDIRECTS[login.perfil] || '/admin');
+    // Entra direto na área principal; as outras áreas da conta aparecem no menu
+    const redirect = ROLE_REDIRECTS[login.perfil] || '/admin';
 
     res.json({
       success: true,
