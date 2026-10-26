@@ -126,7 +126,7 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
 // ==================== PAPÉIS DE UMA CONTA ====================
 
-// PUT /api/logins/:id/papeis  { papeis: ["reception", "game_master"] }
+// PUT /api/acessos/:id/papeis  { papeis: ["reception", "game_master"] }
 // Define as áreas extras da conta (além do perfil principal). Só para contas da equipe.
 router.put('/:id/papeis', requireRole('admin', 'master'), async (req, res) => {
   try {
