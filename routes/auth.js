@@ -3,9 +3,39 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { query, queryOne } = require('../database');
+const { verifyToken } = require('../utils/middleware');
+const { papeisDaConta } = require('../utils/papeis');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk', 'score_kiosk']);
+
+// Token da conta na área `role`. `papeis` é a lista de áreas que a conta pode usar (vai junto para o front).
+function assinarToken(login, role, papeis) {
+  return jwt.sign(
+    {
+      id: login.loginId,
+      email: login.email,
+      empresaId: login.empresaId,
+      empresa_nome: login.empresa_nome,
+      role,
+      papeis,
+      plan: login.plano   // o painel usa para mostrar os jogos do plano (o backend confere no banco)
+    },
+    JWT_SECRET,
+    { expiresIn: '24h' }
+  );
+}
+
+const ROLE_REDIRECTS = {
+  'admin': '/admin',
+  'reception': '/reception',
+  'game_master': '/game-master',
+  'display': '/display',
+  'family': '/family',
+  'master': '/master',
+  'kiosk': '/reception/kiosk',
+  'score_kiosk': '/score-kiosk'
+};
 
 // Login: validar email + senha contra tabela logins
 router.post('/login', async (req, res) => {
@@ -19,7 +49,7 @@ router.post('/login', async (req, res) => {
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.loginId, l.email, l.senha, l.status, l.perfil, l.nomeFamilia,
+      `SELECT l.loginId, l.email, l.senha, l.status, l.perfil, l.perfisExtras, l.nomeFamilia,
               e.empresaId as empresaId, e.nome as empresa_nome, e.[plano]
        FROM login l
        JOIN empresa e ON l.empresaId = e.empresaId
@@ -51,19 +81,9 @@ router.post('/login', async (req, res) => {
     // ✅ Login bem-sucedido
     console.log(`✅ Login bem-sucedido: ${email} (role: ${login.perfil})`);
 
-    // Gerar JWT com empresaId e role
-    const token = jwt.sign(
-      { 
-        id: login.loginId,
-        email: login.email,
-        empresaId: login.empresaId,
-        empresa_nome: login.empresa_nome,
-        role: login.perfil,
-        plan: login.plano   // o painel usa para mostrar os jogos do plano (o backend confere no banco)
-      },
-      JWT_SECRET,
-      { expiresIn: '24h' }
-    );
+    // Token na área principal da conta; as outras áreas dela ficam em papeis
+    const papeis = papeisDaConta(login);
+    const token = assinarToken(login, login.perfil, papeis);
 
     // Atualizar último acesso
     await query(
@@ -71,17 +91,8 @@ router.post('/login', async (req, res) => {
       { id: login.loginId }
     );
 
-    // Definir redirect baseado no role
-    const roleRedirects = {
-      'admin': '/admin',
-      'reception': '/reception',
-      'game_master': '/game-master',
-      'display': '/display',
-      'family': '/family',
-      'master': '/master',
-      'kiosk': '/reception/kiosk',
-      'score_kiosk': '/score-kiosk'
-    };
+    // Conta com mais de uma área: o front mostra a escolha de área antes de seguir
+    const redirect = papeis.length > 1 ? '/escolher-area' : (ROLE_REDIRECTS[login.perfil] || '/admin');
 
     res.json({
       success: true,
@@ -94,7 +105,8 @@ router.post('/login', async (req, res) => {
         name: login.nomeFamilia || login.empresa_nome,
         email: login.email,
         role: login.perfil,
-        redirect: roleRedirects[login.perfil] || '/admin',
+        papeis,
+        redirect,
         plan: login.plano,
         empresaId: login.empresaId
       }
@@ -102,6 +114,51 @@ router.post('/login', async (req, res) => {
 
   } catch (err) {
     console.error('❌ Erro ao fazer login:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Troca de área: a conta pede um token para outro papel que ela já tem
+// POST /auth/papel  { role }
+router.post('/papel', verifyToken, async (req, res) => {
+  try {
+    const { role } = req.body || {};
+
+    const login = await queryOne(
+      `SELECT l.loginId, l.email, l.status, l.perfil, l.perfisExtras, l.nomeFamilia,
+              e.empresaId as empresaId, e.nome as empresa_nome, e.[plano]
+       FROM login l
+       JOIN empresa e ON l.empresaId = e.empresaId
+       WHERE l.loginId = @id`,
+      { id: req.user.id }
+    );
+
+    if (!login || login.status !== 'active') {
+      return res.status(401).json({ error: 'Sessão inválida. Entre de novo.' });
+    }
+
+    const papeis = papeisDaConta(login);
+    if (!papeis.includes(role)) {
+      return res.status(403).json({ error: 'Esta conta não tem acesso a essa área' });
+    }
+
+    const token = assinarToken(login, role, papeis);
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: login.loginId,
+        name: login.nomeFamilia || login.empresa_nome,
+        email: login.email,
+        role,
+        papeis,
+        redirect: ROLE_REDIRECTS[role] || '/admin',
+        plan: login.plano,
+        empresaId: login.empresaId
+      }
+    });
+  } catch (err) {
+    console.error('❌ Erro ao trocar de área:', err);
     res.status(500).json({ error: err.message });
   }
 });
