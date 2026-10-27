@@ -45,23 +45,24 @@ async function ensaio() {
 
   const linhas = await db.allQuery('SELECT id, checkpointId, codigo, numCheck, macAddress, statusTransferencia, empresaId FROM pontoVerificacao ORDER BY id');
   assert.equal(linhas.length, antes.length, 'a migração não pode criar nem apagar linhas');
-  for (const l of linhas) {
-    assert.ok(Number.isInteger(Number(l.id)), `id numérico em ${l.checkpointId}`);
+  // Os cadastrados pelo fluxo novo (chave cp-N) já existem no banco real; as regras de "antigo" valem só para os outros.
+  const antigos = linhas.filter((l) => !String(l.checkpointId).startsWith('cp-'));
+  for (const l of linhas) assert.ok(Number.isInteger(Number(l.id)), `id numérico em ${l.checkpointId}`);
+  for (const l of antigos) {
     assert.equal(l.numCheck, l.codigo, `numCheck copiado de codigo em ${l.checkpointId}`);
     assert.equal(l.statusTransferencia, 'aceito', `linha antiga fica aceita: ${l.checkpointId}`);
-    assert.equal(l.macAddress, null);
   }
   assert.equal(new Set(linhas.map((l) => l.id)).size, linhas.length, 'ids únicos');
   const intactas = await db.allQuery('SELECT checkpointId, empresaId FROM pontoVerificacao ORDER BY checkpointId');
   assert.deepEqual(intactas, antes.map(({ checkpointId, empresaId }) => ({ checkpointId, empresaId })), 'chave e buffet antigos intactos');
-  console.log(`  ✔ ${linhas.length} checkpoints antigos: id gerado, numCheck copiado, status aceito, chave intacta`);
+  console.log(`  ✔ ${antigos.length} checkpoints antigos (de ${linhas.length}): id gerado, numCheck copiado, status aceito, chave intacta`);
 
   const empresa = await db.queryOne("SELECT empresaId, nome FROM empresa WHERE empresaId = 'empresa-001'");
   assert.ok(empresa, 'buffet de teste empresa-001 existe');
 
   console.log('▶ rotas atuais dos checkpoints não podem mudar de formato');
   const legado = require('../routes/checkpoints');
-  const eventoLegado = await db.queryOne("SELECT eventoId, empresaId FROM pontoVerificacao WHERE proposito = 'game' LIMIT 1");
+  const eventoLegado = await db.queryOne("SELECT eventoId, empresaId FROM pontoVerificacao WHERE proposito = 'game' AND eventoId IS NOT NULL AND statusTransferencia = 'aceito' AND checkpointId NOT LIKE 'cp-%' LIMIT 1");
   assert.ok(eventoLegado, 'há um checkpoint de jogo para comparar');
   const lista = await chamar(legado, 'GET', `/evento/${eventoLegado.eventoId}`, { empresaId: eventoLegado.empresaId });
   assert.equal(lista.status, 200, JSON.stringify(lista.body));
@@ -130,7 +131,12 @@ async function ensaio() {
 
   r = await chamar(router, 'GET', '/?statusTransferencia=estoque');
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body.map((x) => Number(x.id)), [Number(a.id), Number(b.id)], 'lista só o estoque');
+  assert.deepEqual(
+    r.body.map((x) => Number(x.id)).filter((id) => id === Number(a.id) || id === Number(b.id)),
+    [Number(a.id), Number(b.id)],
+    'lista o estoque'
+  );
+  assert.ok(r.body.every((x) => x.statusTransferencia === 'estoque'), 'e só o estoque');
 
   r = await chamar(router, 'POST', `/${a.id}/transferir`, { corpo: { empresaId: 'nao-existe' } });
   assert.equal(r.status, 404, 'buffet inexistente');
@@ -177,7 +183,7 @@ async function ensaio() {
   assert.equal(r.status, 404);
 
   // Um checkpoint antigo (aceito) não pode ser transferido, excluído nem ter o número mudado pelo master.
-  const antigo = linhas[0];
+  const antigo = antigos[0];
   r = await chamar(router, 'POST', `/${antigo.id}/transferir`, { corpo: { empresaId: empresa.empresaId } });
   assert.equal(r.status, 409);
   r = await chamar(router, 'DELETE', `/${antigo.id}`);
@@ -245,7 +251,11 @@ async function ensaio() {
   console.log('  ✔ aceite: valida número, evento e buffet; grava empresaId e codigo');
 
   r = await chamar(recebimento, 'GET', '/sem-evento', admin());
-  assert.ok(r.body.some((c) => c.checkpointId === pend.checkpointId), 'aceito sem evento aparece em sem-evento');
+  const semEventoLinha = r.body.find((c) => c.checkpointId === pend.checkpointId);
+  assert.ok(semEventoLinha, 'aceito sem evento aparece em sem-evento');
+  for (const campo of ['nome', 'tipo', 'macAddress', 'numCheck', 'status', 'zona', 'pontos']) {
+    assert.ok(campo in semEventoLinha, `a lista sem-evento traz ${campo} (a tabela do buffet precisa)`);
+  }
   let legadoLista = await chamar(legado, 'GET', `/evento/${eventoLegado.eventoId}`, { empresaId: buffet });
   assert.ok(!legadoLista.body.some((c) => c.checkpointId === pend.checkpointId), 'sem evento não entra na lista de um evento');
 

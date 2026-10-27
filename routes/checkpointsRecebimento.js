@@ -10,7 +10,7 @@ const { STATUS, validarNumCheck, podeAceitar, podeRecusar } = require('../utils/
 router.use(verifyToken, requireRole('admin'));
 
 const COLUNAS = `p.checkpointId, p.numCheck, p.macAddress, p.nome, p.tipo, p.proposito, p.status, p.ultimoVisto,
-  p.statusTransferencia, p.eventoId, p.transferidoEm, e.nome AS eventoNome`;
+  p.statusTransferencia, p.eventoId, p.transferidoEm, p.zona, p.pontos, e.nome AS eventoNome`;
 
 const buscar = (checkpointId) => queryOne(
   `SELECT ${COLUNAS}, p.empresaId, p.empresaDestinoId
