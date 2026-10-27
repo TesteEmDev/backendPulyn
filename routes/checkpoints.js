@@ -44,7 +44,7 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
     const now = new Date();
     
     const checkpoint = await queryOne(
-      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id',
+      'SELECT checkpointId, numCheck, statusTransferencia FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (!checkpoint) {
@@ -70,7 +70,12 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
       }
     }
     
-    res.json({ ok: true, message: 'Checkpoint online', timestamp: now });
+    // numCheck e statusTransferencia deixam o aparelho (identificado pelo MAC) saber o número que o buffet deu a ele
+    // e se já foi aceito.
+    res.json({
+      ok: true, message: 'Checkpoint online', timestamp: now,
+      numCheck: checkpoint.numCheck, statusTransferencia: checkpoint.statusTransferencia,
+    });
   } catch (err) {
     console.error('❌ Erro ao processar heartbeat:', err);
     res.status(500).json({ error: err.message });

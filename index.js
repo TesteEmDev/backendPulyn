@@ -33,6 +33,7 @@ const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
 const checkpointsMasterRoutes = require('./routes/checkpointsMaster');
 const checkpointsRecebimentoRoutes = require('./routes/checkpointsRecebimento');
+const { identificarPorMac } = require('./utils/dispositivoMac');
 const leiturasRoutes = require('./routes/leituras');
 const settingsRoutes = require('./routes/settings');
 const empresaRoutes = require('./routes/empresa');
@@ -252,6 +253,7 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 // Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
+app.use('/api', identificarPorMac);   // ESP32 que manda o MAC no lugar do ID do checkpoint (utils/dispositivoMac.js)
 
 // 🆕 Monitoramento de pool de conexões
 const { poolMonitoringMiddleware, setupPoolMonitoringEndpoints } = require('./utils/poolMonitoring');

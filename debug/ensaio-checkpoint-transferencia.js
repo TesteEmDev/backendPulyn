@@ -4,10 +4,11 @@
 const assert = require('node:assert/strict');
 const jwt = require('jsonwebtoken');
 const db = require('../database');
+const { identificarPorMac } = require('../utils/dispositivoMac');
 
 const REVERTER = 'ENSAIO_REVERTIDO';
 
-function chamar(router, metodo, url, { corpo = {}, papel = 'master', empresaId } = {}) {
+function chamar(router, metodo, url, { corpo = {}, papel = 'master', empresaId, viaMac = null } = {}) {
   return new Promise((resolve, reject) => {
     const [caminho, texto = ''] = url.split('?');
     const req = {
@@ -20,7 +21,11 @@ function chamar(router, metodo, url, { corpo = {}, papel = 'master', empresaId }
       status(codigo) { this.statusCode = codigo; return this; },
       json(body) { resolve({ status: this.statusCode, body }); return this; },
     };
-    router.handle(req, res, (erro) => (erro ? reject(erro) : resolve({ status: 404, body: null })));
+    const seguir = () => router.handle(req, res, (erro) => (erro ? reject(erro) : resolve({ status: 404, body: null })));
+    if (!viaMac) return seguir();
+    // Como no app: o middleware enxerga a URL com o prefixo em que o roteador está montado e pode reescrevê-la.
+    req.url = viaMac + req.url;
+    identificarPorMac(req, res, () => { req.url = req.url.slice(viaMac.length); seguir(); }).catch(reject);
   });
 }
 
@@ -281,6 +286,94 @@ async function ensaio() {
   r = await chamar(recebimento, 'POST', `/cp-${z.id}/recusar`, admin());
   assert.equal(r.status, 404, 'já não é pendente deste buffet');
   console.log('  ✔ recusar devolve ao estoque');
+
+  // ---------- etapa 3: o ESP32 se identifica pelo MAC ----------
+  console.log('▶ ESP32 identificado pelo MAC');
+  const MAC = 'AA:BB:CC:DD:EE:05';
+  const viaCp = (rota, metodo, url, extra = {}) => chamar(rota, metodo, url, { viaMac: '/pontoVerificacao', ...extra });
+  const statusDoBanco = (chave) => db.queryOne('SELECT status, ultimoVisto FROM pontoVerificacao WHERE checkpointId = @c', { c: chave });
+
+  r = await viaCp(legado, 'POST', '/AA:BB:CC:DD:EE:99/heartbeat');
+  assert.equal(r.status, 404, 'MAC desconhecido');
+  assert.equal(r.body.mac, 'AA:BB:CC:DD:EE:99');
+
+  const d = await criar(MAC, { nome: 'Portal' });
+  const chaveD = `cp-${d.id}`;
+  r = await viaCp(legado, 'POST', `/${MAC}/heartbeat`);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.statusTransferencia, 'estoque');
+  assert.equal(r.body.numCheck, null);
+  assert.equal((await statusDoBanco(chaveD)).status, 'online', 'em estoque o heartbeat marca online (o master vê o aparelho)');
+  r = await viaCp(legado, 'POST', `/${MAC.toLowerCase()}/heartbeat`);
+  assert.equal(r.status, 200, 'MAC em minúsculas também');
+  r = await viaCp(legado, 'GET', `/${MAC}/territory`);
+  assert.equal(r.status, 409, 'em estoque não lê território');
+  assert.equal(r.body.statusTransferencia, 'estoque');
+  console.log('  ✔ MAC desconhecido = 404; em estoque só o heartbeat passa');
+
+  r = await transferir(d);
+  assert.equal(r.status, 200);
+  r = await viaCp(legado, 'GET', `/${MAC}/territory`);
+  assert.equal(r.status, 409);
+  assert.equal(r.body.statusTransferencia, 'pendente');
+
+  r = await chamar(recebimento, 'POST', `/${chaveD}/aceitar`, admin({ corpo: { numCheck: '60' } }));
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  r = await viaCp(legado, 'GET', `/${MAC}/territory`);
+  assert.equal(r.status, 409, 'aceito mas sem evento');
+  assert.match(r.body.error, /evento/);
+  r = await chamar(recebimento, 'PATCH', `/${chaveD}/evento`, admin({ corpo: { eventoId: eventoLegado.eventoId } }));
+  assert.equal(r.status, 200);
+
+  r = await viaCp(legado, 'GET', `/${MAC}/territory`);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.checkpointId, chaveD, 'a rota recebeu a chave interna no lugar do MAC');
+  r = await viaCp(legado, 'POST', `/${MAC}/heartbeat`);
+  assert.equal(r.status, 200);
+  assert.equal(r.body.numCheck, '60', 'o heartbeat devolve o número que o buffet deu');
+  assert.equal(r.body.statusTransferencia, 'aceito');
+  console.log('  ✔ pendente e sem evento = 409; aceito com evento = rotas normais, com o número de volta no heartbeat');
+
+  // Trocar o número no buffet não muda a identidade do aparelho: o MAC continua chegando no mesmo checkpoint.
+  r = await chamar(recebimento, 'PATCH', `/${chaveD}/numero`, admin({ corpo: { numCheck: '61' } }));
+  assert.equal(r.status, 200);
+  r = await viaCp(legado, 'POST', `/${MAC}/heartbeat`);
+  assert.equal(r.body.numCheck, '61', 'renumerar na tela vale na hora para o aparelho, sem mexer nele');
+
+  // Corpo (leituras e jogos) e query (modo do checkpoint): o MAC no lugar do ID também é traduzido.
+  const reescrever = async (req) => {
+    let seguiu = false;
+    let resp = null;
+    const res = { status(c) { this.c = c; return this; }, json(b) { resp = { status: this.c, body: b }; return this; } };
+    await identificarPorMac(req, res, () => { seguiu = true; });
+    return { seguiu, resp, req };
+  };
+  let t = await reescrever({ url: '/leituras', body: { checkpointId: MAC, uid: 'X' }, query: {} });
+  assert.equal(t.seguiu, true);
+  assert.equal(t.req.body.checkpointId, chaveD, 'corpo: MAC trocado pela chave');
+  assert.equal(t.req.body.uid, 'X');
+  t = await reescrever({ url: '/debug/checkpoint-mode?checkpointId=' + MAC, body: undefined, query: { checkpointId: MAC } });
+  assert.equal(t.req.query.checkpointId, chaveD, 'query: MAC trocado pela chave');
+  t = await reescrever({ url: '/leituras', body: { checkpointId: '15', uid: 'X' }, query: {} });
+  assert.equal(t.req.body.checkpointId, '15', 'ID antigo no corpo segue intacto');
+  t = await reescrever({ url: '/leituras', body: { checkpointId: 'AA:BB:CC:DD:EE:77', uid: 'X' }, query: {} });
+  assert.equal(t.seguiu, false);
+  assert.equal(t.resp.status, 404, 'corpo com MAC desconhecido');
+  await criar('AA:BB:CC:DD:EE:06');
+  t = await reescrever({ url: '/leituras', body: { checkpointId: 'AA:BB:CC:DD:EE:06', uid: 'X' }, query: {} });
+  assert.equal(t.resp.status, 409, 'leitura de quem está em estoque é recusada');
+  console.log('  ✔ corpo e query traduzidos; ID antigo intacto; MAC desconhecido e estoque recusados');
+
+  // Checkpoint antigo: o super admin grava o MAC nele e ele passa a responder por MAC, com a mesma chave de sempre.
+  const velho = await db.queryOne('SELECT id, checkpointId FROM pontoVerificacao WHERE checkpointId = @c', { c: lista.body[0].checkpointId });
+  r = await chamar(router, 'PATCH', `/${velho.id}`, { corpo: { macAddress: 'AA:BB:CC:DD:EE:15' } });
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  r = await viaCp(legado, 'GET', '/AA:BB:CC:DD:EE:15/territory');
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.checkpointId, velho.checkpointId, 'o antigo continua com a chave dele');
+  r = await chamar(legado, 'GET', `/${velho.checkpointId}/territory`);
+  assert.equal(r.status, 200, 'e continua respondendo pelo ID antigo');
+  console.log('  ✔ checkpoint antigo: MAC gravado pelo master, responde por MAC e pelo ID de antes');
 
   throw new Error(REVERTER);
 }
