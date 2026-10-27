@@ -452,6 +452,8 @@ router.get('/children', verifyToken, async (req, res) => {
       nickname: child.apelido,
       age: child.idade,
       profileImage: child.profileImage,
+      // As telas da família leem `avatar` (mesmo campo que a criança guarda no cadastro)
+      avatar: child.profileImage,
       currentScore: child.currentScore || 0,
       totalScore: child.totalScore || 0,
       teamId: child.teamId || '',
