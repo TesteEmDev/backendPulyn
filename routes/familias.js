@@ -505,6 +505,49 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
   }
 });
 
+// GET /api/familias/children/:id/history
+// Eventos em que a criança já esteve (todas as linhas de cadastro do mesmo perfil),
+// com os pontos e a quantidade de checkpoints visitados em cada um.
+router.get('/children/:id/history', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const child = await queryOne(`
+      SELECT c.criancaId, c.perfilCriancaId, c.nome, c.apelido
+      FROM vinculoFamiliar l
+      JOIN crianca c ON c.criancaId = l.criancaId
+      WHERE l.loginId = @loginId AND l.criancaId = @childId AND l.status = 'approved'
+    `, { loginId: req.user.id, childId: req.params.id });
+    if (!child) return res.status(404).json({ error: 'Criança não encontrada na sua família' });
+
+    const eventos = await allQuery(`
+      SELECT c.criancaId, c.eventoId, c.pontos, e.nome AS eventoNome, e.data AS dataEvento,
+             (SELECT COUNT(DISTINCT p.checkpointId) FROM pontuacao p
+               WHERE p.criancaId = c.criancaId AND p.eventoId = c.eventoId) AS checkpointsVisitados
+      FROM crianca c
+      JOIN evento e ON e.eventoId = c.eventoId
+      WHERE c.criancaId = @criancaId
+         OR (@perfilCriancaId IS NOT NULL AND c.perfilCriancaId = @perfilCriancaId)
+      ORDER BY e.data DESC
+    `, { criancaId: child.criancaId, perfilCriancaId: child.perfilCriancaId || null });
+
+    res.json({
+      child: { id: child.criancaId, nome: child.nome, apelido: child.apelido },
+      eventos: eventos.map((ev) => ({
+        criancaId: ev.criancaId,
+        eventoId: ev.eventoId,
+        eventoNome: ev.eventoNome,
+        data: ev.dataEvento,
+        pontos: Number(ev.pontos || 0),
+        checkpointsVisitados: Number(ev.checkpointsVisitados || 0),
+      })),
+    });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao buscar histórico:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /**
  * ✅ GET /api/familias/active-event
  * Retorna o evento/jogo ativo para a família
