@@ -1,10 +1,12 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
-const { query, queryOne, allQuery } = require('../database');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
 const { criarPerfil } = require('../utils/perfilCrianca');
+const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
+const { getAvatarForCreate } = require('../utils/avatar');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
 const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -226,8 +228,9 @@ router.post('/invites/:token/register', async (req, res) => {
         const linkId = crypto.randomUUID();
         await query(`
           INSERT INTO vinculoFamiliar
-            (vinculoId, loginId, criancaId, empresaId, relacionamento, status, aprovadoEm)
-          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'approved', GETDATE())
+            (vinculoId, loginId, criancaId, empresaId, relacionamento, status, aprovadoEm, perfilCriancaId)
+          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'approved', GETDATE(),
+                  (SELECT c.perfilCriancaId FROM crianca c WHERE c.criancaId = @childId))
         `, {
           id: linkId,
           loginId,
@@ -501,6 +504,135 @@ router.get('/children/:id/scores', verifyToken, async (req, res) => {
     `, { childId: child.criancaId, eventoId: child.eventoId });
     res.json({ child, scores });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/familias/children/:id/history
+// Eventos em que a criança já esteve (todas as linhas de cadastro do mesmo perfil),
+// com os pontos e a quantidade de checkpoints visitados em cada um.
+router.get('/children/:id/history', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const child = await queryOne(`
+      SELECT c.criancaId, c.perfilCriancaId, c.nome, c.apelido
+      FROM vinculoFamiliar l
+      JOIN crianca c ON c.criancaId = l.criancaId
+      WHERE l.loginId = @loginId AND l.criancaId = @childId AND l.status = 'approved'
+    `, { loginId: req.user.id, childId: req.params.id });
+    if (!child) return res.status(404).json({ error: 'Criança não encontrada na sua família' });
+
+    const eventos = await allQuery(`
+      SELECT c.criancaId, c.eventoId, c.pontos, e.nome AS eventoNome, e.data AS dataEvento,
+             (SELECT COUNT(DISTINCT p.checkpointId) FROM pontuacao p
+               WHERE p.criancaId = c.criancaId AND p.eventoId = c.eventoId) AS checkpointsVisitados
+      FROM crianca c
+      JOIN evento e ON e.eventoId = c.eventoId
+      WHERE c.criancaId = @criancaId
+         OR (@perfilCriancaId IS NOT NULL AND c.perfilCriancaId = @perfilCriancaId)
+      ORDER BY e.data DESC
+    `, { criancaId: child.criancaId, perfilCriancaId: child.perfilCriancaId || null });
+
+    res.json({
+      child: { id: child.criancaId, nome: child.nome, apelido: child.apelido },
+      eventos: eventos.map((ev) => ({
+        criancaId: ev.criancaId,
+        eventoId: ev.eventoId,
+        eventoNome: ev.eventoNome,
+        data: ev.dataEvento,
+        pontos: Number(ev.pontos || 0),
+        checkpointsVisitados: Number(ev.checkpointsVisitados || 0),
+      })),
+    });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao buscar histórico:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pré-cadastro: eventos abertos de qualquer buffet, para o responsável escolher onde cadastrar a criança.
+router.get('/eventos-abertos', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const eventos = await allQuery(`
+      SELECT e.eventoId, e.nome, e.data, e.status, emp.nome AS buffetNome, emp.cidade AS buffetCidade
+      FROM evento e
+      JOIN empresa emp ON emp.empresaId = e.empresaId
+      WHERE emp.nome <> 'Master Admin'
+      ORDER BY e.data ASC
+    `);
+    res.json({ eventos: eventos.filter(eventoAberto).slice(0, 50) });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao listar eventos abertos:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pré-cadastro: crianças que o responsável cadastrou e que ainda não entraram em nenhum evento.
+router.get('/perfis', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const perfis = await allQuery(`
+      SELECT p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, emp.nome AS buffetNome
+      FROM perfilVinculoFamiliar pv
+      JOIN perfilCrianca p ON p.perfilCriancaId = pv.perfilCriancaId
+      JOIN empresa emp ON emp.empresaId = pv.empresaId
+      WHERE pv.loginId = @loginId
+        AND NOT EXISTS (SELECT 1 FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId)
+      ORDER BY p.nome ASC
+    `, { loginId: req.user.id });
+    res.json({ perfis });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao listar pré-cadastros:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pré-cadastro: cria o cadastro da criança no buffet do evento escolhido e liga o responsável a ele.
+// O buffet vem do evento no banco, nunca do corpo da requisição.
+router.post('/perfis', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const dados = validarPreCadastro(req.body);
+    if (!dados.ok) return res.status(400).json({ error: dados.error });
+    const { eventoId, nome, apelido, idade } = dados.value;
+
+    const evento = await queryOne(
+      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @eventoId',
+      { eventoId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!eventoAberto(evento)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
+
+    const perfilCriancaId = await withTransaction(async () => {
+      const perfilId = await criarPerfil({
+        empresaId: evento.empresaId,
+        eventoId: null,
+        nome,
+        apelido,
+        idade,
+        avatar: getAvatarForCreate(null),
+      });
+      await query(
+        `INSERT INTO perfilVinculoFamiliar (vinculoId, loginId, perfilCriancaId, empresaId, relacionamento)
+         VALUES (@vinculoId, @loginId, @perfilCriancaId, @empresaId, 'responsável')`,
+        {
+          vinculoId: crypto.randomUUID(),
+          loginId: req.user.id,
+          perfilCriancaId: perfilId,
+          empresaId: evento.empresaId,
+        }
+      );
+      return perfilId;
+    });
+
+    res.status(201).json({ perfilCriancaId, nome, apelido, idade });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao pré-cadastrar criança:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

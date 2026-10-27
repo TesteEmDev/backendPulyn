@@ -36,6 +36,26 @@ async function ensureFamilySchema() {
     await query('ALTER TABLE login ADD COLUMN IF NOT EXISTS nomeFamilia varchar(255)');
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uqConviteFamiliaHashToken ON conviteFamilia (hashToken)');
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uqVinculoFamiliarLoginCrianca ON vinculoFamiliar (loginId, criancaId)');
+    // Vínculo passa a seguir o cadastro permanente da criança, não só a participação no evento.
+    await query('ALTER TABLE vinculoFamiliar ADD COLUMN IF NOT EXISTS perfilCriancaId varchar(36)');
+    await query('CREATE INDEX IF NOT EXISTS ixVinculoFamiliarPerfil ON vinculoFamiliar (perfilCriancaId)');
+    await query(`
+      UPDATE vinculoFamiliar v SET perfilCriancaId = c.perfilCriancaId
+      FROM crianca c
+      WHERE c.criancaId = v.criancaId AND v.perfilCriancaId IS NULL AND c.perfilCriancaId IS NOT NULL
+    `);
+    // Pré-cadastro: o responsável ligado ao cadastro antes de a criança ter participação em evento.
+    await query(`
+      CREATE TABLE IF NOT EXISTS perfilVinculoFamiliar (
+        vinculoId varchar(36) PRIMARY KEY,
+        loginId varchar(36) NOT NULL,
+        perfilCriancaId varchar(36) NOT NULL,
+        empresaId varchar(36) NOT NULL,
+        relacionamento varchar(50) NOT NULL DEFAULT 'responsável',
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uqPerfilVinculoFamiliar ON perfilVinculoFamiliar (loginId, perfilCriancaId)');
     return;
   }
 
@@ -88,6 +108,39 @@ async function ensureFamilySchema() {
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqVinculoFamiliarLoginCrianca' AND object_id = OBJECT_ID('dbo.vinculoFamiliar'))
       CREATE UNIQUE INDEX uqVinculoFamiliarLoginCrianca ON vinculoFamiliar (loginId, criancaId)
+  `);
+  // Vínculo passa a seguir o cadastro permanente da criança, não só a participação no evento.
+  await query(`
+    IF COL_LENGTH('dbo.vinculoFamiliar', 'perfilCriancaId') IS NULL
+      ALTER TABLE vinculoFamiliar ADD perfilCriancaId NVARCHAR(36) NULL
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'ixVinculoFamiliarPerfil' AND object_id = OBJECT_ID('dbo.vinculoFamiliar'))
+      CREATE INDEX ixVinculoFamiliarPerfil ON vinculoFamiliar (perfilCriancaId)
+  `);
+  await query(`
+    UPDATE v SET v.perfilCriancaId = c.perfilCriancaId
+    FROM vinculoFamiliar v
+    JOIN crianca c ON c.criancaId = v.criancaId
+    WHERE v.perfilCriancaId IS NULL AND c.perfilCriancaId IS NOT NULL
+  `);
+  // Pré-cadastro: o responsável ligado ao cadastro antes de a criança ter participação em evento.
+  await query(`
+    IF OBJECT_ID('dbo.perfilVinculoFamiliar', 'U') IS NULL
+    BEGIN
+      CREATE TABLE perfilVinculoFamiliar (
+        vinculoId NVARCHAR(36) NOT NULL PRIMARY KEY,
+        loginId NVARCHAR(36) NOT NULL,
+        perfilCriancaId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NOT NULL,
+        relacionamento NVARCHAR(50) NOT NULL DEFAULT 'responsável',
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
+      )
+    END
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqPerfilVinculoFamiliar' AND object_id = OBJECT_ID('dbo.perfilVinculoFamiliar'))
+      CREATE UNIQUE INDEX uqPerfilVinculoFamiliar ON perfilVinculoFamiliar (loginId, perfilCriancaId)
   `);
 }
 

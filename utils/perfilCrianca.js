@@ -174,6 +174,50 @@ async function pontosDoPerfil(perfilCriancaId, empresaId) {
   };
 }
 
+// Vínculos aprovados do perfil viram um por responsável (o mesmo responsável pode ter vínculo com
+// várias participações antigas do perfil, e a nova participação só precisa de um).
+function vinculosParaNovaParticipacao(vinculos) {
+  const porResponsavel = new Map();
+  for (const vinculo of vinculos) {
+    if (!porResponsavel.has(vinculo.loginId)) {
+      porResponsavel.set(vinculo.loginId, vinculo.relacionamento);
+    }
+  }
+  return [...porResponsavel].map(([loginId, relacionamento]) => ({ loginId, relacionamento }));
+}
+
+// Quem já é responsável pelo cadastro da criança passa a ser responsável também pela nova participação
+// dela no evento. Sem isso, a criança que volta some do app da família até alguém vincular de novo.
+async function copiarVinculosParaParticipacao({ perfilCriancaId, criancaId, empresaId }) {
+  if (!perfilCriancaId) return 0;
+  // Pré-cadastro (perfilVinculoFamiliar) e vínculos de participações anteriores (vinculoFamiliar).
+  const vinculos = await allQuery(
+    `SELECT loginId, relacionamento FROM vinculoFamiliar
+     WHERE perfilCriancaId = @perfilCriancaId AND status = 'approved'
+     UNION ALL
+     SELECT loginId, relacionamento FROM perfilVinculoFamiliar
+     WHERE perfilCriancaId = @perfilCriancaId`,
+    { perfilCriancaId }
+  );
+  const novos = vinculosParaNovaParticipacao(vinculos);
+  for (const vinculo of novos) {
+    await query(
+      `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, relacionamento, status, perfilCriancaId, aprovadoEm)
+       VALUES (@vinculoId, @loginId, @criancaId, @empresaId, @relacionamento, 'approved', @perfilCriancaId, @agora)`,
+      {
+        vinculoId: uuidv4(),
+        loginId: vinculo.loginId,
+        criancaId,
+        empresaId,
+        relacionamento: vinculo.relacionamento,
+        perfilCriancaId,
+        agora: new Date(),
+      }
+    );
+  }
+  return novos.length;
+}
+
 module.exports = {
   criarPerfil,
   buscarPerfil,
@@ -182,6 +226,8 @@ module.exports = {
   recalcularUltimoEvento,
   buscarPerfisParaKiosk,
   pontosDoPerfil,
+  copiarVinculosParaParticipacao,
+  vinculosParaNovaParticipacao,
   nomeParaExibir,
   idadeValida,
   normalizarBusca,
