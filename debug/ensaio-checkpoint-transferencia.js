@@ -174,6 +174,114 @@ async function ensaio() {
   assert.equal(r.status, 409);
   console.log('  ✔ todas as rotas responderam como esperado');
 
+  // ---------- etapa 2: o buffet recebe ----------
+  console.log('▶ buffet recebe os checkpoints transferidos');
+  const recebimento = require('../routes/checkpointsRecebimento');
+  const buffet = eventoLegado.empresaId;   // buffet que já tem o checkpoint "15" no evento eventoLegado.eventoId
+  const nomeBuffet = await db.queryOne('SELECT empresaId FROM empresa WHERE empresaId = @e', { e: buffet });
+  assert.ok(nomeBuffet, 'o buffet dos checkpoints antigos existe na tabela empresa');
+  const admin = (extra = {}) => ({ papel: 'admin', empresaId: buffet, ...extra });
+
+  const criar = async (mac, corpo = {}) => {
+    const x = await chamar(router, 'POST', '/', { corpo: { macAddress: mac, ...corpo } });
+    assert.equal(x.status, 201, JSON.stringify(x.body));
+    return x.body;
+  };
+  const transferir = (cp) => chamar(router, 'POST', `/${cp.id}/transferir`, { corpo: { empresaId: buffet } });
+
+  // Número que já existe no buffet de destino impede a transferência (o checkpoint "15" antigo).
+  const y = await criar('AA:BB:CC:DD:EE:03', { nome: 'Rampa', numCheck: '15' });
+  r = await transferir(y);
+  assert.equal(r.status, 409, 'número 15 já existe no buffet');
+  r = await chamar(router, 'PATCH', `/${y.id}`, { corpo: { numCheck: '40' } });
+  assert.equal(r.status, 200);
+  r = await transferir(y);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+
+  r = await chamar(recebimento, 'GET', '/pendentes', admin());
+  assert.equal(r.status, 200);
+  const pend = r.body.find((p) => p.macAddress === 'AA:BB:CC:DD:EE:03');
+  assert.ok(pend, 'o pendente aparece para o buffet de destino');
+  assert.equal(pend.nome, 'Rampa');
+  assert.equal(pend.numCheck, '40', 'a sugestão do super admin vem preenchida');
+  assert.equal(pend.checkpointId, `cp-${y.id}`);
+
+  r = await chamar(recebimento, 'GET', '/pendentes', admin({ empresaId: 'outro-buffet' }));
+  assert.equal(r.body.length, 0, 'outro buffet não vê o pendente');
+  r = await chamar(recebimento, 'POST', `/${pend.checkpointId}/aceitar`, admin({ empresaId: 'outro-buffet', corpo: { numCheck: '9' } }));
+  assert.equal(r.status, 404, 'outro buffet não aceita o que não é dele');
+  r = await chamar(recebimento, 'GET', '/pendentes', { papel: 'master' });
+  assert.equal(r.status, 403, 'só o admin do buffet usa estas rotas');
+
+  r = await chamar(recebimento, 'POST', `/${pend.checkpointId}/aceitar`, admin({ corpo: { numCheck: '15' } }));
+  assert.equal(r.status, 409, 'número repetido no buffet');
+  r = await chamar(recebimento, 'POST', `/${pend.checkpointId}/aceitar`, admin({ corpo: { numCheck: '1 2' } }));
+  assert.equal(r.status, 400, 'número inválido');
+  r = await chamar(recebimento, 'POST', `/${pend.checkpointId}/aceitar`, admin({ corpo: { numCheck: '41', eventoId: 'nao-existe' } }));
+  assert.equal(r.status, 404, 'evento inexistente');
+  r = await chamar(recebimento, 'POST', `/${pend.checkpointId}/aceitar`, admin({ corpo: { numCheck: '41' } }));
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.statusTransferencia, 'aceito');
+  assert.equal(r.body.numCheck, '41');
+  assert.equal(r.body.eventoId, null);
+  const aceito = await db.queryOne('SELECT empresaId, empresaDestinoId, codigo, numCheck FROM pontoVerificacao WHERE checkpointId = @c', { c: pend.checkpointId });
+  assert.equal(aceito.empresaId, buffet);
+  assert.equal(aceito.empresaDestinoId, null);
+  assert.equal(aceito.codigo, '41', 'codigo acompanha o número para as telas atuais');
+  r = await chamar(recebimento, 'POST', `/${pend.checkpointId}/aceitar`, admin({ corpo: { numCheck: '41' } }));
+  assert.equal(r.status, 409, 'não aceita duas vezes');
+  console.log('  ✔ aceite: valida número, evento e buffet; grava empresaId e codigo');
+
+  r = await chamar(recebimento, 'GET', '/sem-evento', admin());
+  assert.ok(r.body.some((c) => c.checkpointId === pend.checkpointId), 'aceito sem evento aparece em sem-evento');
+  let legadoLista = await chamar(legado, 'GET', `/evento/${eventoLegado.eventoId}`, { empresaId: buffet });
+  assert.ok(!legadoLista.body.some((c) => c.checkpointId === pend.checkpointId), 'sem evento não entra na lista de um evento');
+
+  r = await chamar(recebimento, 'PATCH', `/${pend.checkpointId}/evento`, admin({ corpo: { eventoId: 'nao-existe' } }));
+  assert.equal(r.status, 404);
+  r = await chamar(recebimento, 'PATCH', `/${pend.checkpointId}/evento`, admin({ corpo: { eventoId: eventoLegado.eventoId } }));
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.equal(r.body.eventoId, eventoLegado.eventoId);
+  legadoLista = await chamar(legado, 'GET', `/evento/${eventoLegado.eventoId}`, { empresaId: buffet });
+  const naLista = legadoLista.body.find((c) => c.checkpointId === pend.checkpointId);
+  assert.ok(naLista, 'depois de atribuído, aparece na lista do evento (tela atual)');
+  assert.equal(naLista.codigo, '41');
+  assert.equal(naLista.numCheck, '41');
+  assert.equal(naLista.macAddress, 'AA:BB:CC:DD:EE:03');
+  assert.equal('id' in naLista, false);
+  console.log('  ✔ atribuído ao evento: aparece na tela atual do buffet com número e MAC');
+
+  r = await chamar(recebimento, 'PATCH', `/${pend.checkpointId}/numero`, admin({ corpo: { numCheck: '15' } }));
+  assert.equal(r.status, 409, 'trocar para número que já existe');
+  r = await chamar(recebimento, 'PATCH', `/${pend.checkpointId}/numero`, admin({ corpo: { numCheck: '42' } }));
+  assert.equal(r.status, 200);
+  assert.equal(r.body.numCheck, '42');
+  const trocado = await db.queryOne('SELECT checkpointId, codigo FROM pontoVerificacao WHERE checkpointId = @c', { c: pend.checkpointId });
+  assert.equal(trocado.checkpointId, pend.checkpointId, 'trocar o número não muda a chave interna');
+  assert.equal(trocado.codigo, '42');
+  r = await chamar(recebimento, 'PATCH', `/${lista.body[0].checkpointId}/numero`, admin({ corpo: { numCheck: '77' } }));
+  assert.equal(r.status, 409, 'checkpoint antigo (sem MAC) não troca de número por aqui');
+
+  r = await chamar(recebimento, 'PATCH', `/${pend.checkpointId}/evento`, admin({ corpo: { eventoId: null } }));
+  assert.equal(r.status, 200, 'sem histórico, pode sair do evento');
+  assert.equal(r.body.eventoId, null);
+  console.log('  ✔ número trocado sem mexer na chave; antigo (sem MAC) protegido');
+
+  // Recusar devolve ao estoque do super admin.
+  const z = await criar('AA:BB:CC:DD:EE:04', { nome: 'Teto' });
+  r = await transferir(z);
+  assert.equal(r.status, 200);
+  r = await chamar(recebimento, 'POST', `/cp-${z.id}/recusar`, admin({ empresaId: 'outro-buffet' }));
+  assert.equal(r.status, 404);
+  r = await chamar(recebimento, 'POST', `/cp-${z.id}/recusar`, admin());
+  assert.equal(r.status, 200);
+  r = await chamar(router, 'GET', `/?statusTransferencia=estoque`);
+  const devolvido = r.body.find((c) => Number(c.id) === Number(z.id));
+  assert.ok(devolvido && devolvido.empresaDestinoId === null, 'recusado volta ao estoque sem destino');
+  r = await chamar(recebimento, 'POST', `/cp-${z.id}/recusar`, admin());
+  assert.equal(r.status, 404, 'já não é pendente deste buffet');
+  console.log('  ✔ recusar devolve ao estoque');
+
   throw new Error(REVERTER);
 }
 

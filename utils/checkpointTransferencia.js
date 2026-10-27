@@ -30,6 +30,9 @@ function validarNumCheck(valor) {
 
 const podeTransferir = (status) => status === STATUS.ESTOQUE;
 const podeCancelarTransferencia = (status) => status === STATUS.PENDENTE;
+// O buffet só responde (aceita ou recusa) ao que está pendente para ele.
+const podeAceitar = (status) => status === STATUS.PENDENTE;
+const podeRecusar = (status) => status === STATUS.PENDENTE;
 const podeExcluir = (status) => status === STATUS.ESTOQUE;
 // Depois do aceite o checkpoint é do buffet: o master não mexe mais no número dele.
 const podeEditarNumCheck = (status) => status !== STATUS.ACEITO;
@@ -59,6 +62,8 @@ module.exports = {
   validarNumCheck,
   podeTransferir,
   podeCancelarTransferencia,
+  podeAceitar,
+  podeRecusar,
   podeExcluir,
   podeEditarNumCheck,
   chaveProvisoria,

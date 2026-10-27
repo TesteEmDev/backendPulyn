@@ -32,6 +32,7 @@ const reportsRoutes = require('./routes/reports');
 const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
 const checkpointsMasterRoutes = require('./routes/checkpointsMaster');
+const checkpointsRecebimentoRoutes = require('./routes/checkpointsRecebimento');
 const leiturasRoutes = require('./routes/leituras');
 const settingsRoutes = require('./routes/settings');
 const empresaRoutes = require('./routes/empresa');
@@ -1904,6 +1905,7 @@ app.use('/api/criancas', criancasRoutes);
 app.use('/api/pulseiras', pulseiraRoutes);
 
 // Checkpoints
+app.use('/api/pontoVerificacao/recebimento', checkpointsRecebimentoRoutes);   // antes das rotas /:id de checkpoints
 app.use('/api/pontoVerificacao', checkpointsRoutes);
 
 // Leituras

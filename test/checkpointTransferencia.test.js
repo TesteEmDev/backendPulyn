@@ -64,6 +64,15 @@ test('só cancela a transferência que ainda está pendente', () => {
   assert.equal(podeCancelarTransferencia(STATUS.ACEITO), false);
 });
 
+test('o buffet só aceita ou recusa o que está pendente para ele', () => {
+  const { podeAceitar, podeRecusar } = require('../utils/checkpointTransferencia');
+  for (const pode of [podeAceitar, podeRecusar]) {
+    assert.equal(pode(STATUS.PENDENTE), true);
+    assert.equal(pode(STATUS.ESTOQUE), false);
+    assert.equal(pode(STATUS.ACEITO), false);
+  }
+});
+
 test('só exclui o que nunca saiu do estoque', () => {
   assert.equal(podeExcluir(STATUS.ESTOQUE), true);
   assert.equal(podeExcluir(STATUS.PENDENTE), false);
