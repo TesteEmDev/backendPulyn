@@ -4,7 +4,7 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { garantirCodigo } = require('../utils/codigoBuffet');
 const { usarIdSimples } = require('../utils/chaveCheckpoint');
-const { semIdNovo } = require('../utils/checkpointTransferencia');
+const { semIdNovo, STATUS } = require('../utils/checkpointTransferencia');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
@@ -448,7 +448,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     }
 
     const checkpoint = await queryOne(
-      `SELECT checkpointId, proposito FROM pontoVerificacao
+      `SELECT checkpointId, proposito, macAddress FROM pontoVerificacao
        WHERE LOWER(checkpointId) = LOWER(@id)
          AND LOWER(eventoId) = LOWER(@eventoId)
          AND LOWER(empresaId) = LOWER(@empresaId)`,
@@ -577,6 +577,22 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
       { checkpointId: checkpoint.checkpointId }
     );
+    // Um checkpoint com MAC é um aparelho cadastrado pelo super admin: o buffet não o apaga, devolve. Ele volta ao
+    // estoque, sem buffet, evento nem número, e o histórico dele neste buffet foi limpo acima como na exclusão.
+    if (checkpoint.macAddress) {
+      await query(
+        `UPDATE pontoVerificacao
+         SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+             numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
+             territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
+         WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+           AND LOWER(eventoId) = LOWER(@eventoId)
+           AND LOWER(empresaId) = LOWER(@empresaId)`,
+        { estoque: STATUS.ESTOQUE, checkpointId: checkpoint.checkpointId, eventoId, empresaId }
+      );
+      return res.json({ success: true, devolvido: true, message: 'Checkpoint devolvido ao super admin' });
+    }
+
     await query(
       `DELETE FROM pontoVerificacao
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)
