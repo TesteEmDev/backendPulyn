@@ -31,6 +31,7 @@ const analyticsRoutes = require('./routes/analytics');
 const reportsRoutes = require('./routes/reports');
 const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
+const checkpointsMasterRoutes = require('./routes/checkpointsMaster');
 const leiturasRoutes = require('./routes/leituras');
 const settingsRoutes = require('./routes/settings');
 const empresaRoutes = require('./routes/empresa');
@@ -63,6 +64,7 @@ const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
 const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
+const { ensureCheckpointTransferSchema } = require('./migrations/checkpointTransferencia');
 const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
 const { ensureUhfSchema } = require('./migrations/uhf');
 const refemRoutes = require('./routes/refem');
@@ -1911,6 +1913,9 @@ app.use('/api/leituras', leiturasRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/reports', reportsRoutes);
 
+// Checkpoints cadastrados pelo super admin e transferidos aos buffets (antes de /api/master para não ser engolida por ele)
+app.use('/api/master/checkpoints', checkpointsMasterRoutes);
+
 // Master Dashboard
 app.use('/api/master', masterRoutes);
 
@@ -2006,6 +2011,7 @@ async function startServer() {
     await ensureBombaSchema();
     await ensureRefemSchema();
     await ensureCodigoBuffetSchema();
+    await ensureCheckpointTransferSchema();
     await ensurePulseiraPorEmpresaSchema();
     await ensureUhfSchema();
     refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)

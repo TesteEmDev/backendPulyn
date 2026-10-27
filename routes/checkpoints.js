@@ -4,6 +4,7 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { garantirCodigo } = require('../utils/codigoBuffet');
 const { usarIdSimples } = require('../utils/chaveCheckpoint');
+const { semIdNovo } = require('../utils/checkpointTransferencia');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
@@ -185,7 +186,7 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
 
     // ID digitado (codigo) e, quando a chave interna tem prefixo, o código do buffet que o ESP32 precisa informar.
     const empresaCodigo = await garantirCodigo(evento.empresaId);
-    const comCodigo = (pontoVerificacao || []).map((cp) => {
+    const comCodigo = semIdNovo(pontoVerificacao || []).map((cp) => {
       const codigo = cp.codigo || cp.checkpointId;
       return { ...cp, codigo, empresaCodigo, prefixado: String(cp.checkpointId).toLowerCase() !== String(codigo).toLowerCase() };
     });
@@ -219,7 +220,7 @@ router.get('/:id/config', verifyToken, async (req, res) => {
     checkpoint.tagsAutorizadas = tags.map(t => t.tagUid);
     checkpoint.corLed = checkpoint.corLed || '#00FF00';
 
-    res.json(checkpoint);
+    res.json(semIdNovo(checkpoint));
   } catch (err) {
     console.error('❌ Erro ao buscar configuração do checkpoint:', err);
     res.status(500).json({ error: err.message });

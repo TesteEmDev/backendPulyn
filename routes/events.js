@@ -7,6 +7,7 @@ const { getAvatarForCreate } = require('../utils/avatar');
 const { criarPerfil } = require('../utils/perfilCrianca');
 const bomba = require('../utils/bomba');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
+const { semIdNovo } = require('../utils/checkpointTransferencia');
 const { saveGameState, getGameState } = require('../utils/gameState');
 const {
   isClosedStatus,
@@ -717,7 +718,7 @@ router.get('/:eventoId/pontoVerificacao', verifyToken, async (req, res) => {
       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
       ORDER BY nome ASC
     `, { eventoId, empresaId });
-    res.json(pontoVerificacao);
+    res.json(semIdNovo(pontoVerificacao));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
