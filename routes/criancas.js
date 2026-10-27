@@ -6,7 +6,7 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { getAvatarForCreate, isAdventurerAvatarId } = require('../utils/avatar');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
-const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil } = require('../utils/perfilCrianca');
+const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil, copiarVinculosParaParticipacao } = require('../utils/perfilCrianca');
 
 router.use(verifyToken, (req, res, next) => {
   if (req.user?.role === 'family') return res.status(403).json({ error: 'Famílias devem usar os endpoints de vínculo familiar' });
@@ -158,6 +158,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
        VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @braceletCode, @perfilId)`,
       { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode, perfilId }
     );
+    await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: id, empresaId });
     
     if (normalizedBraceletCode) {
       await query(
