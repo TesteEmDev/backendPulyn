@@ -79,6 +79,13 @@ async function ensaio() {
   let r = await chamar(router, 'GET', '/', { papel: 'admin' });
   assert.equal(r.status, 403, 'não-master recebe 403');
 
+  r = await chamar(router, 'GET', '/buffets');
+  assert.equal(r.status, 200);
+  assert.ok(r.body.some((b) => b.empresaId === 'empresa-001'), 'lista os buffets');
+  assert.ok(!r.body.some((b) => b.nome === 'Master Admin'), 'sem a conta do master');
+  r = await chamar(router, 'GET', '/buffets', { papel: 'admin' });
+  assert.equal(r.status, 403);
+
   r = await chamar(router, 'POST', '/', { corpo: { macAddress: 'xx' } });
   assert.equal(r.status, 400, 'MAC inválido');
 

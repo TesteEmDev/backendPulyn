@@ -49,6 +49,21 @@ async function numeroEmUso(empresaId, numCheck, ignorarId = null) {
   );
 }
 
+// Buffets que podem receber um checkpoint (tabela empresa, a mesma que a transferência valida), sem a conta do master
+// nem as contas de família.
+router.get('/buffets', async (req, res) => {
+  try {
+    res.json(await allQuery(
+      `SELECT empresaId, nome, cidade, estado FROM empresa
+       WHERE nome <> 'Master Admin' AND LOWER(COALESCE(plano, '')) <> 'family'
+       ORDER BY nome`
+    ));
+  } catch (err) {
+    console.error('❌ [MASTER-CHECKPOINTS] Erro ao listar buffets:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Lista tudo que o master cadastrou ou já transferiu. ?statusTransferencia=estoque|pendente|aceito e ?empresaId=
 router.get('/', async (req, res) => {
   try {
