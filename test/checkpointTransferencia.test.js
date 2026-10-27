@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   STATUS, normalizarMac, validarNumCheck,
-  podeTransferir, podeCancelarTransferencia, podeExcluir, podeEditarNumCheck, chaveProvisoria, semIdNovo,
+  podeTransferir, podeCancelarTransferencia, podeExcluir, semIdNovo,
 } = require('../utils/checkpointTransferencia');
 
 test('as respostas atuais não levam o id novo, para o apelido id -> checkpointId do frontend continuar valendo', () => {
@@ -79,13 +79,3 @@ test('só exclui o que nunca saiu do estoque', () => {
   assert.equal(podeExcluir(STATUS.ACEITO), false);
 });
 
-test('depois do aceite o número é do buffet e o master não edita', () => {
-  assert.equal(podeEditarNumCheck(STATUS.ESTOQUE), true);
-  assert.equal(podeEditarNumCheck(STATUS.PENDENTE), true);
-  assert.equal(podeEditarNumCheck(STATUS.ACEITO), false);
-});
-
-test('a chave provisória não bate com os IDs antigos como "12" ou "R1"', () => {
-  assert.equal(chaveProvisoria(12), 'cp-12');
-  assert.equal(chaveProvisoria('7'), 'cp-7');
-});

@@ -67,6 +67,7 @@ const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
 const { ensureCheckpointTransferSchema } = require('./migrations/checkpointTransferencia');
+const { ensureCheckpointIdNumericoSchema } = require('./migrations/checkpointIdNumerico');
 const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
 const { ensureUhfSchema } = require('./migrations/uhf');
 const refemRoutes = require('./routes/refem');
@@ -2016,6 +2017,7 @@ async function startServer() {
     await ensureRefemSchema();
     await ensureCodigoBuffetSchema();
     await ensureCheckpointTransferSchema();
+    await ensureCheckpointIdNumericoSchema();   // a chave do checkpoint passa a ser o id numérico (migra uma vez)
     await ensurePulseiraPorEmpresaSchema();
     await ensureUhfSchema();
     refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)

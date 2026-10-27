@@ -5,7 +5,9 @@
 //   - no corpo:    { "checkpointId": "<MAC>", ... }  em /api/leituras, /api/leituras/reception, /api/<jogo>/leitura
 //   - na query:    /api/debug/checkpoint-mode?checkpointId=<MAC>
 // O middleware troca o MAC pela chave interna do checkpoint antes das rotas, então nenhuma delas precisa saber de MAC.
-// Só vale o MAC com dois-pontos; as chaves antigas ("15", "R1", "cp-4") seguem funcionando como antes.
+// Só vale o MAC com dois-pontos. O ID numérico do checkpoint ("15") segue valendo no lugar do MAC, pois as telas do
+// sistema o usam. ESP32 com firmware antigo, que mandava o ID que a pessoa digitou, deixam de ser reconhecidos: o ID
+// agora é gerado pelo banco e só vale para o checkpoint de mesmo número (ver COMO_CADASTRAR_POR_MAC.md).
 //
 // Quem ainda não foi aceito por um buffet (estoque/pendente) só consegue mandar heartbeat: assim o super admin vê o
 // aparelho online, mas ele não lê pulseira nem entra em jogo. Os demais pedidos recebem 409.

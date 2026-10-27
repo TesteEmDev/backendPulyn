@@ -5,9 +5,14 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const {
-  STATUS, PROPOSITOS, normalizarMac, validarNumCheck,
-  podeTransferir, podeCancelarTransferencia, podeExcluir, podeEditarNumCheck, chaveProvisoria,
+  STATUS, PROPOSITOS, normalizarMac,
+  podeTransferir, podeCancelarTransferencia, podeExcluir,
 } = require('../utils/checkpointTransferencia');
+
+// O ID do checkpoint é gerado pelo banco (autoincremento, só números) e o único valor que uma pessoa define é o
+// número do checkpoint (numCheck), e só o admin do buffet, ao aceitar. O master nunca informa nem altera o número.
+const ERRO_NUMERO_DO_BUFFET = 'O número do checkpoint é definido pelo admin do buffet, ao aceitar';
+const informouNumero = (corpo) => corpo && corpo.numCheck !== undefined && corpo.numCheck !== null && String(corpo.numCheck).trim() !== '';
 
 router.use(verifyToken, requireRole('master'));
 
@@ -36,16 +41,6 @@ async function macEmUso(mac, ignorarId = null) {
   return queryOne(
     'SELECT id, nome FROM pontoVerificacao WHERE macAddress = @mac AND (@ignorarId::int IS NULL OR id <> @ignorarId::int)',
     { mac, ignorarId }
-  );
-}
-
-// O número é único dentro de cada buffet.
-async function numeroEmUso(empresaId, numCheck, ignorarId = null) {
-  return queryOne(
-    `SELECT id, nome FROM pontoVerificacao
-     WHERE empresaId = @empresaId AND LOWER(numCheck) = LOWER(@numCheck)
-       AND (@ignorarId::int IS NULL OR id <> @ignorarId::int)`,
-    { empresaId, numCheck, ignorarId }
   );
 }
 
@@ -91,8 +86,7 @@ router.post('/', async (req, res) => {
     const mac = normalizarMac(req.body.macAddress);
     if (!mac) return res.status(400).json({ error: 'MAC inválido: use o formato AA:BB:CC:DD:EE:FF' });
 
-    const numero = validarNumCheck(req.body.numCheck);
-    if (!numero.ok) return res.status(400).json({ error: numero.erro });
+    if (informouNumero(req.body)) return res.status(400).json({ error: ERRO_NUMERO_DO_BUFFET });
 
     const proposito = String(req.body.proposito || 'game').trim().toLowerCase();
     if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game ou reception' });
@@ -106,23 +100,16 @@ router.post('/', async (req, res) => {
     const existente = await macEmUso(mac);
     if (existente) return res.status(409).json({ error: `O MAC ${mac} já está cadastrado (checkpoint ${existente.id})` });
 
+    // Sem id nem chave no INSERT: o banco gera o id (autoincremento) e o gatilho copia o mesmo número para o
+    // checkpointId (migrations/checkpointIdNumerico.js). O nome padrão leva o id, que só existe depois do INSERT.
     const id = await withTransaction(async (tx) => {
-      const { id: novoId } = await tx.queryOne(`SELECT nextval(pg_get_serial_sequence('"pontoVerificacao"', 'id')) AS id`);
-      await tx.query(
-        `INSERT INTO pontoVerificacao
-           (id, checkpointId, nome, tipo, proposito, numCheck, macAddress, statusTransferencia, empresaId, eventoId)
-         VALUES (@id, @chave, @nome, @tipo, @proposito, @numCheck, @mac, @estoque, NULL, NULL)`,
-        {
-          id: Number(novoId),
-          chave: chaveProvisoria(novoId),
-          nome: nomeInformado || `Checkpoint ${novoId}`,
-          tipo,
-          proposito,
-          numCheck: numero.valor,
-          mac,
-          estoque: STATUS.ESTOQUE,
-        }
+      const { id: novoId } = await tx.queryOne(
+        `INSERT INTO pontoVerificacao (nome, tipo, proposito, macAddress, statusTransferencia, empresaId, eventoId)
+         VALUES (@nome, @tipo, @proposito, @mac, @estoque, NULL, NULL)
+         RETURNING id`,
+        { nome: nomeInformado || 'Checkpoint', tipo, proposito, mac, estoque: STATUS.ESTOQUE }
       );
+      if (!nomeInformado) await tx.query('UPDATE pontoVerificacao SET nome = @nome WHERE id = @id', { nome: `Checkpoint ${novoId}`, id: novoId });
       return Number(novoId);
     });
 
@@ -172,15 +159,7 @@ router.patch('/:id', async (req, res) => {
       campos.push('proposito = @proposito');
       params.proposito = proposito;
     }
-    if (req.body.numCheck !== undefined) {
-      if (!podeEditarNumCheck(atual.statusTransferencia)) {
-        return res.status(409).json({ error: 'Este checkpoint já foi aceito pelo buffet: o número é definido pelo admin dele' });
-      }
-      const numero = validarNumCheck(req.body.numCheck);
-      if (!numero.ok) return res.status(400).json({ error: numero.erro });
-      campos.push('numCheck = @numCheck');
-      params.numCheck = numero.valor;
-    }
+    if (informouNumero(req.body)) return res.status(400).json({ error: ERRO_NUMERO_DO_BUFFET });
 
     if (campos.length === 0) return res.status(400).json({ error: 'Nenhum campo para atualizar' });
 
@@ -209,13 +188,6 @@ router.post('/:id/transferir', async (req, res) => {
 
     const empresa = await queryOne('SELECT empresaId, nome FROM empresa WHERE empresaId = @empresaId', { empresaId });
     if (!empresa) return res.status(404).json({ error: 'Buffet de destino não encontrado' });
-
-    if (atual.numCheck) {
-      const repetido = await numeroEmUso(empresaId, atual.numCheck);
-      if (repetido) {
-        return res.status(409).json({ error: `O buffet "${empresa.nome}" já tem um checkpoint com o número "${atual.numCheck}". Mude o número antes de transferir.` });
-      }
-    }
 
     // A condição no WHERE evita transferir duas vezes se dois pedidos chegarem juntos.
     const atualizado = await queryOne(

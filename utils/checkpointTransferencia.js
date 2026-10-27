@@ -34,17 +34,12 @@ const podeCancelarTransferencia = (status) => status === STATUS.PENDENTE;
 const podeAceitar = (status) => status === STATUS.PENDENTE;
 const podeRecusar = (status) => status === STATUS.PENDENTE;
 const podeExcluir = (status) => status === STATUS.ESTOQUE;
-// Depois do aceite o checkpoint é do buffet: o master não mexe mais no número dele.
-const podeEditarNumCheck = (status) => status !== STATUS.ACEITO;
 
-// Chave interna provisória das linhas criadas pelo super admin. A chave de verdade passa a ser o `id` na etapa
-// em que os dados são migrados para ele; o prefixo evita bater com os IDs antigos ("12", "R1").
-const chaveProvisoria = (id) => `cp-${id}`;
-
-// Enquanto a chave do checkpoint ainda é o checkpointId, as telas atuais usam `id` como apelido de checkpointId
-// (FrontEnd/src/services/api.ts só cria o apelido quando a linha não tem `id`). O `id` novo, numérico, não pode
-// aparecer nas respostas das rotas atuais, ou elas passariam a mandar o número errado ao editar ou excluir.
-// Sai das respostas com linhas cruas (SELECT *) de pontoVerificacao; as rotas do master o expõem de propósito.
+// O ID do checkpoint é gerado pelo banco (migrations/checkpointIdNumerico.js): `id` é o inteiro autoincremento e
+// `checkpointId` é o mesmo número escrito como texto, que as rotas e as tabelas de jogos usam como chave.
+// As telas usam `id` como apelido de checkpointId (FrontEnd/src/services/api.ts só cria o apelido quando a linha não
+// tem `id`), e um `id` numérico quebraria as comparações com texto. Por isso ele sai das respostas com linhas cruas
+// (SELECT *) de pontoVerificacao; as rotas do master o expõem de propósito.
 function semIdNovo(linhas) {
   const tirar = (linha) => {
     if (!linha || typeof linha !== 'object') return linha;
@@ -65,6 +60,4 @@ module.exports = {
   podeAceitar,
   podeRecusar,
   podeExcluir,
-  podeEditarNumCheck,
-  chaveProvisoria,
 };

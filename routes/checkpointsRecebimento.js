@@ -81,7 +81,7 @@ router.post('/:checkpointId/aceitar', async (req, res) => {
       return res.status(409).json({ error: `Este checkpoint não está pendente (situação: "${atual.statusTransferencia}")` });
     }
 
-    const numero = validarNumCheck(req.body.numCheck ?? atual.numCheck);
+    const numero = validarNumCheck(req.body.numCheck);   // só o admin do buffet define o número
     if (!numero.ok) return res.status(400).json({ error: numero.erro });
     if (!numero.valor) return res.status(400).json({ error: 'Informe o número do checkpoint' });
 
@@ -144,21 +144,27 @@ router.post('/:checkpointId/recusar', async (req, res) => {
   }
 });
 
-// Carrega um checkpoint já aceito do buffet e que veio do fluxo novo (tem MAC). Os mais antigos seguem pelas telas de antes.
-async function checkpointDoBuffet(req, res) {
+// Carrega um checkpoint já aceito do buffet. `exigirMac`: só os que vieram do cadastro do super admin (com MAC); os
+// mais antigos seguem pelas telas de antes.
+async function checkpointDoBuffet(req, res, { exigirMac = false } = {}) {
   const atual = await buscar(req.params.checkpointId);
   if (!atual || atual.empresaId !== req.user.empresaId) {
     res.status(404).json({ error: 'Checkpoint não encontrado' });
     return null;
   }
-  if (atual.statusTransferencia !== STATUS.ACEITO || !atual.macAddress) {
+  if (atual.statusTransferencia !== STATUS.ACEITO) {
+    res.status(409).json({ error: 'Este checkpoint ainda não foi aceito' });
+    return null;
+  }
+  if (exigirMac && !atual.macAddress) {
     res.status(409).json({ error: 'Só checkpoints recebidos pelo cadastro novo (com MAC) podem ser alterados aqui' });
     return null;
   }
   return atual;
 }
 
-// Troca o número do checkpoint. Os jogos e o histórico apontam para a chave interna, então nada se perde.
+// Troca o número do checkpoint. Os jogos e o histórico apontam para o id (que nunca muda), então nada se perde. Vale
+// para qualquer checkpoint aceito do buffet, com ou sem MAC.
 router.patch('/:checkpointId/numero', async (req, res) => {
   try {
     const atual = await checkpointDoBuffet(req, res);
@@ -190,7 +196,7 @@ router.patch('/:checkpointId/numero', async (req, res) => {
 // o histórico pertence ao evento em que foi feito.
 router.patch('/:checkpointId/evento', async (req, res) => {
   try {
-    const atual = await checkpointDoBuffet(req, res);
+    const atual = await checkpointDoBuffet(req, res, { exigirMac: true });
     if (!atual) return;
 
     const pedido = req.body.eventoId ? String(req.body.eventoId) : null;
