@@ -42,6 +42,10 @@ function trocarMacNaUrl(url, chave) {
 
 const ehHeartbeat = (url) => HEARTBEAT.test(String(url || ''));
 
+// Consulta que a placa faz a cada ~10 s para saber o modo do jogo (o firmware trata qualquer resposta que não seja 200
+// como "API fora do ar" e pisca o LED de erro do servidor).
+const ehConsultaDeModo = (req) => req.method === 'GET' && /^\/debug\/checkpoint-mode\/?(?:[?#]|$)/i.test(String(req.url || ''));
+
 function resposta(res, status, corpo) {
   return res.status(status).json(corpo);
 }
@@ -72,6 +76,11 @@ async function identificarPorMac(req, res, next) {
           statusTransferencia: checkpoint.statusTransferencia,
         });
       }
+      // Aceito mas ainda fora de um evento: o servidor está bem, só não há jogo. Responde "parado" em vez de 409, para a
+      // placa não se declarar sem servidor. Leituras e jogos seguem recusados abaixo.
+      if (!checkpoint.eventoId && ehConsultaDeModo(req)) {
+        return resposta(res, 200, { mode: 'idle', gameType: 'none', eventoId: null });
+      }
       if (!checkpoint.eventoId) {
         return resposta(res, 409, { error: 'Este checkpoint ainda não está em nenhum evento', numCheck: checkpoint.numCheck });
       }
@@ -88,4 +97,4 @@ async function identificarPorMac(req, res, next) {
   }
 }
 
-module.exports = { ehMac, macDaUrl, trocarMacNaUrl, ehHeartbeat, identificarPorMac };
+module.exports = { ehMac, macDaUrl, trocarMacNaUrl, ehHeartbeat, ehConsultaDeModo, identificarPorMac };

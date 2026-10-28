@@ -357,6 +357,11 @@ async function ensaio() {
   r = await viaCp(legado, 'GET', `/${MAC}/territory`);
   assert.equal(r.status, 409, 'aceito mas sem evento');
   assert.match(r.body.error, /evento/);
+  let respModo = null;
+  const resModo = { status(c) { this.c = c; return this; }, json(b) { respModo = { status: this.c, body: b }; return this; } };
+  await identificarPorMac({ method: 'GET', url: '/debug/checkpoint-mode?checkpointId=' + MAC, body: undefined, query: { checkpointId: MAC } }, resModo, () => {});
+  assert.equal(respModo.status, 200, 'aceito sem evento: a consulta de modo responde parado, não 409');
+  assert.equal(respModo.body.mode, 'idle');
   r = await chamar(recebimento, 'PATCH', `/${chaveD}/evento`, admin({ corpo: { eventoId: eventoLegado.eventoId } }));
   assert.equal(r.status, 200);
 

@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { ehMac, macDaUrl, trocarMacNaUrl, ehHeartbeat } = require('../utils/dispositivoMac');
+const { ehMac, macDaUrl, trocarMacNaUrl, ehHeartbeat, ehConsultaDeModo } = require('../utils/dispositivoMac');
 
 test('só o MAC com dois-pontos é reconhecido; chaves antigas não', () => {
   assert.equal(ehMac('AA:BB:CC:DD:EE:FF'), true);
@@ -44,4 +44,12 @@ test('reconhece o heartbeat, o único pedido que um checkpoint ainda não aceito
   assert.equal(ehHeartbeat('/pontoVerificacao/15/territory'), false);
   assert.equal(ehHeartbeat('/leituras'), false);
   assert.equal(ehHeartbeat('/pontoVerificacao/15/heartbeats'), false);
+});
+
+test('só o GET do modo do checkpoint é a consulta de modo', () => {
+  assert.equal(ehConsultaDeModo({ method: 'GET', url: '/debug/checkpoint-mode?checkpointId=70:4B:CA:02:ED:54' }), true);
+  assert.equal(ehConsultaDeModo({ method: 'GET', url: '/debug/checkpoint-mode' }), true);
+  assert.equal(ehConsultaDeModo({ method: 'POST', url: '/debug/checkpoint-mode?checkpointId=1' }), false);
+  assert.equal(ehConsultaDeModo({ method: 'GET', url: '/debug/checkpoint-mode-x?checkpointId=1' }), false);
+  assert.equal(ehConsultaDeModo({ method: 'GET', url: '/pontoVerificacao/1/territory' }), false);
 });
