@@ -8,6 +8,8 @@ const { criarPerfil } = require('../utils/perfilCrianca');
 const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia } = require('../utils/eventosFamilia');
+const { gerarCodigo, normalizarCodigo, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
+const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
 const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -16,12 +18,17 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+// O código do convite tem só 8 dígitos hexadecimais: quem erra códigos demais é barrado por um tempo.
+const tentativasDeConvite = criarLimitador({ max: 15 });
+const MENSAGEM_MUITAS_TENTATIVAS = 'Muitas tentativas com códigos inválidos. Tente de novo em alguns minutos.';
+const quemPede = (req) => req.user?.id || ipDoCliente(req);
+
 function isStaff(req) {
   return STAFF_ROLES.includes(req.user?.role);
 }
 
 async function getInvite(token) {
-  if (!token || token.length < 32) return null;
+  if (!formatoValido(token)) return null;
   const invite = await queryOne(`
     SELECT i.*, e.nome as evento_nome, e.data as evento_data,
            c.criancaId as linked_child_id, c.nome as linked_child_name
@@ -29,7 +36,7 @@ async function getInvite(token) {
     JOIN evento e ON e.eventoId = i.eventoId
     LEFT JOIN crianca c ON c.criancaId = i.criancaId
     WHERE i.hashToken = @tokenHash
-  `, { tokenHash: hashToken(token) });
+  `, { tokenHash: hashToken(normalizarCodigo(token)) });
   if (!invite) return null;
   if (invite.status === 'pending' && new Date(invite.expiramEm) <= new Date()) {
     await query(`UPDATE conviteFamilia SET status = 'expired' WHERE conviteId = @id AND status = 'pending'`, { id: invite.conviteId });
@@ -64,9 +71,15 @@ function publicInvite(invite) {
 // Validar convite sem revelar o token armazenado ou dados internos.
 router.get('/invites/:token', async (req, res) => {
   try {
+    const quem = quemPede(req);
+    if (tentativasDeConvite.bloqueado(quem)) return res.status(429).json({ error: MENSAGEM_MUITAS_TENTATIVAS });
     const invite = await getInvite(req.params.token);
-    if (!invite) return res.status(404).json({ error: 'Convite não encontrado' });
+    if (!invite) {
+      tentativasDeConvite.registrarFalha(quem);
+      return res.status(404).json({ error: 'Convite não encontrado' });
+    }
     if (invite.status !== 'pending') {
+      tentativasDeConvite.registrarFalha(quem);
       return res.status(410).json({ error: invite.status === 'expired' ? 'Convite expirado' : 'Convite já utilizado', status: invite.status });
     }
     res.json(publicInvite(invite));
@@ -94,7 +107,13 @@ router.post('/invites', verifyToken, async (req, res) => {
       if (!child) return res.status(404).json({ error: 'Criança não encontrada neste evento' });
     }
 
-    const rawToken = crypto.randomBytes(32).toString('hex');
+    // Código de 8 dígitos hexadecimais; sorteia de novo se por azar já existir um igual (mesmo de convite antigo)
+    let codigo = gerarCodigo();
+    for (let tentativa = 0; tentativa < 10; tentativa++) {
+      const existente = await queryOne('SELECT conviteId FROM conviteFamilia WHERE hashToken = @tokenHash', { tokenHash: hashToken(codigo) });
+      if (!existente) break;
+      codigo = gerarCodigo();
+    }
     const days = Math.min(Math.max(Number(expiresInDays) || 7, 1), 30);
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
     const id = crypto.randomUUID();
@@ -108,15 +127,16 @@ router.post('/invites', verifyToken, async (req, res) => {
       eventoId,
       criancaId: criancaId || null,
       email: email ? String(email).trim().toLowerCase() : null,
-      tokenHash: hashToken(rawToken),
+      tokenHash: hashToken(codigo),
       expiresAt,
       createdBy: req.user.id,
     });
 
     res.status(201).json({
       id,
-      token: rawToken,
-      inviteUrl: `${FRONTEND_URL}/family/invite/${rawToken}`,
+      codigo: exibirCodigo(codigo),
+      token: exibirCodigo(codigo), // mesmo valor do código; mantido para quem ainda lê "token"
+      inviteUrl: `${FRONTEND_URL}/family/invite/${exibirCodigo(codigo)}`,
       expiresAt: expiresAt.toISOString(),
       event: { id: evento.eventoId, name: evento.nome, date: evento.data },
     });
@@ -130,9 +150,15 @@ router.post('/invites', verifyToken, async (req, res) => {
 router.post('/invites/:token/register', async (req, res) => {
   let invite = null;
   try {
+    const quem = quemPede(req);
+    if (tentativasDeConvite.bloqueado(quem)) return res.status(429).json({ error: MENSAGEM_MUITAS_TENTATIVAS });
     invite = await getInvite(req.params.token);
-    if (!invite) return res.status(404).json({ error: 'Convite não encontrado' });
+    if (!invite) {
+      tentativasDeConvite.registrarFalha(quem);
+      return res.status(404).json({ error: 'Convite não encontrado' });
+    }
     if (invite.status !== 'pending') {
+      tentativasDeConvite.registrarFalha(quem);
       return res.status(410).json({ error: invite.status === 'expired' ? 'Convite expirado' : 'Convite já utilizado', status: invite.status });
     }
 
@@ -276,9 +302,15 @@ router.post('/invites/:token/entrar', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
 
+    const quem = quemPede(req);
+    if (tentativasDeConvite.bloqueado(quem)) return res.status(429).json({ error: MENSAGEM_MUITAS_TENTATIVAS });
     const invite = await getInvite(req.params.token);
     const avaliacao = avaliarConviteParaEntrar(invite, req.user.email);
-    if (!avaliacao.ok) return res.status(avaliacao.status).json({ error: avaliacao.error });
+    if (!avaliacao.ok) {
+      // Código inexistente, usado ou vencido conta como tentativa errada; e-mail diferente não (o código estava certo)
+      if (avaliacao.status !== 403) tentativasDeConvite.registrarFalha(quem);
+      return res.status(avaliacao.status).json({ error: avaliacao.error });
+    }
 
     const resultado = await withTransaction(async () => {
       // O UPDATE é a trava: se dois pedidos chegam juntos, só um consegue marcar o convite como usado.

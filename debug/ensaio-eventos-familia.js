@@ -17,7 +17,7 @@ const router = require('../routes/familias');
 class Desfazer extends Error {}
 
 // Chama o último handler da rota (o que vem depois do verifyToken), já com o usuário preenchido.
-function chamar(metodo, caminho, { usuario, params = {} }) {
+function chamar(metodo, caminho, { usuario, params = {}, body = {} }) {
   const camada = router.stack.find((l) => l.route && l.route.path === caminho && l.route.methods[metodo]);
   assert.ok(camada, `rota ${metodo} ${caminho} existe`);
   const handler = camada.route.stack[camada.route.stack.length - 1].handle;
@@ -27,7 +27,7 @@ function chamar(metodo, caminho, { usuario, params = {} }) {
       status(c) { this.statusCode = c; return this; },
       json(corpo) { resolve({ status: this.statusCode, corpo }); return this; },
     };
-    Promise.resolve(handler({ user: usuario, params, body: {}, query: {} }, res)).catch(reject);
+    Promise.resolve(handler({ user: usuario, params, body, query: {}, headers: {}, ip: '127.0.0.1' }, res)).catch(reject);
   });
 }
 
@@ -130,6 +130,24 @@ async function main() {
         console.log('  - sem criança livre no banco: caso do convite de criança não ensaiado');
       }
 
+      // 5c) Convite criado pela rota: código de 8 dígitos hexadecimais, aceito em qualquer escrita.
+      const equipe = { id: 'equipe-ensaio', email: 'equipe@ensaio.com', role: 'admin', empresaId: e2.empresaId };
+      const criado = await chamar('post', '/invites', { usuario: equipe, body: { eventoId: e2.eventoId } });
+      assert.equal(criado.status, 201, JSON.stringify(criado.corpo));
+      assert.match(criado.corpo.codigo, /^[0-9A-F]{8}$/);
+      assert.equal(criado.corpo.token, criado.corpo.codigo);
+      assert.ok(criado.corpo.inviteUrl.endsWith(`/family/invite/${criado.corpo.codigo}`));
+      const guardado = await queryOne('SELECT hashToken FROM conviteFamilia WHERE conviteId = @id', { id: criado.corpo.id });
+      assert.equal(guardado.hashToken, crypto.createHash('sha256').update(criado.corpo.codigo.toLowerCase()).digest('hex'), 'só o hash do código em minúsculas vai para o banco');
+      const consulta = await chamar('get', '/invites/:token', { usuario: null, params: { token: criado.corpo.codigo.toLowerCase() } });
+      assert.equal(consulta.status, 200, 'consulta pública aceita minúsculas');
+      assert.equal(consulta.corpo.event.id, e2.eventoId);
+      const digitado = `${criado.corpo.codigo.slice(0, 4)} ${criado.corpo.codigo.slice(4)}`.toLowerCase();
+      const r9 = await entrar(digitado);
+      assert.equal(r9.status, 201, JSON.stringify(r9.corpo));
+      assert.equal((await entrar(criado.corpo.codigo)).status, 410, 'o mesmo código não vale duas vezes');
+      console.log(`  ✔ convite criado pela rota: código ${criado.corpo.codigo}; aceito digitado como "${digitado}"; só vale uma vez`);
+
       // 6) Quem não é família não usa a rota; código que não existe dá 404.
       assert.equal((await entrar('x'.repeat(40), { ...usuario, role: 'admin' })).status, 403);
       assert.equal((await entrar('x'.repeat(40))).status, 404);
@@ -139,6 +157,18 @@ async function main() {
       await apagarEventoDentroDaTransacao(e1.eventoId);
       assert.equal(await total('SELECT COUNT(*)::int AS n FROM familiaEvento WHERE eventoId = @e', { e: e1.eventoId }), 0);
       console.log('  ✔ excluir o evento apaga o registro de familiaEvento');
+
+      // 8) Muitos códigos inválidos seguidos: o cliente é barrado (429), mesmo que o próximo fosse certo.
+      const chato = { id: `chato-${crypto.randomUUID()}`, email: 'chato@ensaio.com', role: 'family', empresaId: login.empresaId };
+      for (let i = 0; i < 15; i++) {
+        assert.equal((await entrar(crypto.randomBytes(4).toString('hex'), chato)).status, 404);
+      }
+      const barrado = await entrar(crypto.randomBytes(4).toString('hex'), chato);
+      assert.equal(barrado.status, 429);
+      const certo = await novoConvite({ empresaId: e2.empresaId, eventoId: e2.eventoId }); // e1 já foi excluído no passo 7
+      assert.equal((await entrar(certo.token, chato)).status, 429, 'barrado vale também para o código certo');
+      assert.equal((await entrar(certo.token)).status, 201, 'outro cliente não é afetado');
+      console.log('  ✔ 15 códigos inválidos seguidos: 429 para esse cliente, sem afetar os outros');
 
       throw new Desfazer();
     });
