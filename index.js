@@ -34,6 +34,7 @@ const checkpointsRoutes = require('./routes/checkpoints');
 const checkpointsMasterRoutes = require('./routes/checkpointsMaster');
 const checkpointsRecebimentoRoutes = require('./routes/checkpointsRecebimento');
 const { identificarPorMac } = require('./utils/dispositivoMac');
+const comandosCheckpoint = require('./utils/comandosCheckpoint');
 const leiturasRoutes = require('./routes/leituras');
 const settingsRoutes = require('./routes/settings');
 const empresaRoutes = require('./routes/empresa');
@@ -1570,6 +1571,8 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
         'SELECT eventoId FROM pontoVerificacao WHERE checkpointId = @checkpointId',
         { checkpointId }
       );
+      // Teste de LED/som pedido pelo admin (utils/comandosCheckpoint.js): a placa executa e o servidor o esquece.
+      const comando = comandosCheckpoint.retirar(checkpointId);
       if (checkpoint?.eventoId) {
         const eventState = await getGameState(checkpoint.eventoId);
         if (eventState) {
@@ -1578,9 +1581,11 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
             gameType: eventState.tipoJogo,
             eventoId: eventState.eventoId,
             updatedAt: eventState.atualizadoEm,
+            ...(comando ? { comando } : {}),
           });
         }
       }
+      if (comando) return res.json({ mode: currentMode, gameType: currentGameType, comando });
     }
 
     res.json({ mode: currentMode, gameType: currentGameType });

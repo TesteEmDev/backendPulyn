@@ -3,7 +3,8 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { semIdNovo, STATUS } = require('../utils/checkpointTransferencia');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
+const comandos = require('../utils/comandosCheckpoint');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
 
@@ -77,6 +78,36 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
   } catch (err) {
     console.error('❌ Erro ao processar heartbeat:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST - Testar o LED ou o som da placa. O comando espera na fila até a placa buscá-lo (até ~10 s); ver
+// utils/comandosCheckpoint.js. Só o admin do buffet dono do checkpoint, e só se a placa está em evento e online.
+const ONLINE_ATE_MS = 3 * 60 * 1000; // o heartbeat chega a cada 60 s
+router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const tipo = String(req.body?.tipo || '').toLowerCase();
+    if (!comandos.TIPOS.includes(tipo)) {
+      return res.status(400).json({ error: `Informe o tipo do teste: ${comandos.TIPOS.join(' ou ')}` });
+    }
+    const checkpoint = await queryOne(
+      `SELECT checkpointId, eventoId, ultimoVisto FROM pontoVerificacao
+       WHERE LOWER(checkpointId) = LOWER(@id) AND LOWER(empresaId) = LOWER(@empresaId) AND statusTransferencia = @aceito`,
+      { id: req.params.checkpointId, empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
+    );
+    if (!checkpoint) return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    if (!checkpoint.eventoId) {
+      return res.status(409).json({ error: 'Coloque o checkpoint em um evento antes de testá-lo' });
+    }
+    const visto = checkpoint.ultimoVisto ? new Date(checkpoint.ultimoVisto).getTime() : 0;
+    if (Date.now() - visto > ONLINE_ATE_MS) {
+      return res.status(409).json({ error: 'O checkpoint está offline: não há como mandar o teste' });
+    }
+    comandos.agendar(checkpoint.checkpointId, tipo);
+    res.json({ ok: true, tipo, validadeSegundos: comandos.VALIDADE_MS / 1000 });
+  } catch (err) {
+    console.error('❌ Erro ao agendar teste do checkpoint:', err);
+    res.status(500).json({ error: 'Não foi possível enviar o teste' });
   }
 });
 
