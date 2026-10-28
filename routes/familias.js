@@ -253,17 +253,19 @@ router.post('/invites/:token/register', async (req, res) => {
 
       for (const childId of childIds) {
         const linkId = crypto.randomUUID();
+        // Valor direto: repetir @childId num subselect dá "tipos inconsistentes" no PostgreSQL
+        const cadastro = await queryOne('SELECT perfilCriancaId FROM crianca WHERE criancaId = @childId', { childId });
         await query(`
           INSERT INTO vinculoFamiliar
             (vinculoId, loginId, criancaId, empresaId, relacionamento, status, aprovadoEm, perfilCriancaId)
-          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'approved', GETDATE(),
-                  (SELECT c.perfilCriancaId FROM crianca c WHERE c.criancaId = @childId))
+          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'approved', GETDATE(), @perfilCriancaId)
         `, {
           id: linkId,
           loginId,
           childId,
           empresaId: invite.empresaId,
           relacionamento: String(relacionamento).trim().slice(0, 50) || 'responsável',
+          perfilCriancaId: cadastro?.perfilCriancaId || null,
         });
       }
 
