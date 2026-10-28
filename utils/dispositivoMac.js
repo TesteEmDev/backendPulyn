@@ -13,6 +13,7 @@
 // aparelho online, mas ele não lê pulseira nem entra em jogo. Os demais pedidos recebem 409.
 const { queryOne } = require('../database');
 const { normalizarMac, STATUS } = require('./checkpointTransferencia');
+const comandos = require('./comandosCheckpoint');
 
 const MAC_COM_DOIS_PONTOS = /^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}$/;
 // Depois de /pontoVerificacao/ vêm rotas que não são ID de checkpoint.
@@ -79,7 +80,9 @@ async function identificarPorMac(req, res, next) {
       // Aceito mas ainda fora de um evento: o servidor está bem, só não há jogo. Responde "parado" em vez de 409, para a
       // placa não se declarar sem servidor. Leituras e jogos seguem recusados abaixo.
       if (!checkpoint.eventoId && ehConsultaDeModo(req)) {
-        return resposta(res, 200, { mode: 'idle', gameType: 'none', eventoId: null });
+        // Sem evento a placa ainda pode ser testada (LED/som): o comando pedido pelo admin segue junto.
+        const comando = comandos.retirar(checkpoint.checkpointId);
+        return resposta(res, 200, { mode: 'idle', gameType: 'none', eventoId: null, ...(comando ? { comando } : {}) });
       }
       if (!checkpoint.eventoId) {
         return resposta(res, 409, { error: 'Este checkpoint ainda não está em nenhum evento', numCheck: checkpoint.numCheck });

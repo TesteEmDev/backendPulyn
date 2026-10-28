@@ -43,7 +43,8 @@ const servidor = http.createServer(app).listen(0, async () => {
     assert.equal(r.status, 404, 'não é do buffet');
     linha = { checkpointId: '5', eventoId: null, ultimoVisto: new Date() };
     r = await pedir(porta, '5', 'admin', { tipo: 'led' });
-    assert.equal(r.status, 409, 'sem evento');
+    assert.equal(r.status, 200, 'sem evento também pode ser testado');
+    assert.equal(comandos.retirar('5'), 'led');
     linha = { checkpointId: '5', eventoId: 'ev-1', ultimoVisto: new Date(Date.now() - 10 * 60 * 1000) };
     r = await pedir(porta, '5', 'admin', { tipo: 'led' });
     assert.equal(r.status, 409, 'offline');
@@ -61,7 +62,7 @@ const servidor = http.createServer(app).listen(0, async () => {
     await pedir(porta, '5', 'admin', { tipo: 'som' });
     assert.equal(comandos.retirar('5'), 'som');
     assert.equal(comandos.retirar('5'), null);
-    console.log('OK: 401, 403, 400, 404, 409 (sem evento), 409 (offline) e 200 com o comando na fila');
+    console.log('OK: 401, 403, 400, 404, 200 (mesmo sem evento), 409 (offline) e 200 com o comando na fila');
   } catch (e) {
     console.error('FALHOU:', e.message);
     process.exitCode = 1;

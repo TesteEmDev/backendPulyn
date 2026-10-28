@@ -85,7 +85,7 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
 });
 
 // POST - Testar o LED ou o som da placa. O comando espera na fila até a placa buscá-lo (até ~10 s); ver
-// utils/comandosCheckpoint.js. Só o admin do buffet dono do checkpoint, e só se a placa está em evento e online.
+// utils/comandosCheckpoint.js. Só o admin do buffet dono do checkpoint que já aceitou, e só se a placa está online.
 const ONLINE_ATE_MS = 3 * 60 * 1000; // o heartbeat chega a cada 60 s
 router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (req, res) => {
   try {
@@ -94,14 +94,11 @@ router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (r
       return res.status(400).json({ error: `Informe o tipo do teste: ${comandos.TIPOS.join(' ou ')}` });
     }
     const checkpoint = await queryOne(
-      `SELECT checkpointId, eventoId, ultimoVisto, proposito FROM pontoVerificacao
+      `SELECT checkpointId, ultimoVisto, proposito FROM pontoVerificacao
        WHERE LOWER(checkpointId) = LOWER(@id) AND LOWER(empresaId) = LOWER(@empresaId) AND statusTransferencia = @aceito`,
       { id: req.params.checkpointId, empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
     );
     if (!checkpoint) return res.status(404).json({ error: 'Checkpoint não encontrado' });
-    if (!checkpoint.eventoId) {
-      return res.status(409).json({ error: 'Coloque o checkpoint em um evento antes de testá-lo' });
-    }
     const visto = checkpoint.ultimoVisto ? new Date(checkpoint.ultimoVisto).getTime() : 0;
     if (Date.now() - visto > ONLINE_ATE_MS) {
       return res.status(409).json({ error: 'O checkpoint está offline: não há como mandar o teste' });

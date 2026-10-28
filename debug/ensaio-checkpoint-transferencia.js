@@ -362,6 +362,10 @@ async function ensaio() {
   await identificarPorMac({ method: 'GET', url: '/debug/checkpoint-mode?checkpointId=' + MAC, body: undefined, query: { checkpointId: MAC } }, resModo, () => {});
   assert.equal(respModo.status, 200, 'aceito sem evento: a consulta de modo responde parado, não 409');
   assert.equal(respModo.body.mode, 'idle');
+  require('../utils/comandosCheckpoint').agendar(chaveD, 'led');
+  respModo = null;
+  await identificarPorMac({ method: 'GET', url: '/debug/checkpoint-mode?checkpointId=' + MAC, body: undefined, query: { checkpointId: MAC } }, resModo, () => {});
+  assert.equal(respModo.body.comando, 'led', 'sem evento, o teste de LED/som chega junto da resposta');
   r = await chamar(recebimento, 'PATCH', `/${chaveD}/evento`, admin({ corpo: { eventoId: eventoLegado.eventoId } }));
   assert.equal(r.status, 200);
 
