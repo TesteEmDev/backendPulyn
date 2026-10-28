@@ -117,12 +117,12 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
       if (vinculacaoExistente) {
         // ✅ Já existe - verificar status
         if (vinculacaoExistente.status === 'inactive') {
-          console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.id}`);
+          console.log(`   ✅ Re-ativando vinculação existente: ${vinculacaoExistente.vinculoId}`);
           await tx.query(
             `UPDATE vinculoFamiliar
              SET status = 'approved', aprovadoEm = CURRENT_TIMESTAMP
              WHERE vinculoId = @linkId`,
-            { linkId: vinculacaoExistente.id }
+            { linkId: vinculacaoExistente.vinculoId }
           );
         } else {
           throw new Error('ALREADY_LINKED');
@@ -134,8 +134,9 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         console.log(`   📊 Dados: loginId=${req.user.id}, criancaId=${codigoVinculacao.criancaId}, empresaId=${codigoVinculacao.empresaId}`);
         
         await tx.query(
-          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm)
-           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP)`,
+          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm, perfilCriancaId)
+           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP,
+                   (SELECT c.perfilCriancaId FROM crianca c WHERE c.criancaId = @criancaId))`,
           {
             linkId: linkId,
             loginId: req.user.id, 
@@ -255,15 +256,16 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
         if (vinculacaoExistente.status === 'inactive') {
           await tx.query(
             `UPDATE vinculoFamiliar SET status = 'approved', aprovadoEm = CURRENT_TIMESTAMP WHERE vinculoId = @linkId`,
-            { linkId: vinculacaoExistente.id }
+            { linkId: vinculacaoExistente.vinculoId }
           );
         } else {
           throw new Error('ALREADY_LINKED');
         }
       } else {
         await tx.query(
-          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm)
-           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP)`,
+          `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm, perfilCriancaId)
+           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP,
+                   (SELECT c.perfilCriancaId FROM crianca c WHERE c.criancaId = @criancaId))`,
           {
             linkId: uuidv4(),
             loginId: req.user.id,

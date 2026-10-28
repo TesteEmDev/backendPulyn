@@ -248,24 +248,31 @@ function criarSincronizador({
     const limite = marca.rows[0].maximo;
     let total = 0;
     for (const tabela of faltam) {
-      const colunas = sch.colunasPorTabela[tabela];
-      const colunasChave = sch.colunasChave[tabela];
-      const ordem = colunasChave.map((c) => `"${c.replace(/"/g, '""')}"`).join(', ');
-      const tamanho = Math.min(lote, linhasPorComando(colunas.length));
-      for (let deslocamento = 0; ; deslocamento += tamanho) {
-        const r = await local.query(`SELECT * FROM "${tabela}" ORDER BY ${ordem} LIMIT ${tamanho} OFFSET ${deslocamento}`);
-        if (!r.rows.length) break;
-        await executarNaNuvem((cliente) => gravarLinhas(cliente, tabela, colunas, colunasChave, r.rows));
-        total += r.rows.length;
-        if (r.rows.length < tamanho) break;
+      try {
+        const colunas = sch.colunasPorTabela[tabela];
+        const colunasChave = sch.colunasChave[tabela];
+        const ordem = colunasChave.map((c) => `"${c.replace(/"/g, '""')}"`).join(', ');
+        const tamanho = Math.min(lote, linhasPorComando(colunas.length));
+        for (let deslocamento = 0; ; deslocamento += tamanho) {
+          const r = await local.query(`SELECT * FROM "${tabela}" ORDER BY ${ordem} LIMIT ${tamanho} OFFSET ${deslocamento}`);
+          if (!r.rows.length) break;
+          await executarNaNuvem((cliente) => gravarLinhas(cliente, tabela, colunas, colunasChave, r.rows));
+          total += r.rows.length;
+          if (r.rows.length < tamanho) break;
+        }
+        // O que mudou nessa tabela ANTES da carga já foi copiado por ela; o que mudou durante continua na fila.
+        await local.query(
+          'UPDATE "sincronizacaoFila" SET "enviadoEm" = now() WHERE "filaId" <= $1 AND "tabela" = $2 AND "enviadoEm" IS NULL',
+          [limite, tabela]
+        );
+        await gravarEstado(`carga:${tabela}`, agora().toISOString());
+        carregadas.add(tabela);
+      } catch (erro) {
+        if (ehErroDeConexao(erro)) throw erro;
+        // Uma carga que falha (ex.: chave estrangeira para uma linha que ainda não está na nuvem) não pode
+        // travar a fila: o ciclo segue, a fila envia o que falta e a carga é tentada de novo no próximo ciclo.
+        log.warn(`[sincronização] carga inicial de ${tabela} adiada: ${descreverErro(erro)}`);
       }
-      // O que mudou nessa tabela ANTES da carga já foi copiado por ela; o que mudou durante continua na fila.
-      await local.query(
-        'UPDATE "sincronizacaoFila" SET "enviadoEm" = now() WHERE "filaId" <= $1 AND "tabela" = $2 AND "enviadoEm" IS NULL',
-        [limite, tabela]
-      );
-      await gravarEstado(`carga:${tabela}`, agora().toISOString());
-      carregadas.add(tabela);
     }
     if (sch.ordem.every((tabela) => carregadas.has(tabela))) await gravarEstado('cargaInicialEm', agora().toISOString());
     const semCarga = sch.ordem.filter((tabela) => !carregadas.has(tabela));

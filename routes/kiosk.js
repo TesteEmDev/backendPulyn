@@ -5,7 +5,7 @@ const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { getAvatarForCreate } = require('../utils/avatar');
 const {
-  criarPerfil, buscarPerfil, registrarVolta, buscarPerfisParaKiosk, idadeValida,
+  criarPerfil, buscarPerfil, registrarVolta, buscarPerfisParaKiosk, idadeValida, copiarVinculosParaParticipacao,
 } = require('../utils/perfilCrianca');
 
 const router = express.Router();
@@ -261,6 +261,7 @@ router.post('/participants', async (req, res) => {
           perfilId,
         }
       );
+      await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: childId, empresaId: event.empresaId });
 
       const braceletUpdate = await tx.query(
         `UPDATE pulseira

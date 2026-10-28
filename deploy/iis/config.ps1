@@ -33,7 +33,7 @@ $RepoRaiz = $null
 try { $RepoRaiz = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..') -ErrorAction Stop).Path } catch { }
 if ($RepoRaiz -and -not (Test-Path (Join-Path $RepoRaiz 'backendPulyn\index.js'))) { $RepoRaiz = $null }
 $RepoBackend  = if ($RepoRaiz) { Join-Path $RepoRaiz 'backendPulyn' } else { $null }
-$RepoFront    = if ($RepoRaiz) { Join-Path $RepoRaiz 'front-pulyn' } else { $null }
+$RepoFront    = if ($RepoRaiz) { Join-Path $RepoRaiz 'frontenPulyn' } else { $null }
 
 function Exigir-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()

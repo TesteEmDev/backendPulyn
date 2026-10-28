@@ -35,13 +35,26 @@ function removeCheckpointFromJson(value, checkpointId) {
   }
 }
 
+// IP que a placa informa no heartbeat. Só aceita IPv4 válido; qualquer outra coisa é ignorado.
+function ipDoCheckpoint(valor) {
+  if (typeof valor !== 'string') return null;
+  const ip = valor.trim();
+  const partes = ip.split('.');
+  const valido = partes.length === 4 && partes.every(p => /^\d{1,3}$/.test(p) && Number(p) <= 255);
+  return valido ? ip : null;
+}
+
 // ✨ NOVO: Heartbeat - Checkpoint registra que está online
 // SEM autenticação: Arduino envia heartbeat sem token
+// O corpo pode trazer o IP da placa ({"ip":"192.168.0.50"}). Placas antigas mandam "{}" e o IP fica como está.
 router.post('/:checkpointId/heartbeat', async (req, res) => {
   try {
     const { checkpointId } = req.params;
     const now = new Date();
-    
+    const ip = ipDoCheckpoint(req.body?.ip);
+    const campoIp = ip ? ', ip = @ip' : '';
+    const extra = ip ? { ip } : {};
+
     const checkpoint = await queryOne(
       'SELECT checkpointId, numCheck, statusTransferencia FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
@@ -54,15 +67,15 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
     // validada para não aceitar IDs arbitrários.
     try {
       await query(
-        `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now WHERE checkpointId = @id`,
-        { id: checkpointId, now }
+        `UPDATE pontoVerificacao SET status = 'online', ultimoVisto = @now${campoIp} WHERE checkpointId = @id`,
+        { id: checkpointId, now, ...extra }
       );
     } catch (err) {
       // Se coluna ultimoVisto não existe, só atualiza o status
       if (err.message.includes('ultimoVisto')) {
         await query(
-          `UPDATE pontoVerificacao SET status = 'online' WHERE checkpointId = @id`,
-          { id: checkpointId }
+          `UPDATE pontoVerificacao SET status = 'online'${campoIp} WHERE checkpointId = @id`,
+          { id: checkpointId, ...extra }
         );
       } else {
         throw err;

@@ -3,8 +3,8 @@
 // O ID que o recreacionista dá ao checkpoint (ex.: 12) é único DENTRO do buffet, mas pode se repetir entre buffets.
 // Internamente a chave continua global (pontoVerificacao.checkpointId, usada pelo ESP32 e pelas FKs):
 //   - ID livre no sistema todo:  checkpointId = ID  (como sempre foi; o ESP32 só precisa do ID)
-//   - ID já usado por outro buffet:  checkpointId = "<código do buffet>-<ID>"  (o ESP32 informa o código do buffet na
-//     página /config e monta esse mesmo valor sozinho)
+//   - ID já usado por outro buffet:  checkpointId = "<código do buffet>-<ID>"  (quem configura o ESP32 digita essa chave
+//     completa na página /config; ela precisa caber nos 16 caracteres, ver utils/idCheckpoint.js)
 const { query, queryOne, allQuery } = require('../database');
 
 const ALFABETO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // sem 0/O e 1/I para não confundir ao digitar no ESP32
