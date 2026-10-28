@@ -7,6 +7,7 @@ const { planInviteRegistration, describeRegistrationResult } = require('../utils
 const { criarPerfil } = require('../utils/perfilCrianca');
 const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
+const { avaliarConviteParaEntrar, montarEventosDaFamilia } = require('../utils/eventosFamilia');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
 const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -269,6 +270,78 @@ router.post('/invites/:token/register', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Responsável já logado adiciona um evento digitando o código do convite. O evento passa a ser da conta dele
+// (familiaEvento) e, se o convite era de uma criança específica, ela também é vinculada.
+router.post('/invites/:token/entrar', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const invite = await getInvite(req.params.token);
+    const avaliacao = avaliarConviteParaEntrar(invite, req.user.email);
+    if (!avaliacao.ok) return res.status(avaliacao.status).json({ error: avaliacao.error });
+
+    const resultado = await withTransaction(async () => {
+      // O UPDATE é a trava: se dois pedidos chegam juntos, só um consegue marcar o convite como usado.
+      const usado = await query(`
+        UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
+        WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
+      `, { id: invite.conviteId });
+      if (!usado.rowsAffected?.[0]) return { conflito: true };
+
+      const jaTinhaEvento = Boolean(await queryOne(
+        'SELECT familiaEventoId FROM familiaEvento WHERE loginId = @loginId AND eventoId = @eventoId',
+        { loginId: req.user.id, eventoId: invite.eventoId }
+      ));
+      if (!jaTinhaEvento) {
+        await query(`
+          INSERT INTO familiaEvento (familiaEventoId, loginId, eventoId, empresaId, conviteId)
+          VALUES (@id, @loginId, @eventoId, @empresaId, @conviteId)
+        `, {
+          id: crypto.randomUUID(), loginId: req.user.id, eventoId: invite.eventoId,
+          empresaId: invite.empresaId, conviteId: invite.conviteId,
+        });
+      }
+
+      let crianca = null;
+      if (invite.linked_child_id) {
+        const vinculo = await queryOne(
+          'SELECT vinculoId, status FROM vinculoFamiliar WHERE loginId = @loginId AND criancaId = @criancaId',
+          { loginId: req.user.id, criancaId: invite.linked_child_id }
+        );
+        if (!vinculo) {
+          const cadastro = await queryOne('SELECT perfilCriancaId FROM crianca WHERE criancaId = @criancaId', { criancaId: invite.linked_child_id });
+          await query(`
+            INSERT INTO vinculoFamiliar
+              (vinculoId, loginId, criancaId, empresaId, relacionamento, status, aprovadoEm, perfilCriancaId)
+            VALUES (@id, @loginId, @criancaId, @empresaId, 'responsável', 'approved', GETDATE(), @perfilCriancaId)
+          `, {
+            id: crypto.randomUUID(), loginId: req.user.id, criancaId: invite.linked_child_id,
+            empresaId: invite.empresaId, perfilCriancaId: cadastro?.perfilCriancaId || null,
+          });
+        } else if (vinculo.status !== 'approved') {
+          await query(
+            `UPDATE vinculoFamiliar SET status = 'approved', aprovadoEm = GETDATE(), rejeitadoEm = NULL WHERE vinculoId = @id`,
+            { id: vinculo.vinculoId }
+          );
+        }
+        crianca = { id: invite.linked_child_id, nome: invite.linked_child_name };
+      }
+      return { jaTinhaEvento, crianca };
+    });
+
+    if (resultado.conflito) return res.status(409).json({ error: 'Convite já foi utilizado ou expirou' });
+    res.status(201).json({
+      success: true,
+      evento: { id: invite.eventoId, nome: invite.evento_nome, data: invite.evento_data },
+      crianca: resultado.crianca,
+      jaTinhaEvento: resultado.jaTinhaEvento,
+    });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao adicionar evento pelo convite:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Pendências visíveis apenas para recepção/admin/master.
 async function listFamilyLinks(status, eventoId, req) {
   return allQuery(`
@@ -566,6 +639,36 @@ router.get('/eventos-abertos', verifyToken, async (req, res) => {
     res.json({ eventos: eventos.filter(eventoAberto).slice(0, 50) });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao listar eventos abertos:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Eventos da família (os adicionados pelo código e os das crianças vinculadas), passados e atuais.
+router.get('/eventos', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const porConvite = await allQuery(`
+      SELECT fe.eventoId, e.nome, e.data, e.status, emp.nome AS "buffetNome"
+      FROM familiaEvento fe
+      JOIN evento e ON e.eventoId = fe.eventoId
+      LEFT JOIN empresa emp ON emp.empresaId = e.empresaId
+      WHERE fe.loginId = @loginId
+    `, { loginId: req.user.id });
+
+    const porCrianca = await allQuery(`
+      SELECT c.eventoId, e.nome, e.data, e.status, emp.nome AS "buffetNome",
+             c.criancaId AS "criancaId", c.nome AS "criancaNome", c.apelido, COALESCE(c.pontos, 0) AS pontos
+      FROM vinculoFamiliar l
+      JOIN crianca c ON c.criancaId = l.criancaId
+      JOIN evento e ON e.eventoId = c.eventoId
+      LEFT JOIN empresa emp ON emp.empresaId = e.empresaId
+      WHERE l.loginId = @loginId AND l.status IN ('approved', 'pending')
+    `, { loginId: req.user.id });
+
+    res.json({ eventos: montarEventosDaFamilia(porConvite, porCrianca) });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao listar eventos da família:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

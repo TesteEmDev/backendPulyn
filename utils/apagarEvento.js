@@ -3,7 +3,7 @@
 // O banco recusa apagar um evento que tem participantes, times, zonas, pontos etc. (chaves estrangeiras), então a rota
 // antiga respondia 500 em qualquer evento usado. Aqui a exclusão é feita na ordem certa, numa transação (tudo ou nada):
 //   - apaga: participantes, times, zonas, pontuação, leituras, conquistas, mensagens do display, códigos de família,
-//     vínculos de jogos e o estado/partidas dos jogos do evento;
+//     eventos que famílias adicionaram pelo convite (familiaEvento), vínculos de jogos e o estado/partidas dos jogos do evento;
 //   - mantém: os cadastros permanentes (perfilCrianca, brincadeira), as pulseiras (voltam a ficar disponíveis), o log
 //     (perde só o vínculo com o evento) e os checkpoints com MAC, que são aparelhos do buffet: voltam a ficar "sem evento".
 //     Checkpoint sem MAC (cadastro antigo, só configuração) é apagado junto.
@@ -75,6 +75,7 @@ async function apagarEventoDentroDaTransacao(eventoId) {
   // partidaBomba e partidaRefem saem sozinhas (ON DELETE CASCADE); o log fica, sem o vínculo com o evento.
   await query('UPDATE log SET eventoId = NULL WHERE LOWER(eventoId) = LOWER(@eventoId)', p);
   await query('DELETE FROM "controleEventoEmpresa" WHERE LOWER(eventoId) = LOWER(@eventoId)', p);
+  await query('DELETE FROM "familiaEvento" WHERE LOWER(eventoId) = LOWER(@eventoId)', p);
 
   resumo.eventosApagados = contar(await query('DELETE FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)', p));
 

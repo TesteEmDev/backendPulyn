@@ -56,6 +56,18 @@ async function ensureFamilySchema() {
       )
     `);
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uqPerfilVinculoFamiliar ON perfilVinculoFamiliar (loginId, perfilCriancaId)');
+    // Eventos que a família adicionou pelo código de convite, mesmo sem criança vinculada a eles.
+    await query(`
+      CREATE TABLE IF NOT EXISTS familiaEvento (
+        familiaEventoId varchar(36) PRIMARY KEY,
+        loginId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        empresaId varchar(36),
+        conviteId varchar(36),
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uqFamiliaEventoLoginEvento ON familiaEvento (loginId, eventoId)');
     return;
   }
 
@@ -141,6 +153,24 @@ async function ensureFamilySchema() {
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqPerfilVinculoFamiliar' AND object_id = OBJECT_ID('dbo.perfilVinculoFamiliar'))
       CREATE UNIQUE INDEX uqPerfilVinculoFamiliar ON perfilVinculoFamiliar (loginId, perfilCriancaId)
+  `);
+  // Eventos que a família adicionou pelo código de convite, mesmo sem criança vinculada a eles.
+  await query(`
+    IF OBJECT_ID('dbo.familiaEvento', 'U') IS NULL
+    BEGIN
+      CREATE TABLE familiaEvento (
+        familiaEventoId NVARCHAR(36) NOT NULL PRIMARY KEY,
+        loginId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NULL,
+        conviteId NVARCHAR(36) NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
+      )
+    END
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqFamiliaEventoLoginEvento' AND object_id = OBJECT_ID('dbo.familiaEvento'))
+      CREATE UNIQUE INDEX uqFamiliaEventoLoginEvento ON familiaEvento (loginId, eventoId)
   `);
 }
 
