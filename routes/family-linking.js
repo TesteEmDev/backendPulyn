@@ -3,6 +3,7 @@ const router = express.Router();
 const { verifyToken } = require('../utils/middleware');
 const { queryOne, query, withTransaction } = require('../database');
 const { uidSqlExpression } = require('../utils/uid');
+const { eventoDaFamilia } = require('../utils/acessoEventoFamilia');
 const {
   parseBraceletUid,
   checkBraceletLinkable,
@@ -11,31 +12,6 @@ const {
 
 // Limite de tentativas do vínculo por pulseira (o UID é público e fixo; ver braceletLinkRules.js).
 const braceletAttempts = createAttemptLimiter();
-
-// O evento onde o responsável quer vincular a criança. Vale se o evento é do buffet do login, se a família entrou nele
-// pelo código de convite (familiaEvento) ou se já tem criança vinculada nele. Qualquer outro caso é como se o evento
-// não existisse (null), para não revelar eventos de outros buffets.
-async function eventoDoVinculo(user, eventoId) {
-  const evento = await queryOne(
-    'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
-    { eventoId: String(eventoId) }
-  );
-  if (!evento) return null;
-  if (evento.empresaId && String(evento.empresaId).toLowerCase() === String(user.empresaId).toLowerCase()) return evento;
-
-  const porConvite = await queryOne(
-    'SELECT 1 AS x FROM familiaEvento WHERE loginId = @loginId AND LOWER(eventoId) = LOWER(@eventoId)',
-    { loginId: user.id, eventoId: evento.eventoId }
-  );
-  if (porConvite) return evento;
-
-  const comCrianca = await queryOne(
-    `SELECT 1 AS x FROM vinculoFamiliar v JOIN crianca c ON c.criancaId = v.criancaId
-     WHERE v.loginId = @loginId AND v.status IN ('approved', 'pending') AND LOWER(c.eventoId) = LOWER(@eventoId)`,
-    { loginId: user.id, eventoId: evento.eventoId }
-  );
-  return comCrianca ? evento : null;
-}
 
 /**
  * MOBILE: POST /api/family/qrcode/validate
@@ -257,7 +233,7 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
     let filtroEvento = '';
     const parametros = { uid: parsed.uid };
     if (pedido) {
-      const evento = await eventoDoVinculo(req.user, pedido);
+      const evento = await eventoDaFamilia(req.user, pedido);
       if (!evento) {
         const negado = checkBraceletLinkable(null);
         return res.status(404).json({ error: negado.error, codigo: negado.code });

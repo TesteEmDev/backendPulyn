@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
+const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { buildCheckpointConfigs, parseConfigItems, idOf } = require('../utils/liveCheckpoints');
 const { refreshTreasureTargetAfterListChange } = require('../utils/treasure');
 const { refreshMonsterSpecialAfterListChange } = require('../utils/monster');
@@ -76,8 +77,9 @@ function normalizeCheckpointConfigs(tipo, checkpoints) {
 // Listar brincadeira por empresa/evento do usuário
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresaId = req.user.empresaId;
     const eventoId = req.query.eventoId ? String(req.query.eventoId) : null;
+    // Família acompanha o evento do buffet dele, mesmo que a conta tenha sido criada em outro (utils/acessoEventoFamilia.js)
+    const empresaId = await empresaParaEvento(req.user, eventoId);
 
     let whereClause = `b.empresaId = @empresaId
       AND LOWER(COALESCE(b.status, 'active')) <> 'archived'`;

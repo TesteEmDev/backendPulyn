@@ -5,6 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { processParallelScan } = require('../utils/parallelGame');
 const {
   getActiveSession,
@@ -1256,7 +1257,8 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
   try {
     const eventoId = String(req.params.eventoId || '').trim();
     const brincadeiraId = String(req.query.brincadeiraId || '').trim();
-    const empresaId = req.user.empresaId;
+    // Família acompanha o evento do buffet dele, mesmo que a conta tenha sido criada em outro (utils/acessoEventoFamilia.js)
+    const empresaId = await empresaParaEvento(req.user, eventoId);
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
     const master = isMaster(req) ? 1 : 0;
     const sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId

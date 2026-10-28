@@ -100,6 +100,7 @@ const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { checkGameStartRequirements } = require('./utils/gameRequirements');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
+const { eventoDaFamilia } = require('./utils/acessoEventoFamilia');
 const WS_JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 const {
   TREASURE_GAME_TYPE,
@@ -323,12 +324,15 @@ wss.on('connection', async (ws, req) => {
 
   if (wsUser && !controlScope && wsUser.role !== 'master') {
     try {
-      const authorizedEvent = await queryOne(
-        `SELECT eventoId FROM "evento"
-         WHERE LOWER("eventoId") = LOWER(@eventoId)
-           AND LOWER(empresaId) = LOWER(@empresaId)`,
-        { eventoId, empresaId: wsUser.empresaId }
-      );
+      // Família: vale o evento do buffet dela, o que entrou por código ou onde tem criança (mesmo de outro buffet)
+      const authorizedEvent = wsUser.role === 'family'
+        ? await eventoDaFamilia(wsUser, eventoId)
+        : await queryOne(
+          `SELECT eventoId FROM "evento"
+           WHERE LOWER("eventoId") = LOWER(@eventoId)
+             AND LOWER(empresaId) = LOWER(@empresaId)`,
+          { eventoId, empresaId: wsUser.empresaId }
+        );
       if (!authorizedEvent) {
         ws.close(1008, 'Evento não autorizado para esta empresa');
         return;
