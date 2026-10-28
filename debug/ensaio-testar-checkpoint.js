@@ -52,6 +52,13 @@ const servidor = http.createServer(app).listen(0, async () => {
     r = await pedir(porta, '5', 'admin', { tipo: 'som' });
     assert.equal(r.status, 200);
     assert.equal(r.corpo.tipo, 'som');
+    assert.equal(r.corpo.esperaSegundos, 10);
+    linha = { ...linha, proposito: 'reception' };
+    r = await pedir(porta, '5', 'admin', { tipo: 'led' });
+    assert.equal(r.corpo.esperaSegundos, 60, 'recepção só no heartbeat');
+    comandos.retirar('5');
+    linha = { checkpointId: '5', eventoId: 'ev-1', ultimoVisto: new Date() };
+    await pedir(porta, '5', 'admin', { tipo: 'som' });
     assert.equal(comandos.retirar('5'), 'som');
     assert.equal(comandos.retirar('5'), null);
     console.log('OK: 401, 403, 400, 404, 409 (sem evento), 409 (offline) e 200 com o comando na fila');

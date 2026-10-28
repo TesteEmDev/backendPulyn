@@ -71,9 +71,12 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
     
     // numCheck e statusTransferencia deixam o aparelho (identificado pelo MAC) saber o número que o buffet deu a ele
     // e se já foi aceito.
+    // comando = teste de LED/som pedido pelo admin (utils/comandosCheckpoint.js); a recepção só o recebe por aqui.
+    const comando = comandos.retirar(checkpoint.checkpointId);
     res.json({
       ok: true, message: 'Checkpoint online', timestamp: now,
       numCheck: checkpoint.numCheck, statusTransferencia: checkpoint.statusTransferencia,
+      ...(comando ? { comando } : {}),
     });
   } catch (err) {
     console.error('❌ Erro ao processar heartbeat:', err);
@@ -91,7 +94,7 @@ router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (r
       return res.status(400).json({ error: `Informe o tipo do teste: ${comandos.TIPOS.join(' ou ')}` });
     }
     const checkpoint = await queryOne(
-      `SELECT checkpointId, eventoId, ultimoVisto FROM pontoVerificacao
+      `SELECT checkpointId, eventoId, ultimoVisto, proposito FROM pontoVerificacao
        WHERE LOWER(checkpointId) = LOWER(@id) AND LOWER(empresaId) = LOWER(@empresaId) AND statusTransferencia = @aceito`,
       { id: req.params.checkpointId, empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
     );
@@ -104,7 +107,9 @@ router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (r
       return res.status(409).json({ error: 'O checkpoint está offline: não há como mandar o teste' });
     }
     comandos.agendar(checkpoint.checkpointId, tipo);
-    res.json({ ok: true, tipo, validadeSegundos: comandos.VALIDADE_MS / 1000 });
+    // A placa de jogo busca o comando a cada ~10 s (checkpoint-mode); a de recepção só no heartbeat, a cada 60 s.
+    const recepcao = String(checkpoint.proposito || 'game').toLowerCase() === 'reception';
+    res.json({ ok: true, tipo, esperaSegundos: recepcao ? 60 : 10 });
   } catch (err) {
     console.error('❌ Erro ao agendar teste do checkpoint:', err);
     res.status(500).json({ error: 'Não foi possível enviar o teste' });
