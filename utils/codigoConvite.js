@@ -21,6 +21,11 @@ function normalizarCodigo(entrada) {
   return CODIGO_CURTO.test(curto) ? curto : texto;
 }
 
+// É um código curto (8 dígitos hexadecimais, já normalizado)? Só ele pode ser o código fixo de um evento.
+function ehCodigoCurto(codigo) {
+  return CODIGO_CURTO.test(String(codigo ?? ''));
+}
+
 // Vale a pena consultar o banco? Descarta de cara o que não é código curto nem token antigo.
 function formatoValido(entrada) {
   const codigo = normalizarCodigo(entrada);
@@ -32,4 +37,4 @@ function exibirCodigo(codigo) {
   return String(codigo).toUpperCase();
 }
 
-module.exports = { gerarCodigo, normalizarCodigo, formatoValido, exibirCodigo };
+module.exports = { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo };

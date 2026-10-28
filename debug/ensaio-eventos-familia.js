@@ -44,7 +44,7 @@ const novoConvite = async ({ empresaId, eventoId, criancaId = null, email = null
 
 const total = async (sql, p) => Number((await queryOne(sql, p)).n);
 const fotografia = async () => ({
-  familiaEventoExistia: Boolean(await queryOne("SELECT 1 AS x FROM information_schema.tables WHERE table_name = 'familiaevento'")),
+  familiaEventoExistia: Boolean(await queryOne("SELECT 1 AS x FROM information_schema.tables WHERE LOWER(table_name) = 'familiaevento'")),
   convitesPendentes: await total("SELECT COUNT(*)::int AS n FROM conviteFamilia WHERE status = 'pending'"),
   vinculos: await total('SELECT COUNT(*)::int AS n FROM vinculoFamiliar'),
 });

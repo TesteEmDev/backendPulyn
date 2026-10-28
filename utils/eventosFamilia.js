@@ -17,6 +17,25 @@ function avaliarConviteParaEntrar(invite, emailDoUsuario) {
   return { ok: true };
 }
 
+// O código fixo do evento visto como um convite que não se esgota: vale para qualquer conta, quantas vezes for usado,
+// e deixa de valer quando o evento é encerrado. Tem o mesmo formato dos convites da tabela (conviteFamilia).
+function conviteDoEvento(evento) {
+  return {
+    conviteId: null,
+    empresaId: evento.empresaId,
+    eventoId: evento.eventoId,
+    criancaId: null,
+    email: null,
+    status: eventoAberto(evento) ? 'pending' : 'expired',
+    expiramEm: null,
+    evento_nome: evento.nome,
+    evento_data: evento.data,
+    linked_child_id: null,
+    linked_child_name: null,
+    reutilizavel: true,
+  };
+}
+
 const dataEmMs = (valor) => {
   const ms = new Date(valor).getTime();
   return Number.isNaN(ms) ? 0 : ms;
@@ -59,4 +78,4 @@ function montarEventosDaFamilia(porConvite = [], porCrianca = []) {
   return [...eventos.values()].sort((a, b) => dataEmMs(b.data) - dataEmMs(a.data));
 }
 
-module.exports = { avaliarConviteParaEntrar, montarEventosDaFamilia };
+module.exports = { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento };

@@ -34,7 +34,7 @@ const validarPulseira = (usuario, body) => chamar(router, '/bracelet/validate', 
 const total = async (sql, p) => Number((await queryOne(sql, p)).n);
 const fotografia = async () => ({
   vinculos: await total('SELECT COUNT(*)::int AS n FROM vinculoFamiliar'),
-  familiaEventoExistia: Boolean(await queryOne("SELECT 1 AS x FROM information_schema.tables WHERE table_name = 'familiaevento'")),
+  familiaEventoExistia: Boolean(await queryOne("SELECT 1 AS x FROM information_schema.tables WHERE LOWER(table_name) = 'familiaevento'")),
 });
 
 async function main() {

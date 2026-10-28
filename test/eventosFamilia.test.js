@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { avaliarConviteParaEntrar, montarEventosDaFamilia } = require('../utils/eventosFamilia');
+const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
 
 const convite = (extra = {}) => ({ status: 'pending', email: null, ...extra });
 
@@ -82,4 +82,26 @@ test('encerrado vem da situação do evento', () => {
 
 test('evento sem nome ganha um nome padrão', () => {
   assert.equal(montarEventosDaFamilia([ev('e1', '2026-10-01', { nome: null })], [])[0].nome, 'Evento');
+});
+
+test('código fixo do evento: convite sem criança nem e-mail, que não se esgota', () => {
+  const convite = conviteDoEvento({ eventoId: 'e1', empresaId: 'emp1', nome: 'Festa do João', data: '2026-10-20', status: 'active' });
+  assert.equal(convite.status, 'pending');
+  assert.equal(convite.reutilizavel, true);
+  assert.equal(convite.conviteId, null);
+  assert.equal(convite.linked_child_id, null);
+  assert.equal(convite.email, null);
+  assert.equal(convite.eventoId, 'e1');
+  assert.equal(convite.empresaId, 'emp1');
+  assert.equal(convite.evento_nome, 'Festa do João');
+  assert.deepEqual(avaliarConviteParaEntrar(convite, 'qualquer@email.com'), { ok: true });
+});
+
+test('código fixo do evento: evento encerrado vira convite expirado', () => {
+  for (const status of ['finished', 'completed', 'cancelled']) {
+    const convite = conviteDoEvento({ eventoId: 'e1', empresaId: 'emp1', nome: 'X', status });
+    assert.equal(convite.status, 'expired', status);
+    assert.equal(avaliarConviteParaEntrar(convite, 'a@a.com').status, 410);
+  }
+  assert.equal(conviteDoEvento({ eventoId: 'e1', status: 'scheduled' }).status, 'pending');
 });

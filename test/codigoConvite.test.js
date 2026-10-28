@@ -40,3 +40,9 @@ test('formato válido: código curto (em qualquer escrita) e token antigo; o res
 test('exibir: maiúsculas', () => {
   assert.equal(exibirCodigo('a3f09c12'), 'A3F09C12');
 });
+
+test('código curto: só 8 dígitos hexadecimais já normalizados', () => {
+  const { ehCodigoCurto } = require('../utils/codigoConvite');
+  assert.equal(ehCodigoCurto('a3f09c12'), true);
+  for (const nao of ['A3F09C12', 'a3f0 9c12', 'a3f09c1', 'f'.repeat(64), '', null, undefined]) assert.equal(ehCodigoCurto(nao), false, String(nao));
+});

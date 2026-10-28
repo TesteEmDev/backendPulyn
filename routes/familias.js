@@ -7,8 +7,8 @@ const { planInviteRegistration, describeRegistrationResult } = require('../utils
 const { criarPerfil } = require('../utils/perfilCrianca');
 const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
-const { avaliarConviteParaEntrar, montarEventosDaFamilia } = require('../utils/eventosFamilia');
-const { gerarCodigo, normalizarCodigo, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
+const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
+const { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
 const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
@@ -37,7 +37,16 @@ async function getInvite(token) {
     LEFT JOIN crianca c ON c.criancaId = i.criancaId
     WHERE i.hashToken = @tokenHash
   `, { tokenHash: hashToken(normalizarCodigo(token)) });
-  if (!invite) return null;
+  if (!invite) {
+    // Não é um convite da tabela: pode ser o código fixo de um evento (vale para qualquer conta, sem se esgotar)
+    const chave = normalizarCodigo(token);
+    if (!ehCodigoCurto(chave)) return null;
+    const evento = await queryOne(
+      'SELECT eventoId, empresaId, nome, data, status FROM evento WHERE codigoConvite = @codigo',
+      { codigo: chave }
+    );
+    return evento ? conviteDoEvento(evento) : null;
+  }
   if (invite.status === 'pending' && new Date(invite.expiramEm) <= new Date()) {
     await query(`UPDATE conviteFamilia SET status = 'expired' WHERE conviteId = @id AND status = 'pending'`, { id: invite.conviteId });
     invite.status = 'expired';
@@ -67,6 +76,66 @@ function publicInvite(invite) {
     expiresAt: invite.expiramEm,
   };
 }
+
+// Sorteia um código de 8 dígitos hexadecimais que ninguém usa: nem convite individual, nem código de outro evento.
+async function codigoLivre() {
+  for (let tentativa = 0; tentativa < 20; tentativa++) {
+    const codigo = gerarCodigo();
+    const noEvento = await queryOne('SELECT eventoId FROM evento WHERE codigoConvite = @codigo', { codigo });
+    const emConvite = await queryOne('SELECT conviteId FROM conviteFamilia WHERE hashToken = @tokenHash', { tokenHash: hashToken(codigo) });
+    if (!noEvento && !emConvite) return codigo;
+  }
+  throw new Error('Não foi possível gerar um código livre');
+}
+
+function codigoDoEventoParaTela(evento) {
+  const codigo = exibirCodigo(evento.codigoConvite);
+  return {
+    eventoId: evento.eventoId,
+    codigo,
+    inviteUrl: `${FRONTEND_URL}/family/invite/${codigo}`,
+    encerrado: !eventoAberto(evento),
+  };
+}
+
+// Código fixo do evento: o mesmo código serve para todas as famílias, até o evento acabar. Só a equipe do buffet vê.
+// Nasce na primeira consulta (eventos antigos não precisam de carga prévia).
+router.get('/eventos/:eventoId/codigo', verifyToken, async (req, res) => {
+  try {
+    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+    const permitido = await getEventForUser(req.params.eventoId, req);
+    if (permitido.error) return res.status(permitido.status).json({ error: permitido.error });
+
+    const eventoId = permitido.evento.eventoId;
+    let evento = await queryOne('SELECT eventoId, status, codigoConvite FROM evento WHERE eventoId = @eventoId', { eventoId });
+    if (!evento.codigoConvite) {
+      // O WHERE ... IS NULL evita que duas consultas ao mesmo tempo troquem o código uma da outra
+      await query('UPDATE evento SET codigoConvite = @codigo WHERE eventoId = @eventoId AND codigoConvite IS NULL', { codigo: await codigoLivre(), eventoId });
+      evento = await queryOne('SELECT eventoId, status, codigoConvite FROM evento WHERE eventoId = @eventoId', { eventoId });
+    }
+    res.json(codigoDoEventoParaTela(evento));
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao obter o código do evento:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Troca o código do evento (quando ele vazou): o antigo para de valer na hora. Quem já entrou no evento continua nele.
+router.post('/eventos/:eventoId/codigo/renovar', verifyToken, async (req, res) => {
+  try {
+    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+    const permitido = await getEventForUser(req.params.eventoId, req);
+    if (permitido.error) return res.status(permitido.status).json({ error: permitido.error });
+
+    const eventoId = permitido.evento.eventoId;
+    await query('UPDATE evento SET codigoConvite = @codigo WHERE eventoId = @eventoId', { codigo: await codigoLivre(), eventoId });
+    const evento = await queryOne('SELECT eventoId, status, codigoConvite FROM evento WHERE eventoId = @eventoId', { eventoId });
+    res.json(codigoDoEventoParaTela(evento));
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao renovar o código do evento:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Validar convite sem revelar o token armazenado ou dados internos.
 router.get('/invites/:token', async (req, res) => {
@@ -107,13 +176,7 @@ router.post('/invites', verifyToken, async (req, res) => {
       if (!child) return res.status(404).json({ error: 'Criança não encontrada neste evento' });
     }
 
-    // Código de 8 dígitos hexadecimais; sorteia de novo se por azar já existir um igual (mesmo de convite antigo)
-    let codigo = gerarCodigo();
-    for (let tentativa = 0; tentativa < 10; tentativa++) {
-      const existente = await queryOne('SELECT conviteId FROM conviteFamilia WHERE hashToken = @tokenHash', { tokenHash: hashToken(codigo) });
-      if (!existente) break;
-      codigo = gerarCodigo();
-    }
+    const codigo = await codigoLivre();
     const days = Math.min(Math.max(Number(expiresInDays) || 7, 1), 30);
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
     const id = crypto.randomUUID();
@@ -197,12 +260,15 @@ router.post('/invites/:token/register', async (req, res) => {
       return res.status(409).json({ error: 'A senha informada não confere com a conta familiar existente.' });
     }
 
-    const claimed = await query(`
-      UPDATE conviteFamilia SET status = 'processing'
-      WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
-    `, { id: invite.conviteId });
-    if (!claimed.rowsAffected?.[0]) {
-      return res.status(409).json({ error: 'Convite já está sendo utilizado ou expirou' });
+    // O código fixo do evento não se esgota: só o convite individual é "reservado" enquanto o cadastro roda
+    if (!invite.reutilizavel) {
+      const claimed = await query(`
+        UPDATE conviteFamilia SET status = 'processing'
+        WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
+      `, { id: invite.conviteId });
+      if (!claimed.rowsAffected?.[0]) {
+        return res.status(409).json({ error: 'Convite já está sendo utilizado ou expirou' });
+      }
     }
 
     try {
@@ -219,6 +285,18 @@ router.post('/invites/:token/register', async (req, res) => {
           familyNome: familyName,
           loginStatus: plan.loginStatus,
         });
+      }
+
+      // O evento do convite entra na conta (aparece em "Meus eventos" mesmo sem criança vinculada)
+      const jaTemEvento = await queryOne(
+        'SELECT familiaEventoId FROM familiaEvento WHERE loginId = @loginId AND eventoId = @eventoId',
+        { loginId, eventoId: invite.eventoId }
+      );
+      if (!jaTemEvento) {
+        await query(
+          'INSERT INTO familiaEvento (familiaEventoId, loginId, eventoId, empresaId, conviteId) VALUES (@id, @loginId, @eventoId, @empresaId, @conviteId)',
+          { id: crypto.randomUUID(), loginId, eventoId: invite.eventoId, empresaId: invite.empresaId, conviteId: invite.conviteId || null }
+        );
       }
 
       const childIds = [];
@@ -269,10 +347,12 @@ router.post('/invites/:token/register', async (req, res) => {
         });
       }
 
-      await query(`
-        UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
-        WHERE conviteId = @inviteId AND status = 'processing'
-      `, { inviteId: invite.conviteId });
+      if (!invite.reutilizavel) {
+        await query(`
+          UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
+          WHERE conviteId = @inviteId AND status = 'processing'
+        `, { inviteId: invite.conviteId });
+      }
 
       const result = describeRegistrationResult({
         childless: plan.childless,
@@ -316,11 +396,14 @@ router.post('/invites/:token/entrar', verifyToken, async (req, res) => {
 
     const resultado = await withTransaction(async () => {
       // O UPDATE é a trava: se dois pedidos chegam juntos, só um consegue marcar o convite como usado.
-      const usado = await query(`
-        UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
-        WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
-      `, { id: invite.conviteId });
-      if (!usado.rowsAffected?.[0]) return { conflito: true };
+      // O código fixo do evento não se esgota (vale para qualquer conta), então não passa por aqui.
+      if (!invite.reutilizavel) {
+        const usado = await query(`
+          UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
+          WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
+        `, { id: invite.conviteId });
+        if (!usado.rowsAffected?.[0]) return { conflito: true };
+      }
 
       const jaTinhaEvento = Boolean(await queryOne(
         'SELECT familiaEventoId FROM familiaEvento WHERE loginId = @loginId AND eventoId = @eventoId',
@@ -332,7 +415,7 @@ router.post('/invites/:token/entrar', verifyToken, async (req, res) => {
           VALUES (@id, @loginId, @eventoId, @empresaId, @conviteId)
         `, {
           id: crypto.randomUUID(), loginId: req.user.id, eventoId: invite.eventoId,
-          empresaId: invite.empresaId, conviteId: invite.conviteId,
+          empresaId: invite.empresaId, conviteId: invite.conviteId || null,
         });
       }
 

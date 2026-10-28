@@ -68,6 +68,9 @@ async function ensureFamilySchema() {
       )
     `);
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uqFamiliaEventoLoginEvento ON familiaEvento (loginId, eventoId)');
+    // Código fixo do evento (8 dígitos hexadecimais): o mesmo código serve para todas as famílias do evento.
+    await query('ALTER TABLE evento ADD COLUMN IF NOT EXISTS codigoConvite varchar(8)');
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uqEventoCodigoConvite ON evento (codigoConvite)');
     return;
   }
 
@@ -171,6 +174,15 @@ async function ensureFamilySchema() {
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqFamiliaEventoLoginEvento' AND object_id = OBJECT_ID('dbo.familiaEvento'))
       CREATE UNIQUE INDEX uqFamiliaEventoLoginEvento ON familiaEvento (loginId, eventoId)
+  `);
+  // Código fixo do evento (8 dígitos hexadecimais): o mesmo código serve para todas as famílias do evento.
+  await query(`
+    IF COL_LENGTH('dbo.evento', 'codigoConvite') IS NULL
+      ALTER TABLE evento ADD codigoConvite NVARCHAR(8) NULL
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqEventoCodigoConvite' AND object_id = OBJECT_ID('dbo.evento'))
+      CREATE UNIQUE INDEX uqEventoCodigoConvite ON evento (codigoConvite) WHERE codigoConvite IS NOT NULL
   `);
 }
 
