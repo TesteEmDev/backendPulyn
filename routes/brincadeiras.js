@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
+const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { buildCheckpointConfigs, parseConfigItems, idOf } = require('../utils/liveCheckpoints');
 const { refreshTreasureTargetAfterListChange } = require('../utils/treasure');
 const { refreshMonsterSpecialAfterListChange } = require('../utils/monster');
@@ -76,8 +77,9 @@ function normalizeCheckpointConfigs(tipo, checkpoints) {
 // Listar brincadeira por empresa/evento do usuário
 router.get('/', verifyToken, async (req, res) => {
   try {
-    const empresaId = req.user.empresaId;
     const eventoId = req.query.eventoId ? String(req.query.eventoId) : null;
+    // Família acompanha o evento do buffet dele, mesmo que a conta tenha sido criada em outro (utils/acessoEventoFamilia.js)
+    const empresaId = await empresaParaEvento(req.user, eventoId);
 
     let whereClause = `b.empresaId = @empresaId
       AND LOWER(COALESCE(b.status, 'active')) <> 'archived'`;
@@ -339,7 +341,12 @@ router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 
     if (!isMaster(req) && String(game.empresaId).toLowerCase() !== String(req.user.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
-    if (!game.eventoId) return res.status(400).json({ error: 'Este jogo não está ligado a um evento' });
+    // Um jogo reaproveitado de outro cadastro fica ligado ao evento só por eventoBrincadeira (brincadeira.eventoId vazio).
+    const ligadoAEvento = game.eventoId || await queryOne(
+      'SELECT 1 AS ligado FROM eventoBrincadeira WHERE LOWER(brincadeiraId) = LOWER(@gameId) LIMIT 1',
+      { gameId: game.brincadeiraId }
+    );
+    if (!ligadoAEvento) return res.status(400).json({ error: 'Este jogo não está ligado a um evento' });
 
     const requestedIds = Array.isArray(req.body?.checkpoints) ? req.body.checkpoints.map(idOf).filter(Boolean) : [];
     if (requestedIds.length === 0) return res.status(400).json({ error: 'Selecione pelo menos um checkpoint' });

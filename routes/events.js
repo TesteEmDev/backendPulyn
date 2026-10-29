@@ -7,6 +7,8 @@ const { getAvatarForCreate } = require('../utils/avatar');
 const { criarPerfil } = require('../utils/perfilCrianca');
 const bomba = require('../utils/bomba');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
+const { semIdNovo } = require('../utils/checkpointTransferencia');
+const { apagarEvento } = require('../utils/apagarEvento');
 const { saveGameState, getGameState } = require('../utils/gameState');
 const {
   isClosedStatus,
@@ -717,7 +719,7 @@ router.get('/:eventoId/pontoVerificacao', verifyToken, async (req, res) => {
       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
       ORDER BY nome ASC
     `, { eventoId, empresaId });
-    res.json(pontoVerificacao);
+    res.json(semIdNovo(pontoVerificacao));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -983,14 +985,15 @@ router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (r
   }
 });
 
-// Deletar evento
-router.delete('/:id', verifyToken, async (req, res) => {
+// Excluir o evento e tudo o que pertence só a ele (participantes, times, pontos, jogos do evento...). Os checkpoints com
+// MAC ficam no buffet, sem evento, e as pulseiras voltam a ficar disponíveis. Ver utils/apagarEvento.js.
+router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const empresaId = req.user.empresaId;
 
     // Verificar que o evento pertence à empresa (ou user é master)
     const evento = await queryOne(
-      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
+      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @id',
       { id: req.params.id }
     );
 
@@ -998,14 +1001,18 @@ router.delete('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Evento não encontrado' });
     }
 
-    if (!isMaster(req) && evento.empresaId !== empresaId) {
+    if (!isMaster(req) && !sameId(evento.empresaId, empresaId)) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // Deletar evento
-    await query('DELETE FROM evento WHERE eventoId = @id', { id: req.params.id });
+    if (String(evento.status || 'scheduled').toLowerCase() === 'active') {
+      return res.status(409).json({ error: 'O evento está em andamento. Encerre-o antes de excluir.' });
+    }
 
-    res.json({ deleted: true });
+    const resumo = await apagarEvento(evento.eventoId);
+    console.log(`🗑️ [EVENTO] ${evento.eventoId} excluído por ${req.user.email || req.user.role}:`, JSON.stringify(resumo));
+
+    res.json({ deleted: true, resumo });
   } catch (err) {
     console.error('❌ Erro ao deletar evento:', err);
     res.status(500).json({ error: err.message });

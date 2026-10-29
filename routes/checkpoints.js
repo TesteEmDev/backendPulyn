@@ -2,10 +2,9 @@
 const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
-const { garantirCodigo } = require('../utils/codigoBuffet');
-const { usarIdSimples } = require('../utils/chaveCheckpoint');
-const { validarCodigoCheckpoint, chaveComCodigoDoBuffet, cabeNoEsp32, tamanhoMaximoComCodigoDoBuffet } = require('../utils/idCheckpoint');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { semIdNovo, STATUS } = require('../utils/checkpointTransferencia');
+const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
+const comandos = require('../utils/comandosCheckpoint');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
 
@@ -57,7 +56,7 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
     const extra = ip ? { ip } : {};
 
     const checkpoint = await queryOne(
-      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id',
+      'SELECT checkpointId, numCheck, statusTransferencia FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (!checkpoint) {
@@ -83,10 +82,47 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
       }
     }
     
-    res.json({ ok: true, message: 'Checkpoint online', timestamp: now });
+    // numCheck e statusTransferencia deixam o aparelho (identificado pelo MAC) saber o número que o buffet deu a ele
+    // e se já foi aceito.
+    // comando = teste de LED/som pedido pelo admin (utils/comandosCheckpoint.js); a recepção só o recebe por aqui.
+    const comando = comandos.retirar(checkpoint.checkpointId);
+    res.json({
+      ok: true, message: 'Checkpoint online', timestamp: now,
+      numCheck: checkpoint.numCheck, statusTransferencia: checkpoint.statusTransferencia,
+      ...(comando ? { comando } : {}),
+    });
   } catch (err) {
     console.error('❌ Erro ao processar heartbeat:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// POST - Testar o LED ou o som da placa. O comando espera na fila até a placa buscá-lo (até ~10 s); ver
+// utils/comandosCheckpoint.js. Só o admin do buffet dono do checkpoint que já aceitou, e só se a placa está online.
+const ONLINE_ATE_MS = 3 * 60 * 1000; // o heartbeat chega a cada 60 s
+router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    const tipo = String(req.body?.tipo || '').toLowerCase();
+    if (!comandos.TIPOS.includes(tipo)) {
+      return res.status(400).json({ error: `Informe o tipo do teste: ${comandos.TIPOS.join(' ou ')}` });
+    }
+    const checkpoint = await queryOne(
+      `SELECT checkpointId, ultimoVisto, proposito FROM pontoVerificacao
+       WHERE LOWER(checkpointId) = LOWER(@id) AND LOWER(empresaId) = LOWER(@empresaId) AND statusTransferencia = @aceito`,
+      { id: req.params.checkpointId, empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
+    );
+    if (!checkpoint) return res.status(404).json({ error: 'Checkpoint não encontrado' });
+    const visto = checkpoint.ultimoVisto ? new Date(checkpoint.ultimoVisto).getTime() : 0;
+    if (Date.now() - visto > ONLINE_ATE_MS) {
+      return res.status(409).json({ error: 'O checkpoint está offline: não há como mandar o teste' });
+    }
+    comandos.agendar(checkpoint.checkpointId, tipo);
+    // A placa de jogo busca o comando a cada ~10 s (checkpoint-mode); a de recepção só no heartbeat, a cada 60 s.
+    const recepcao = String(checkpoint.proposito || 'game').toLowerCase() === 'reception';
+    res.json({ ok: true, tipo, esperaSegundos: recepcao ? 60 : 10 });
+  } catch (err) {
+    console.error('❌ Erro ao agendar teste do checkpoint:', err);
+    res.status(500).json({ error: 'Não foi possível enviar o teste' });
   }
 });
 
@@ -130,38 +166,6 @@ router.get('/resumo', verifyToken, async (req, res) => {
   }
 });
 
-// Código curto do buffet do usuário. Quando o ID também existe em outro buffet, a chave do checkpoint leva esse código na frente
-// e é ela que se digita no ESP32 (página /config).
-router.get('/codigo-buffet', verifyToken, async (req, res) => {
-  try {
-    res.json({ codigo: await garantirCodigo(req.user.empresaId) });
-  } catch (err) {
-    console.error('❌ Erro ao obter o código do buffet:', err);
-    res.status(500).json({ error: 'Não foi possível obter o código do buffet' });
-  }
-});
-
-// Passa o ID simples (o número, como o ESP32 foi gravado) para este checkpoint. Quem tinha o ID simples em outro buffet
-// passa a precisar do código do buffet no ESP32. Mexe em outro buffet, por isso só o master.
-router.post('/evento/:eventoId/:id/usar-id-simples', verifyToken, async (req, res) => {
-  try {
-    if (!isMaster(req)) return res.status(403).json({ error: 'Só o master pode passar o ID simples entre buffets' });
-    const checkpoint = await queryOne(
-      'SELECT checkpointId FROM pontoVerificacao WHERE checkpointId = @id AND eventoId = @eventoId',
-      { id: req.params.id, eventoId: req.params.eventoId }
-    );
-    if (!checkpoint) return res.status(404).json({ error: 'Checkpoint não encontrado neste evento' });
-    const resultado = await usarIdSimples(checkpoint.checkpointId);
-    console.log(`🔁 [CHECKPOINT] ID simples ${resultado.chave} passou para "${resultado.nome}"` +
-      (resultado.donoAnterior ? ` (antigo dono agora é ${resultado.donoAnterior.chave})` : ''));
-    res.json({ success: true, ...resultado });
-  } catch (err) {
-    if (err.statusCode) return res.status(err.statusCode).json({ error: err.message });
-    console.error('❌ Erro ao passar o ID simples:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 router.get('/evento/:eventoId', verifyToken, async (req, res) => {
   try {
     const { eventoId } = req.params;
@@ -198,12 +202,8 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
       { eventoId, empresaId: evento.empresaId }
     );
 
-    // ID digitado (codigo) e, quando a chave interna tem prefixo, o código do buffet que o ESP32 precisa informar.
-    const empresaCodigo = await garantirCodigo(evento.empresaId);
-    const comCodigo = (pontoVerificacao || []).map((cp) => {
-      const codigo = cp.codigo || cp.checkpointId;
-      return { ...cp, codigo, empresaCodigo, prefixado: String(cp.checkpointId).toLowerCase() !== String(codigo).toLowerCase() };
-    });
+    // `codigo` é o número do checkpoint (o que o buffet vê); o checkpointId é só o ID interno, gerado pelo banco.
+    const comCodigo = semIdNovo(pontoVerificacao || []).map((cp) => ({ ...cp, codigo: cp.numCheck || cp.codigo || cp.checkpointId }));
 
     console.log(`📊 [CHECKPOINTS] Encontrados ${comCodigo.length} checkpoints para evento ${eventoId}`);
     res.json(comCodigo);
@@ -234,7 +234,7 @@ router.get('/:id/config', verifyToken, async (req, res) => {
     checkpoint.tagsAutorizadas = tags.map(t => t.tagUid);
     checkpoint.corLed = checkpoint.corLed || '#00FF00';
 
-    res.json(checkpoint);
+    res.json(semIdNovo(checkpoint));
   } catch (err) {
     console.error('❌ Erro ao buscar configuração do checkpoint:', err);
     res.status(500).json({ error: err.message });
@@ -306,98 +306,6 @@ router.get('/:id/territory', async (req, res) => {
   }
 });
 
-// POST - Criar novo checkpoint
-router.post('/evento/:eventoId', verifyToken, async (req, res) => {
-  try {
-    const { eventoId } = req.params;
-    const empresaId = req.user.empresaId; // ✅ Pegar empresaId do token
-    const { id, nome, tipo, zone, ip, points, status, authorizedTags, mapX, mapY } = req.body;
-    // Finalidade: 'game' (padrão) ou 'reception' (leitor do balcão da recepção; não entra nos jogos).
-    const propositoCheckpoint = String(req.body.proposito || 'game').trim().toLowerCase();
-    if (!['game', 'reception'].includes(propositoCheckpoint)) {
-      return res.status(400).json({ error: 'Finalidade inválida: use game ou reception' });
-    }
-
-    // Validar campos obrigatórios
-    if (!id || !nome) {
-      return res.status(400).json({ error: 'ID e Nome são obrigatórios' });
-    }
-
-    // ✅ Validar que o evento pertence à empresa do usuário
-    const evento = await queryOne(
-      'SELECT eventoId, empresaId FROM evento WHERE eventoId = @id',
-      { id: eventoId }
-    );
-
-    if (!evento) {
-      return res.status(404).json({ error: 'Evento não encontrado' });
-    }
-
-    if (!isMaster(req) && !sameId(evento.empresaId, empresaId)) {
-      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
-    }
-
-    // O ID digitado é único dentro do BUFFET (outros buffets podem usar o mesmo). A chave interna do banco continua
-    // global: vale o próprio ID quando ele está livre no sistema; se outro buffet já usa esse ID, vira
-    // "<código do buffet>-<ID>" (ver utils/codigoBuffet.js). Os dois casos precisam caber no ESP32 (utils/idCheckpoint.js).
-    const codigo = String(id).trim();
-    const erroCodigo = validarCodigoCheckpoint(codigo);
-    if (erroCodigo) return res.status(400).json({ error: erroCodigo });
-    const existing = await queryOne(
-      `SELECT p.eventoId, e.nome AS eventoNome
-       FROM pontoVerificacao p LEFT JOIN evento e ON e.eventoId = p.eventoId
-       WHERE p.empresaId = @empresaId AND LOWER(p.codigo) = LOWER(@codigo)`,
-      { empresaId, codigo }
-    );
-    if (existing) {
-      const onde = sameId(existing.eventoId, eventoId) ? 'neste evento' : `no evento "${existing.eventoNome || 'outro evento'}"`;
-      return res.status(409).json({ error: `Já existe um checkpoint com o ID "${codigo}" ${onde} do seu buffet. Use outro ID (dentro do mesmo buffet cada ID só pode ser usado uma vez).` });
-    }
-
-    const empresaCodigo = await garantirCodigo(empresaId);
-    const idLivre = !(await queryOne('SELECT checkpointId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@codigo)', { codigo }));
-    const checkpointId = idLivre ? codigo : chaveComCodigoDoBuffet(codigo, empresaCodigo);
-    if (!idLivre && !cabeNoEsp32(checkpointId)) {
-      return res.status(409).json({
-        error: `O ID "${codigo}" já é usado em outro buffet e, com o código do buffet, a chave "${checkpointId}" ficaria longa demais para o ESP32 (máximo 16 caracteres). Use um ID de até ${tamanhoMaximoComCodigoDoBuffet(empresaCodigo)} caracteres.`,
-      });
-    }
-    if (!idLivre && await queryOne('SELECT checkpointId FROM pontoVerificacao WHERE LOWER(checkpointId) = LOWER(@checkpointId)', { checkpointId })) {
-      return res.status(409).json({ error: `O ID "${codigo}" não pode ser usado: já existe um checkpoint com a chave "${checkpointId}".` });
-    }
-
-    // ✅ Inserir novo checkpoint COM empresaId
-    await query(`
-      INSERT INTO pontoVerificacao (checkpointId, codigo, eventoId, empresaId, nome, tipo, proposito, zona, ip, pontos, status, tagsAutorizadas, mapaX, mapaY)
-      VALUES (@id, @codigo, @eventoId, @empresaId, @nome, @tipo, @propositoCheckpoint, @zone, @ip, @points, @status, @tagsAutorizadas, @mapaX, @mapaY)
-    `, {
-      id: checkpointId,
-      codigo,
-      eventoId,
-      empresaId, // ✅ NOVO: Incluir empresaId
-      nome,
-      tipo: tipo || 'NFC',
-      propositoCheckpoint,
-      zone: zone || null,
-      ip: ip || null,
-      points: points || 10,
-      status: status || 'configured',
-      tagsAutorizadas: authorizedTags ? JSON.stringify(authorizedTags) : null,
-      mapaX: Number.isFinite(Number(mapX)) ? Math.round(Number(mapX)) : null,
-      mapaY: Number.isFinite(Number(mapY)) ? Math.round(Number(mapY)) : null
-    });
-
-    console.log(`✅ Checkpoint criado: ${nome} (ID ${codigo}, chave ${checkpointId}, empresaId: ${empresaId})`);
-    res.json({
-      success: true, message: 'Checkpoint criado com sucesso', id: checkpointId, codigo, empresaId,
-      empresaCodigo, prefixado: checkpointId !== codigo,
-    });
-  } catch (err) {
-    console.error('❌ Erro ao criar checkpoint:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // POST - Autorizar tags para checkpoint
 // SEM autenticação: Arduino envia tags sem token
 router.post('/:checkpointId/authorize-tags', async (req, res) => {
@@ -461,7 +369,7 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     }
 
     const checkpoint = await queryOne(
-      `SELECT checkpointId, proposito FROM pontoVerificacao
+      `SELECT checkpointId, proposito, macAddress FROM pontoVerificacao
        WHERE LOWER(checkpointId) = LOWER(@id)
          AND LOWER(eventoId) = LOWER(@eventoId)
          AND LOWER(empresaId) = LOWER(@empresaId)`,
@@ -590,6 +498,22 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
       { checkpointId: checkpoint.checkpointId }
     );
+    // Um checkpoint com MAC é um aparelho cadastrado pelo super admin: o buffet não o apaga, devolve. Ele volta ao
+    // estoque, sem buffet, evento nem número, e o histórico dele neste buffet foi limpo acima como na exclusão.
+    if (checkpoint.macAddress) {
+      await query(
+        `UPDATE pontoVerificacao
+         SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+             numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
+             territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
+         WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+           AND LOWER(eventoId) = LOWER(@eventoId)
+           AND LOWER(empresaId) = LOWER(@empresaId)`,
+        { estoque: STATUS.ESTOQUE, checkpointId: checkpoint.checkpointId, eventoId, empresaId }
+      );
+      return res.json({ success: true, devolvido: true, message: 'Checkpoint devolvido ao super admin' });
+    }
+
     await query(
       `DELETE FROM pontoVerificacao
        WHERE LOWER(checkpointId) = LOWER(@checkpointId)

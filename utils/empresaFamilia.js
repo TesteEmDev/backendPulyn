@@ -4,6 +4,7 @@
 // o buffet de verdade é o das crianças vinculadas a ela. Para o perfil family, as rotas que dependem do buffet usam
 // a empresa do vínculo aprovado (o do evento pedido, ou o mais recente).
 const { queryOne } = require('../database');
+const { eventoDaFamilia } = require('./acessoEventoFamilia');
 
 async function empresaDaFamilia(req, { eventoId } = {}) {
   if (req.user?.role !== 'family') return req.user?.empresaId;
@@ -15,7 +16,14 @@ async function empresaDaFamilia(req, { eventoId } = {}) {
       LIMIT 1`,
     { loginId: req.user.id, eventoId }
   );
-  return vinculo?.empresaId || req.user.empresaId;
+  if (vinculo?.empresaId) return vinculo.empresaId;
+
+  // Evento adicionado pelo código de convite e ainda sem criança vinculada: o buffet é o do evento
+  if (eventoId) {
+    const evento = await eventoDaFamilia(req.user, eventoId);
+    if (evento) return evento.empresaId;
+  }
+  return req.user.empresaId;
 }
 
 module.exports = { empresaDaFamilia };

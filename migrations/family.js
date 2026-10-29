@@ -56,6 +56,21 @@ async function ensureFamilySchema() {
       )
     `);
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uqPerfilVinculoFamiliar ON perfilVinculoFamiliar (loginId, perfilCriancaId)');
+    // Eventos que a família adicionou pelo código de convite, mesmo sem criança vinculada a eles.
+    await query(`
+      CREATE TABLE IF NOT EXISTS familiaEvento (
+        familiaEventoId varchar(36) PRIMARY KEY,
+        loginId varchar(36) NOT NULL,
+        eventoId varchar(36) NOT NULL,
+        empresaId varchar(36),
+        conviteId varchar(36),
+        criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uqFamiliaEventoLoginEvento ON familiaEvento (loginId, eventoId)');
+    // Código fixo do evento (8 dígitos hexadecimais): o mesmo código serve para todas as famílias do evento.
+    await query('ALTER TABLE evento ADD COLUMN IF NOT EXISTS codigoConvite varchar(8)');
+    await query('CREATE UNIQUE INDEX IF NOT EXISTS uqEventoCodigoConvite ON evento (codigoConvite)');
     return;
   }
 
@@ -141,6 +156,33 @@ async function ensureFamilySchema() {
   await query(`
     IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqPerfilVinculoFamiliar' AND object_id = OBJECT_ID('dbo.perfilVinculoFamiliar'))
       CREATE UNIQUE INDEX uqPerfilVinculoFamiliar ON perfilVinculoFamiliar (loginId, perfilCriancaId)
+  `);
+  // Eventos que a família adicionou pelo código de convite, mesmo sem criança vinculada a eles.
+  await query(`
+    IF OBJECT_ID('dbo.familiaEvento', 'U') IS NULL
+    BEGIN
+      CREATE TABLE familiaEvento (
+        familiaEventoId NVARCHAR(36) NOT NULL PRIMARY KEY,
+        loginId NVARCHAR(36) NOT NULL,
+        eventoId NVARCHAR(36) NOT NULL,
+        empresaId NVARCHAR(36) NULL,
+        conviteId NVARCHAR(36) NULL,
+        criadoEm DATETIME2 NOT NULL DEFAULT GETDATE()
+      )
+    END
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqFamiliaEventoLoginEvento' AND object_id = OBJECT_ID('dbo.familiaEvento'))
+      CREATE UNIQUE INDEX uqFamiliaEventoLoginEvento ON familiaEvento (loginId, eventoId)
+  `);
+  // Código fixo do evento (8 dígitos hexadecimais): o mesmo código serve para todas as famílias do evento.
+  await query(`
+    IF COL_LENGTH('dbo.evento', 'codigoConvite') IS NULL
+      ALTER TABLE evento ADD codigoConvite NVARCHAR(8) NULL
+  `);
+  await query(`
+    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'uqEventoCodigoConvite' AND object_id = OBJECT_ID('dbo.evento'))
+      CREATE UNIQUE INDEX uqEventoCodigoConvite ON evento (codigoConvite) WHERE codigoConvite IS NOT NULL
   `);
 }
 

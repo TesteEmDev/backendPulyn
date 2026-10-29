@@ -3,6 +3,7 @@ const router = express.Router();
 const { verifyToken } = require('../utils/middleware');
 const { queryOne, query, withTransaction } = require('../database');
 const { uidSqlExpression } = require('../utils/uid');
+const { eventoDaFamilia } = require('../utils/acessoEventoFamilia');
 const {
   parseBraceletUid,
   checkBraceletLinkable,
@@ -78,7 +79,7 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
     console.log(`   🔍 Buscando código QR no banco: "${codigoQR}"`);
     // Buscar código QR ativo
     const codigoVinculacao = await queryOne(
-      `SELECT flc.*, c.nome, c.apelido, c.idade, e.nome as evento_nome, e.eventoId as eventoId, c.empresaId
+      `SELECT flc.*, c.nome, c.apelido, c.idade, e.nome as evento_nome, e.eventoId as eventoId, c.empresaId, c.perfilCriancaId
        FROM "codigoVinculoFamiliar" flc
        JOIN crianca c ON flc.criancaId = c.criancaId
        JOIN evento e ON flc.eventoId = e.eventoId
@@ -135,13 +136,14 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
         
         await tx.query(
           `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm, perfilCriancaId)
-           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP,
-                   (SELECT c.perfilCriancaId FROM crianca c WHERE c.criancaId = @criancaId))`,
+           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP, @perfilCriancaId)`,
           {
             linkId: linkId,
             loginId: req.user.id, 
             criancaId: codigoVinculacao.criancaId, 
-            empresaId: codigoVinculacao.empresaId 
+            empresaId: codigoVinculacao.empresaId,
+            // Valor direto: repetir @criancaId num subselect dá "tipos inconsistentes" no PostgreSQL
+            perfilCriancaId: codigoVinculacao.perfilCriancaId || null,
           }
         );
         console.log(`   ✅ Link criado com sucesso`);
@@ -195,7 +197,9 @@ router.post('/qrcode/validate', verifyToken, async (req, res) => {
 /**
  * MOBILE: POST /api/family/bracelet/validate
  * Vincula o responsável à criança lendo a PULSEIRA NFC no celular (alternativa ao QR Code).
- * Body: { uid } — UID da pulseira, como lido pelo celular (hex, 4/7/10 bytes).
+ * Body: { uid, eventoId? } — UID da pulseira, como lido pelo celular (hex, 4/7/10 bytes). Com eventoId (o evento
+ * escolhido no app) a pulseira é procurada no buffet DESSE evento e tem de ser de uma criança dele; sem eventoId vale
+ * o buffet do login, como antes.
  *
  * Mais restrito que o QR, porque o UID é público e fixo: só vale para pulseira em uso por
  * uma criança da MESMA empresa, em evento aberto, com limite de tentativas. O vínculo
@@ -222,23 +226,40 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       return res.status(400).json({ error: parsed.error, codigo: parsed.codigo });
     }
 
-    // A busca já filtra pela empresa do responsável: pulseira de outra empresa é
-    // indistinguível de pulseira que não existe.
+    // A busca já filtra pela empresa: pulseira de outra empresa é indistinguível de pulseira que não existe.
+    // Com o evento escolhido no app, a empresa é a do evento (se a família tem acesso a ele) e a criança tem de ser dele.
+    const pedido = req.body?.eventoId ? String(req.body.eventoId).trim() : '';
+    let empresaDaBusca = req.user.empresaId;
+    let filtroEvento = '';
+    const parametros = { uid: parsed.uid };
+    if (pedido) {
+      const evento = await eventoDaFamilia(req.user, pedido);
+      if (!evento) {
+        const negado = checkBraceletLinkable(null);
+        return res.status(404).json({ error: negado.error, codigo: negado.code });
+      }
+      empresaDaBusca = evento.empresaId;
+      filtroEvento = 'AND LOWER(c.eventoId) = LOWER(@eventoId)';
+      parametros.eventoId = evento.eventoId;
+    }
+    parametros.empresaId = empresaDaBusca;
+
     const row = await queryOne(
       `SELECT p.codigo, p.status, p.criancaId, p.empresaId,
-              c.nome, c.apelido, c.idade, c.eventoId,
+              c.nome, c.apelido, c.idade, c.eventoId, c.perfilCriancaId,
               e.nome AS evento_nome, e.status AS evento_status
        FROM pulseira p
        JOIN crianca c ON c.criancaId = p.criancaId
        LEFT JOIN evento e ON e.eventoId = c.eventoId
        WHERE ${uidSqlExpression('p.codigo')} = @uid
-         AND LOWER(p.empresaId) = LOWER(@empresaId)`,
-      { uid: parsed.uid, empresaId: req.user.empresaId }
+         AND LOWER(p.empresaId) = LOWER(@empresaId)
+         ${filtroEvento}`,
+      parametros
     );
 
     const decision = checkBraceletLinkable(row);
     if (!decision.ok) {
-      return res.status(404).json({ error: decision.error, codigo: decision.codigo });
+      return res.status(404).json({ error: decision.error, codigo: decision.code });
     }
 
     const { v4: uuidv4 } = require('uuid');
@@ -264,13 +285,14 @@ router.post('/bracelet/validate', verifyToken, async (req, res) => {
       } else {
         await tx.query(
           `INSERT INTO vinculoFamiliar (vinculoId, loginId, criancaId, empresaId, status, relacionamento, aprovadoEm, perfilCriancaId)
-           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP,
-                   (SELECT c.perfilCriancaId FROM crianca c WHERE c.criancaId = @criancaId))`,
+           VALUES (@linkId, @loginId, @criancaId, @empresaId, 'approved', 'responsável', CURRENT_TIMESTAMP, @perfilCriancaId)`,
           {
             linkId: uuidv4(),
             loginId: req.user.id,
             criancaId: row.criancaId,
             empresaId: row.empresaId,
+            // Valor direto: repetir @criancaId num subselect dá "tipos inconsistentes" no PostgreSQL
+            perfilCriancaId: row.perfilCriancaId || null,
           }
         );
       }

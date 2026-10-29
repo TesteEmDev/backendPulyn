@@ -31,6 +31,10 @@ const analyticsRoutes = require('./routes/analytics');
 const reportsRoutes = require('./routes/reports');
 const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
+const checkpointsMasterRoutes = require('./routes/checkpointsMaster');
+const checkpointsRecebimentoRoutes = require('./routes/checkpointsRecebimento');
+const { identificarPorMac } = require('./utils/dispositivoMac');
+const comandosCheckpoint = require('./utils/comandosCheckpoint');
 const leiturasRoutes = require('./routes/leituras');
 const settingsRoutes = require('./routes/settings');
 const empresaRoutes = require('./routes/empresa');
@@ -64,6 +68,8 @@ const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
 const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
+const { ensureCheckpointTransferSchema } = require('./migrations/checkpointTransferencia');
+const { ensureCheckpointIdNumericoSchema } = require('./migrations/checkpointIdNumerico');
 const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
 const { ensureUhfSchema } = require('./migrations/uhf');
 const refemRoutes = require('./routes/refem');
@@ -94,6 +100,7 @@ const { getActiveEvent } = require('./utils/eventControl');
 const { getGameState, saveGameState } = require('./utils/gameState');
 const { checkGameStartRequirements } = require('./utils/gameRequirements');
 const { verifyToken, requireRole, isMaster } = require('./utils/middleware');
+const { eventoDaFamilia } = require('./utils/acessoEventoFamilia');
 const WS_JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 const {
   TREASURE_GAME_TYPE,
@@ -250,6 +257,7 @@ async function persistEventMode(eventoId, mode, gameType = currentGameType, deta
 // Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
+app.use('/api', identificarPorMac);   // ESP32 que manda o MAC no lugar do ID do checkpoint (utils/dispositivoMac.js)
 
 // 🆕 Monitoramento de pool de conexões
 const { poolMonitoringMiddleware, setupPoolMonitoringEndpoints } = require('./utils/poolMonitoring');
@@ -316,12 +324,15 @@ wss.on('connection', async (ws, req) => {
 
   if (wsUser && !controlScope && wsUser.role !== 'master') {
     try {
-      const authorizedEvent = await queryOne(
-        `SELECT eventoId FROM "evento"
-         WHERE LOWER("eventoId") = LOWER(@eventoId)
-           AND LOWER(empresaId) = LOWER(@empresaId)`,
-        { eventoId, empresaId: wsUser.empresaId }
-      );
+      // Família: vale o evento do buffet dela, o que entrou por código ou onde tem criança (mesmo de outro buffet)
+      const authorizedEvent = wsUser.role === 'family'
+        ? await eventoDaFamilia(wsUser, eventoId)
+        : await queryOne(
+          `SELECT eventoId FROM "evento"
+           WHERE LOWER("eventoId") = LOWER(@eventoId)
+             AND LOWER(empresaId) = LOWER(@empresaId)`,
+          { eventoId, empresaId: wsUser.empresaId }
+        );
       if (!authorizedEvent) {
         ws.close(1008, 'Evento não autorizado para esta empresa');
         return;
@@ -1565,6 +1576,8 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
         'SELECT eventoId FROM pontoVerificacao WHERE checkpointId = @checkpointId',
         { checkpointId }
       );
+      // Teste de LED/som pedido pelo admin (utils/comandosCheckpoint.js): a placa executa e o servidor o esquece.
+      const comando = comandosCheckpoint.retirar(checkpointId);
       if (checkpoint?.eventoId) {
         const eventState = await getGameState(checkpoint.eventoId);
         if (eventState) {
@@ -1573,9 +1586,11 @@ app.get('/api/debug/checkpoint-mode', async (req, res) => {
             gameType: eventState.tipoJogo,
             eventoId: eventState.eventoId,
             updatedAt: eventState.atualizadoEm,
+            ...(comando ? { comando } : {}),
           });
         }
       }
+      if (comando) return res.json({ mode: currentMode, gameType: currentGameType, comando });
     }
 
     res.json({ mode: currentMode, gameType: currentGameType });
@@ -1903,6 +1918,7 @@ app.use('/api/criancas', criancasRoutes);
 app.use('/api/pulseiras', pulseiraRoutes);
 
 // Checkpoints
+app.use('/api/pontoVerificacao/recebimento', checkpointsRecebimentoRoutes);   // antes das rotas /:id de checkpoints
 app.use('/api/pontoVerificacao', checkpointsRoutes);
 
 // Leituras
@@ -1911,6 +1927,9 @@ app.use('/api/leituras', leiturasRoutes);
 // Analytics
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/reports', reportsRoutes);
+
+// Checkpoints cadastrados pelo super admin e transferidos aos buffets (antes de /api/master para não ser engolida por ele)
+app.use('/api/master/checkpoints', checkpointsMasterRoutes);
 
 // Master Dashboard
 app.use('/api/master', masterRoutes);
@@ -2008,6 +2027,8 @@ async function startServer() {
     await ensureBombaSchema();
     await ensureRefemSchema();
     await ensureCodigoBuffetSchema();
+    await ensureCheckpointTransferSchema();
+    await ensureCheckpointIdNumericoSchema();   // a chave do checkpoint passa a ser o id numérico (migra uma vez)
     await ensurePulseiraPorEmpresaSchema();
     await ensureUhfSchema();
     refemJogo.iniciarRelogio();   // fim do tempo do round (Resgate do Refém)

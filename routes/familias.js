@@ -7,6 +7,9 @@ const { planInviteRegistration, describeRegistrationResult } = require('../utils
 const { criarPerfil } = require('../utils/perfilCrianca');
 const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
+const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
+const { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
+const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
 const FRONTEND_URL = String(process.env.FRONTEND_URL || 'http://localhost:5173').replace(/\/+$/, '');
@@ -15,12 +18,17 @@ function hashToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+// O código do convite tem só 8 dígitos hexadecimais: quem erra códigos demais é barrado por um tempo.
+const tentativasDeConvite = criarLimitador({ max: 15 });
+const MENSAGEM_MUITAS_TENTATIVAS = 'Muitas tentativas com códigos inválidos. Tente de novo em alguns minutos.';
+const quemPede = (req) => req.user?.id || ipDoCliente(req);
+
 function isStaff(req) {
   return STAFF_ROLES.includes(req.user?.role);
 }
 
 async function getInvite(token) {
-  if (!token || token.length < 32) return null;
+  if (!formatoValido(token)) return null;
   const invite = await queryOne(`
     SELECT i.*, e.nome as evento_nome, e.data as evento_data,
            c.criancaId as linked_child_id, c.nome as linked_child_name
@@ -28,8 +36,17 @@ async function getInvite(token) {
     JOIN evento e ON e.eventoId = i.eventoId
     LEFT JOIN crianca c ON c.criancaId = i.criancaId
     WHERE i.hashToken = @tokenHash
-  `, { tokenHash: hashToken(token) });
-  if (!invite) return null;
+  `, { tokenHash: hashToken(normalizarCodigo(token)) });
+  if (!invite) {
+    // Não é um convite da tabela: pode ser o código fixo de um evento (vale para qualquer conta, sem se esgotar)
+    const chave = normalizarCodigo(token);
+    if (!ehCodigoCurto(chave)) return null;
+    const evento = await queryOne(
+      'SELECT eventoId, empresaId, nome, data, status FROM evento WHERE codigoConvite = @codigo',
+      { codigo: chave }
+    );
+    return evento ? conviteDoEvento(evento) : null;
+  }
   if (invite.status === 'pending' && new Date(invite.expiramEm) <= new Date()) {
     await query(`UPDATE conviteFamilia SET status = 'expired' WHERE conviteId = @id AND status = 'pending'`, { id: invite.conviteId });
     invite.status = 'expired';
@@ -60,12 +77,78 @@ function publicInvite(invite) {
   };
 }
 
+// Sorteia um código de 8 dígitos hexadecimais que ninguém usa: nem convite individual, nem código de outro evento.
+async function codigoLivre() {
+  for (let tentativa = 0; tentativa < 20; tentativa++) {
+    const codigo = gerarCodigo();
+    const noEvento = await queryOne('SELECT eventoId FROM evento WHERE codigoConvite = @codigo', { codigo });
+    const emConvite = await queryOne('SELECT conviteId FROM conviteFamilia WHERE hashToken = @tokenHash', { tokenHash: hashToken(codigo) });
+    if (!noEvento && !emConvite) return codigo;
+  }
+  throw new Error('Não foi possível gerar um código livre');
+}
+
+function codigoDoEventoParaTela(evento) {
+  const codigo = exibirCodigo(evento.codigoConvite);
+  return {
+    eventoId: evento.eventoId,
+    codigo,
+    inviteUrl: `${FRONTEND_URL}/family/invite/${codigo}`,
+    encerrado: !eventoAberto(evento),
+  };
+}
+
+// Código fixo do evento: o mesmo código serve para todas as famílias, até o evento acabar. Só a equipe do buffet vê.
+// Nasce na primeira consulta (eventos antigos não precisam de carga prévia).
+router.get('/eventos/:eventoId/codigo', verifyToken, async (req, res) => {
+  try {
+    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+    const permitido = await getEventForUser(req.params.eventoId, req);
+    if (permitido.error) return res.status(permitido.status).json({ error: permitido.error });
+
+    const eventoId = permitido.evento.eventoId;
+    let evento = await queryOne('SELECT eventoId, status, codigoConvite FROM evento WHERE eventoId = @eventoId', { eventoId });
+    if (!evento.codigoConvite) {
+      // O WHERE ... IS NULL evita que duas consultas ao mesmo tempo troquem o código uma da outra
+      await query('UPDATE evento SET codigoConvite = @codigo WHERE eventoId = @eventoId AND codigoConvite IS NULL', { codigo: await codigoLivre(), eventoId });
+      evento = await queryOne('SELECT eventoId, status, codigoConvite FROM evento WHERE eventoId = @eventoId', { eventoId });
+    }
+    res.json(codigoDoEventoParaTela(evento));
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao obter o código do evento:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Troca o código do evento (quando ele vazou): o antigo para de valer na hora. Quem já entrou no evento continua nele.
+router.post('/eventos/:eventoId/codigo/renovar', verifyToken, async (req, res) => {
+  try {
+    if (!isStaff(req)) return res.status(403).json({ error: 'Acesso negado' });
+    const permitido = await getEventForUser(req.params.eventoId, req);
+    if (permitido.error) return res.status(permitido.status).json({ error: permitido.error });
+
+    const eventoId = permitido.evento.eventoId;
+    await query('UPDATE evento SET codigoConvite = @codigo WHERE eventoId = @eventoId', { codigo: await codigoLivre(), eventoId });
+    const evento = await queryOne('SELECT eventoId, status, codigoConvite FROM evento WHERE eventoId = @eventoId', { eventoId });
+    res.json(codigoDoEventoParaTela(evento));
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao renovar o código do evento:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Validar convite sem revelar o token armazenado ou dados internos.
 router.get('/invites/:token', async (req, res) => {
   try {
+    const quem = quemPede(req);
+    if (tentativasDeConvite.bloqueado(quem)) return res.status(429).json({ error: MENSAGEM_MUITAS_TENTATIVAS });
     const invite = await getInvite(req.params.token);
-    if (!invite) return res.status(404).json({ error: 'Convite não encontrado' });
+    if (!invite) {
+      tentativasDeConvite.registrarFalha(quem);
+      return res.status(404).json({ error: 'Convite não encontrado' });
+    }
     if (invite.status !== 'pending') {
+      tentativasDeConvite.registrarFalha(quem);
       return res.status(410).json({ error: invite.status === 'expired' ? 'Convite expirado' : 'Convite já utilizado', status: invite.status });
     }
     res.json(publicInvite(invite));
@@ -93,7 +176,7 @@ router.post('/invites', verifyToken, async (req, res) => {
       if (!child) return res.status(404).json({ error: 'Criança não encontrada neste evento' });
     }
 
-    const rawToken = crypto.randomBytes(32).toString('hex');
+    const codigo = await codigoLivre();
     const days = Math.min(Math.max(Number(expiresInDays) || 7, 1), 30);
     const expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000);
     const id = crypto.randomUUID();
@@ -107,15 +190,16 @@ router.post('/invites', verifyToken, async (req, res) => {
       eventoId,
       criancaId: criancaId || null,
       email: email ? String(email).trim().toLowerCase() : null,
-      tokenHash: hashToken(rawToken),
+      tokenHash: hashToken(codigo),
       expiresAt,
       createdBy: req.user.id,
     });
 
     res.status(201).json({
       id,
-      token: rawToken,
-      inviteUrl: `${FRONTEND_URL}/family/invite/${rawToken}`,
+      codigo: exibirCodigo(codigo),
+      token: exibirCodigo(codigo), // mesmo valor do código; mantido para quem ainda lê "token"
+      inviteUrl: `${FRONTEND_URL}/family/invite/${exibirCodigo(codigo)}`,
       expiresAt: expiresAt.toISOString(),
       event: { id: evento.eventoId, name: evento.nome, date: evento.data },
     });
@@ -129,9 +213,15 @@ router.post('/invites', verifyToken, async (req, res) => {
 router.post('/invites/:token/register', async (req, res) => {
   let invite = null;
   try {
+    const quem = quemPede(req);
+    if (tentativasDeConvite.bloqueado(quem)) return res.status(429).json({ error: MENSAGEM_MUITAS_TENTATIVAS });
     invite = await getInvite(req.params.token);
-    if (!invite) return res.status(404).json({ error: 'Convite não encontrado' });
+    if (!invite) {
+      tentativasDeConvite.registrarFalha(quem);
+      return res.status(404).json({ error: 'Convite não encontrado' });
+    }
     if (invite.status !== 'pending') {
+      tentativasDeConvite.registrarFalha(quem);
       return res.status(410).json({ error: invite.status === 'expired' ? 'Convite expirado' : 'Convite já utilizado', status: invite.status });
     }
 
@@ -170,12 +260,15 @@ router.post('/invites/:token/register', async (req, res) => {
       return res.status(409).json({ error: 'A senha informada não confere com a conta familiar existente.' });
     }
 
-    const claimed = await query(`
-      UPDATE conviteFamilia SET status = 'processing'
-      WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
-    `, { id: invite.conviteId });
-    if (!claimed.rowsAffected?.[0]) {
-      return res.status(409).json({ error: 'Convite já está sendo utilizado ou expirou' });
+    // O código fixo do evento não se esgota: só o convite individual é "reservado" enquanto o cadastro roda
+    if (!invite.reutilizavel) {
+      const claimed = await query(`
+        UPDATE conviteFamilia SET status = 'processing'
+        WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
+      `, { id: invite.conviteId });
+      if (!claimed.rowsAffected?.[0]) {
+        return res.status(409).json({ error: 'Convite já está sendo utilizado ou expirou' });
+      }
     }
 
     try {
@@ -192,6 +285,18 @@ router.post('/invites/:token/register', async (req, res) => {
           familyNome: familyName,
           loginStatus: plan.loginStatus,
         });
+      }
+
+      // O evento do convite entra na conta (aparece em "Meus eventos" mesmo sem criança vinculada)
+      const jaTemEvento = await queryOne(
+        'SELECT familiaEventoId FROM familiaEvento WHERE loginId = @loginId AND eventoId = @eventoId',
+        { loginId, eventoId: invite.eventoId }
+      );
+      if (!jaTemEvento) {
+        await query(
+          'INSERT INTO familiaEvento (familiaEventoId, loginId, eventoId, empresaId, conviteId) VALUES (@id, @loginId, @eventoId, @empresaId, @conviteId)',
+          { id: crypto.randomUUID(), loginId, eventoId: invite.eventoId, empresaId: invite.empresaId, conviteId: invite.conviteId || null }
+        );
       }
 
       const childIds = [];
@@ -226,24 +331,28 @@ router.post('/invites/:token/register', async (req, res) => {
 
       for (const childId of childIds) {
         const linkId = crypto.randomUUID();
+        // Valor direto: repetir @childId num subselect dá "tipos inconsistentes" no PostgreSQL
+        const cadastro = await queryOne('SELECT perfilCriancaId FROM crianca WHERE criancaId = @childId', { childId });
         await query(`
           INSERT INTO vinculoFamiliar
             (vinculoId, loginId, criancaId, empresaId, relacionamento, status, aprovadoEm, perfilCriancaId)
-          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'approved', GETDATE(),
-                  (SELECT c.perfilCriancaId FROM crianca c WHERE c.criancaId = @childId))
+          VALUES (@id, @loginId, @childId, @empresaId, @relacionamento, 'approved', GETDATE(), @perfilCriancaId)
         `, {
           id: linkId,
           loginId,
           childId,
           empresaId: invite.empresaId,
           relacionamento: String(relacionamento).trim().slice(0, 50) || 'responsável',
+          perfilCriancaId: cadastro?.perfilCriancaId || null,
         });
       }
 
-      await query(`
-        UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
-        WHERE conviteId = @inviteId AND status = 'processing'
-      `, { inviteId: invite.conviteId });
+      if (!invite.reutilizavel) {
+        await query(`
+          UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
+          WHERE conviteId = @inviteId AND status = 'processing'
+        `, { inviteId: invite.conviteId });
+      }
 
       const result = describeRegistrationResult({
         childless: plan.childless,
@@ -269,6 +378,87 @@ router.post('/invites/:token/register', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+// Responsável já logado adiciona um evento digitando o código do convite. O evento passa a ser da conta dele
+// (familiaEvento) e, se o convite era de uma criança específica, ela também é vinculada.
+router.post('/invites/:token/entrar', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const quem = quemPede(req);
+    if (tentativasDeConvite.bloqueado(quem)) return res.status(429).json({ error: MENSAGEM_MUITAS_TENTATIVAS });
+    const invite = await getInvite(req.params.token);
+    const avaliacao = avaliarConviteParaEntrar(invite, req.user.email);
+    if (!avaliacao.ok) {
+      // Código inexistente, usado ou vencido conta como tentativa errada; e-mail diferente não (o código estava certo)
+      if (avaliacao.status !== 403) tentativasDeConvite.registrarFalha(quem);
+      return res.status(avaliacao.status).json({ error: avaliacao.error });
+    }
+
+    const resultado = await withTransaction(async () => {
+      // O UPDATE é a trava: se dois pedidos chegam juntos, só um consegue marcar o convite como usado.
+      // O código fixo do evento não se esgota (vale para qualquer conta), então não passa por aqui.
+      if (!invite.reutilizavel) {
+        const usado = await query(`
+          UPDATE conviteFamilia SET status = 'used', usadoEm = GETDATE()
+          WHERE conviteId = @id AND status = 'pending' AND expiramEm > GETDATE()
+        `, { id: invite.conviteId });
+        if (!usado.rowsAffected?.[0]) return { conflito: true };
+      }
+
+      const jaTinhaEvento = Boolean(await queryOne(
+        'SELECT familiaEventoId FROM familiaEvento WHERE loginId = @loginId AND eventoId = @eventoId',
+        { loginId: req.user.id, eventoId: invite.eventoId }
+      ));
+      if (!jaTinhaEvento) {
+        await query(`
+          INSERT INTO familiaEvento (familiaEventoId, loginId, eventoId, empresaId, conviteId)
+          VALUES (@id, @loginId, @eventoId, @empresaId, @conviteId)
+        `, {
+          id: crypto.randomUUID(), loginId: req.user.id, eventoId: invite.eventoId,
+          empresaId: invite.empresaId, conviteId: invite.conviteId || null,
+        });
+      }
+
+      let crianca = null;
+      if (invite.linked_child_id) {
+        const vinculo = await queryOne(
+          'SELECT vinculoId, status FROM vinculoFamiliar WHERE loginId = @loginId AND criancaId = @criancaId',
+          { loginId: req.user.id, criancaId: invite.linked_child_id }
+        );
+        if (!vinculo) {
+          const cadastro = await queryOne('SELECT perfilCriancaId FROM crianca WHERE criancaId = @criancaId', { criancaId: invite.linked_child_id });
+          await query(`
+            INSERT INTO vinculoFamiliar
+              (vinculoId, loginId, criancaId, empresaId, relacionamento, status, aprovadoEm, perfilCriancaId)
+            VALUES (@id, @loginId, @criancaId, @empresaId, 'responsável', 'approved', GETDATE(), @perfilCriancaId)
+          `, {
+            id: crypto.randomUUID(), loginId: req.user.id, criancaId: invite.linked_child_id,
+            empresaId: invite.empresaId, perfilCriancaId: cadastro?.perfilCriancaId || null,
+          });
+        } else if (vinculo.status !== 'approved') {
+          await query(
+            `UPDATE vinculoFamiliar SET status = 'approved', aprovadoEm = GETDATE(), rejeitadoEm = NULL WHERE vinculoId = @id`,
+            { id: vinculo.vinculoId }
+          );
+        }
+        crianca = { id: invite.linked_child_id, nome: invite.linked_child_name };
+      }
+      return { jaTinhaEvento, crianca };
+    });
+
+    if (resultado.conflito) return res.status(409).json({ error: 'Convite já foi utilizado ou expirou' });
+    res.status(201).json({
+      success: true,
+      evento: { id: invite.eventoId, nome: invite.evento_nome, data: invite.evento_data },
+      crianca: resultado.crianca,
+      jaTinhaEvento: resultado.jaTinhaEvento,
+    });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao adicionar evento pelo convite:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Pendências visíveis apenas para recepção/admin/master.
 async function listFamilyLinks(status, eventoId, req) {
   return allQuery(`
@@ -566,6 +756,36 @@ router.get('/eventos-abertos', verifyToken, async (req, res) => {
     res.json({ eventos: eventos.filter(eventoAberto).slice(0, 50) });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao listar eventos abertos:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Eventos da família (os adicionados pelo código e os das crianças vinculadas), passados e atuais.
+router.get('/eventos', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const porConvite = await allQuery(`
+      SELECT fe.eventoId, e.nome, e.data, e.status, emp.nome AS "buffetNome"
+      FROM familiaEvento fe
+      JOIN evento e ON e.eventoId = fe.eventoId
+      LEFT JOIN empresa emp ON emp.empresaId = e.empresaId
+      WHERE fe.loginId = @loginId
+    `, { loginId: req.user.id });
+
+    const porCrianca = await allQuery(`
+      SELECT c.eventoId, e.nome, e.data, e.status, emp.nome AS "buffetNome",
+             c.criancaId AS "criancaId", c.nome AS "criancaNome", c.apelido, COALESCE(c.pontos, 0) AS pontos
+      FROM vinculoFamiliar l
+      JOIN crianca c ON c.criancaId = l.criancaId
+      JOIN evento e ON e.eventoId = c.eventoId
+      LEFT JOIN empresa emp ON emp.empresaId = e.empresaId
+      WHERE l.loginId = @loginId AND l.status IN ('approved', 'pending')
+    `, { loginId: req.user.id });
+
+    res.json({ eventos: montarEventosDaFamilia(porConvite, porCrianca) });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao listar eventos da família:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
