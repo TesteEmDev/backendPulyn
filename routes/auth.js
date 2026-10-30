@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const jwt = require('jsonwebtoken');
 const { query, queryOne } = require('../database');
-const { verifyToken } = require('../utils/middleware');
+const { verifyToken, requireRole } = require('../utils/middleware');
 const { papeisDaConta } = require('../utils/papeis');
 const { normalizarCodigoTelao } = require('../utils/codigoTelao');
 const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
@@ -125,6 +125,28 @@ router.post('/login', async (req, res) => {
 const TELAO_TOKEN_VALIDADE = '7d';
 const tentativasDeTelao = criarLimitador({ max: 15, janelaMs: 10 * 60 * 1000 });
 
+// Sessão do telão: não é uma conta, o id do token é o do buffet (nada no backend procura o login de um telão).
+function sessaoDeTelao(empresa) {
+  const token = assinarToken(
+    { loginId: empresa.empresaId, email: 'telao', empresaId: empresa.empresaId, empresa_nome: empresa.nome, plano: empresa.plano },
+    'display', ['display'], TELAO_TOKEN_VALIDADE
+  );
+  return {
+    success: true,
+    token,
+    user: {
+      id: empresa.empresaId,
+      name: empresa.nome,
+      email: 'telao',
+      role: 'display',
+      papeis: ['display'],
+      redirect: ROLE_REDIRECTS.display,
+      plan: empresa.plano,
+      empresaId: empresa.empresaId
+    }
+  };
+}
+
 // POST /auth/telao  { codigo }
 router.post('/telao', async (req, res) => {
   try {
@@ -142,27 +164,22 @@ router.post('/telao', async (req, res) => {
       return res.status(404).json({ error: 'Link do telão inválido ou desativado' });
     }
 
-    // Não é uma conta: o id do token é o do buffet (nada no backend procura o login de um telão)
-    const token = assinarToken(
-      { loginId: empresa.empresaId, email: 'telao', empresaId: empresa.empresaId, empresa_nome: empresa.nome, plano: empresa.plano },
-      'display', ['display'], TELAO_TOKEN_VALIDADE
-    );
-    res.json({
-      success: true,
-      token,
-      user: {
-        id: empresa.empresaId,
-        name: empresa.nome,
-        email: 'telao',
-        role: 'display',
-        papeis: ['display'],
-        redirect: ROLE_REDIRECTS.display,
-        plan: empresa.plano,
-        empresaId: empresa.empresaId
-      }
-    });
+    res.json(sessaoDeTelao(empresa));
   } catch (err) {
     console.error('❌ Erro ao entrar no telão:', err);
+    res.status(500).json({ error: 'Erro ao abrir o telão' });
+  }
+});
+
+// Telão aberto pela equipe logada (botão "Abrir telão" da recepção): a conta pede a sessão de telão do PRÓPRIO buffet.
+// POST /auth/telao-da-equipe  (com o token da conta)
+router.post('/telao-da-equipe', verifyToken, requireRole(['admin', 'reception', 'game_master']), async (req, res) => {
+  try {
+    const empresa = await queryOne('SELECT empresaId, nome, [plano] FROM empresa WHERE empresaId = @empresaId', { empresaId: req.user.empresaId });
+    if (!empresa) return res.status(404).json({ error: 'Buffet não encontrado' });
+    res.json(sessaoDeTelao(empresa));
+  } catch (err) {
+    console.error('❌ Erro ao abrir o telão pela equipe:', err);
     res.status(500).json({ error: 'Erro ao abrir o telão' });
   }
 });

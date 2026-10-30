@@ -85,6 +85,25 @@ async function main() {
       assert.equal((await chamar(auth, 'post', '/telao', { body: { codigo: 'Z'.repeat(24) }, ip: '10.0.0.10' })).status, 404, 'outro IP não é afetado');
       console.log('  ✔ 15 erros seguidos do mesmo IP: 429; outro IP segue normal');
 
+      // 6) telão aberto pela equipe logada: token display do PRÓPRIO buffet; só admin, recepção e recreação podem pedir
+      const rota = auth.stack.find((l) => l.route && l.route.path === '/telao-da-equipe' && l.route.methods.post).route;
+      const barreira = rota.stack[1].handle;   // requireRole
+      const passa = (role) => new Promise((resolve) => {
+        let liberou = false;
+        barreira({ user: { role } }, { status() { return { json() { resolve(false); } }; } }, () => { liberou = true; resolve(true); });
+        if (!liberou) setTimeout(() => resolve(false), 0);
+      });
+      for (const role of ['admin', 'reception', 'game_master']) assert.equal(await passa(role), true, `${role} pode abrir o telão`);
+      for (const role of ['family', 'display', 'kiosk', 'score_kiosk', 'master']) assert.equal(await passa(role), false, `${role} não pode`);
+      const daEquipe = await chamar(auth, 'post', '/telao-da-equipe', { usuario: { id: 'x', role: 'reception', empresaId: empresa.empresaId } });
+      assert.equal(daEquipe.status, 200, JSON.stringify(daEquipe.corpo));
+      const t2 = jwt.verify(daEquipe.corpo.token, secret);
+      assert.equal(t2.role, 'display');
+      assert.equal(String(t2.empresaId).toLowerCase(), String(empresa.empresaId).toLowerCase());
+      const semBuffet = await chamar(auth, 'post', '/telao-da-equipe', { usuario: { id: 'x', role: 'reception', empresaId: '00000000-0000-0000-0000-000000000000' } });
+      assert.equal(semBuffet.status, 404);
+      console.log('  ✔ pela equipe: admin/recepção/recreação abrem o telão do próprio buffet; família, telão, kiosk e master são barrados');
+
       throw new Desfazer();
     });
   } catch (e) {
