@@ -3,7 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
-const { planRandomDistribution, DISTRIBUTION_MODES } = require('../utils/teamDistribution');
+const { planRandomDistribution, montarFormacaoDosTimes, DISTRIBUTION_MODES } = require('../utils/teamDistribution');
 const { planDefaultTeams } = require('../utils/defaultTeams');
 
 const TEAM_MANAGER_ROLES = ['admin', 'reception', 'game_master', 'master'];
@@ -246,6 +246,7 @@ router.post(
         return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
       }
 
+      let sorteadosIds = [];
       const result = await withTransaction(async (tx) => {
         const teams = await tx.allQuery(
           'SELECT timeId, nome FROM "time" WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY nome',
@@ -260,6 +261,7 @@ router.post(
           { eventoId: evento.eventoId, empresaId: evento.empresaId }
         );
         const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.timeId), mode });
+        sorteadosIds = assignments.map(a => a.criancaId);
 
         for (const { criancaId, timeId } of assignments) {
           await tx.query(
@@ -293,6 +295,31 @@ router.post(
 
       if (result.error) return res.status(400).json({ error: result.error });
       console.log(`🎲 Distribuição aleatória (${mode}): ${result.distributed} criança(s) no evento ${evento.eventoId}`);
+
+      // O telão mostra a formação dos times assim que o sorteio acaba. Falha aqui não desfaz o sorteio.
+      try {
+        const timesDoEvento = await allQuery(
+          'SELECT timeId, nome, cor FROM "time" WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY nome',
+          { eventoId: evento.eventoId, empresaId: evento.empresaId }
+        );
+        const criancas = await allQuery(
+          'SELECT criancaId, nome, apelido, avatar, timeId FROM crianca WHERE eventoId = @eventoId AND empresaId = @empresaId AND timeId IS NOT NULL',
+          { eventoId: evento.eventoId, empresaId: evento.empresaId }
+        );
+        if (global.broadcastToEvent) {
+          global.broadcastToEvent(evento.eventoId, {
+            type: 'TEAMS_DRAWN',
+            payload: {
+              eventoId: evento.eventoId,
+              drawnAt: new Date().toISOString(),
+              mode,
+              teams: montarFormacaoDosTimes({ teams: timesDoEvento, children: criancas, sorteadosIds }),
+            },
+          });
+        }
+      } catch (broadcastErr) {
+        console.error('⚠️ Sorteio feito, mas o aviso ao telão falhou:', broadcastErr.message);
+      }
       return res.json(result);
     } catch (err) {
       console.error('❌ Erro ao distribuir participantes:', err);
