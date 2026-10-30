@@ -169,6 +169,12 @@ async function getParticipatingTeams(eventoId) {
   );
 }
 
+// Leituras da equipe da vez para liberar o próximo ponto: metade dos participantes, arredondando para baixo.
+// Equipe de 1 participante precisa de 1 leitura (metade de 1 seria zero).
+function leiturasNecessarias(participantes) {
+  return Math.max(1, Math.floor(Number(participantes) / 2) || 0);
+}
+
 function chooseRandom(values) {
   if (!values.length) return null;
   return values[Math.floor(Math.random() * values.length)];
@@ -312,8 +318,8 @@ async function startTreasureGame(eventoId, brincadeiraId) {
       id: partidaId,
       eventoId,
       brincadeiraId,
-      startingTeamId: startingTeam.id,
-      turnTeamId: startingTeam.id,
+      startingTeamId: startingTeam.timeId,
+      turnTeamId: startingTeam.timeId,
       turnAvailableAt: initialTurnAvailableAt,
       targetCheckpointId,
       completedCheckpointIds: JSON.stringify([]),
@@ -334,7 +340,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
         timeId: team.timeId,
         // A equipe sorteada começa a correr depois dos 10 segundos de preparação.
         // O cronômetro de cada equipe começa quando sua primeira vez for liberada.
-        startedAt: sameId(team.timeId, startingTeam.id) ? initialTurnAvailableAt : null,
+        startedAt: sameId(team.timeId, startingTeam.timeId) ? initialTurnAvailableAt : null,
       }
     );
   }
@@ -344,10 +350,10 @@ async function startTreasureGame(eventoId, brincadeiraId) {
     eventoId,
     brincadeiraId,
     roundNumber: 1,
-    startingTeamId: startingTeam.id,
-    startingTeamName: startingTeam.name,
-    turnTeamId: startingTeam.id,
-    turnTeamName: startingTeam.name,
+    startingTeamId: startingTeam.timeId,
+    startingTeamName: startingTeam.nome,
+    turnTeamId: startingTeam.timeId,
+    turnTeamName: startingTeam.nome,
     turnAvailableAt: initialTurnAvailableAt.toISOString(),
     turnRemainingSeconds: TREASURE_TURN_DELAY_MS / 1000,
     turnWaitSeconds: TREASURE_TURN_DELAY_MS / 1000,
@@ -446,9 +452,9 @@ async function getTreasureEventStatus(eventoId) {
     partidaId: session.partidaId,
     roundNumber: session.numeroRonda,
     startingTeamId: session.timeInicialId || null,
-    startingTeamName: startingTeam?.name || null,
+    startingTeamName: startingTeam?.nome || null,
     turnTeamId: session.timeVezId || null,
-    turnTeamName: turnTeam?.name || null,
+    turnTeamName: turnTeam?.nome || null,
     turnAvailableAt: session.vezDisponvelEm || null,
     turnRemainingSeconds,
     initialWait,
@@ -488,14 +494,21 @@ async function getTeamsProgress(eventoId, session) {
     { eventoId, partidaId: session.partidaId, roundNumber: session.numeroRonda }
   );
 
-  return teams.map(team => ({
-    teamId: team.timeId,
-    teamName: team.nome,
-    teamColor: team.cor,
-    scanned: Number(team.scanned || 0),
-    total: Number(team.total || 0),
-    complete: Number(team.total || 0) > 0 && Number(team.scanned || 0) >= Number(team.total || 0),
-  }));
+  // total = quantas leituras a equipe precisa para liberar o próximo ponto (metade dos participantes, para baixo)
+  return teams.map(team => {
+    const members = Number(team.total || 0);
+    const required = members > 0 ? leiturasNecessarias(members) : 0;
+    const scanned = Number(team.scanned || 0);
+    return {
+      teamId: team.timeId,
+      teamName: team.nome,
+      teamColor: team.cor,
+      scanned,
+      total: required,
+      members,
+      complete: required > 0 && scanned >= required,
+    };
+  });
 }
 
 async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeiraId, uid, now }) {
@@ -538,11 +551,19 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     ? await queryOne('SELECT nome FROM "time" WHERE timeId = @timeId', { timeId: turnTeamId })
     : null;
 
-  if (turnTeamId && !sameId(turnTeamId, crianca.timeId)) {
+  if (!turnTeamId) {
     return {
       handled: true,
       accepted: false,
-      error: `Agora é a vez da equipe ${turnTeam?.name || 'da vez'}`,
+      error: 'Aguarde: a equipe que começa ainda não foi definida',
+    };
+  }
+
+  if (!sameId(turnTeamId, crianca.timeId)) {
+    return {
+      handled: true,
+      accepted: false,
+      error: `Agora é a vez da equipe ${turnTeam?.nome || 'da vez'}`,
       turnTeamId,
     };
   }
@@ -553,7 +574,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     return {
       handled: true,
       accepted: false,
-      error: `Aguarde ${remainingSeconds} segundos para começar a vez da equipe ${turnTeam?.name || ''}`.trim(),
+      error: `Aguarde ${remainingSeconds} segundos para começar a vez da equipe ${turnTeam?.nome || ''}`.trim(),
       turnTeamId,
       turnAvailableAt: turnAvailableAt.toISOString(),
       remainingSeconds,
@@ -581,6 +602,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   if (!members.length) {
     return { handled: true, accepted: false, error: 'Equipe sem participantes cadastrados' };
   }
+  const required = leiturasNecessarias(members.length);
 
   const alreadyScanned = await queryOne(
     `SELECT scanId FROM cacaTesourScan
@@ -603,7 +625,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       duplicate: true,
       message: 'Esta criança já participou desta etapa',
       scanned: Number(duplicateCount?.total || 0),
-      total: members.length,
+      total: required,
     };
   }
 
@@ -643,7 +665,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
         duplicate: true,
         message: 'Esta criança já participou desta etapa',
         scanned: Number(duplicateCount?.total || 0),
-        total: members.length,
+        total: required,
       };
     }
     throw error;
@@ -658,15 +680,15 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   );
   const scanned = Number(countResult?.total || 0);
 
-  if (scanned < members.length) {
+  if (scanned < required) {
     return {
       handled: true,
       accepted: true,
       teamComplete: false,
       roundNumber: session.numeroRonda,
       scanned,
-      total: members.length,
-      message: `Participante confirmado: ${scanned}/${members.length}`,
+      total: required,
+      message: `Participante confirmado: ${scanned}/${required}`,
     };
   }
 
@@ -694,7 +716,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
 
   const ownership = await getTeamOwnershipProgress(eventoId, crianca.timeId, treasureCheckpointIds);
   if (ownership.won) {
-    await completeTeamRace(session.id, crianca.timeId, now);
+    await completeTeamRace(session.partidaId, crianca.timeId, now);
   }
 
   const raceTimes = await getTeamRaceTimes(eventoId, session);
@@ -721,7 +743,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       : now;
 
   if (nextTurnTeam && nextTurnAvailableAt) {
-    await startTeamRaceTimer(session.id, nextTurnTeam.teamId, nextTurnAvailableAt);
+    await startTeamRaceTimer(session.partidaId, nextTurnTeam.teamId, nextTurnAvailableAt);
   }
 
   const nextTargetCheckpointId = raceFinished
@@ -798,7 +820,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       duplicate: true,
       message: 'Esta etapa já foi concluída por outra equipe',
       scanned,
-      total: members.length,
+      total: required,
     };
   }
 
@@ -825,7 +847,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     roundNumber: raceFinished ? session.numeroRonda : session.numeroRonda + 1,
     finished: raceFinished,
     scanned,
-    total: members.length,
+    total: required,
     teamId: crianca.timeId,
     teamName: team?.nome || 'Equipe',
     teamColor: team?.cor || '#00AA00',
@@ -880,6 +902,7 @@ async function refreshTreasureTargetAfterListChange(eventoId) {
 }
 
 module.exports = {
+  leiturasNecessarias,
   refreshTreasureTargetAfterListChange,
   TREASURE_GAME_TYPE,
   getGameForEvent,
