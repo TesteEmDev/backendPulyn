@@ -926,7 +926,7 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
 
     // A nova data/hora é lida no relógio do buffet (mesmo fuso do início automático).
     const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
-    if (wallClockOf(schedule.data, schedule.hora) < nowMinute) {
+    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
       return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
     }
 
@@ -934,13 +934,13 @@ router.post('/:id/reschedule', verifyToken, requireRole('admin', 'master'), asyn
       `UPDATE evento
        SET data = @date, hora = @time, duracao = COALESCE(@duration, duracao)
        WHERE eventoId = @id AND LOWER(COALESCE(status, 'scheduled')) = 'scheduled'`,
-      { date: schedule.data, time: schedule.hora, duration: schedule.duracao, id: evento.eventoId }
+      { date: schedule.date, time: schedule.time, duration: schedule.duration, id: evento.eventoId }
     );
     if (!Number(result?.rowsAffected?.[0] || 0)) {
       return res.status(409).json({ error: 'O evento mudou de situação e não pode mais ser reagendado.' });
     }
 
-    console.log(`📅 [EVENTO] ${evento.eventoId} reagendado para ${schedule.data} ${schedule.hora}`);
+    console.log(`📅 [EVENTO] ${evento.eventoId} reagendado para ${schedule.date} ${schedule.time}`);
     const updated = await queryOne('SELECT * FROM evento WHERE eventoId = @id', { id: evento.eventoId });
     res.json({ rescheduled: true, evento: updated });
   } catch (err) {
@@ -968,7 +968,7 @@ router.post('/:id/reopen', verifyToken, requireRole('admin', 'master'), async (r
     if (schedule.error) return res.status(400).json({ error: schedule.error });
 
     const nowMinute = Math.floor(wallClockNow() / 60000) * 60000;
-    if (wallClockOf(schedule.data, schedule.hora) < nowMinute) {
+    if (wallClockOf(schedule.date, schedule.time) < nowMinute) {
       return res.status(400).json({ error: 'A nova data e horário precisam estar no futuro.' });
     }
 
