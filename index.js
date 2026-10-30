@@ -56,6 +56,7 @@ const zoneConquestRoutes = require('./routes/zoneConquest');
 const companyMapRoutes = require('./routes/companyMap');
 const uhfRoutes = require('./routes/uhf');
 const telaoRoutes = require('./routes/telao');
+const gameSelectionRoutes = require('./routes/gameSelection');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -1905,6 +1906,7 @@ app.use('/api/clientes', clientRoutes);
 // Eventos
 app.use('/api/eventos', eventRoutes);
 app.use('/api/company-map', companyMapRoutes);
+app.use('/api/debug', gameSelectionRoutes);   // "Sem jogos": tira a seleção do jogo
 app.use('/api/telao', telaoRoutes);   // link do telão (admin)
 app.use('/api/uhf', uhfRoutes);   // leitores UHF (UR4) e mapa de calor
 
