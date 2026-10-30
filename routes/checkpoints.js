@@ -7,6 +7,7 @@ const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 const comandos = require('../utils/comandosCheckpoint');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
+const { ONLINE_ATE_MS, statusEfetivo } = require('../utils/statusCheckpoint');
 
 function sameId(left, right) {
   return left !== null && left !== undefined
@@ -99,7 +100,6 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
 
 // POST - Testar o LED ou o som da placa. O comando espera na fila até a placa buscá-lo (até ~10 s); ver
 // utils/comandosCheckpoint.js. Só o admin do buffet dono do checkpoint que já aceitou, e só se a placa está online.
-const ONLINE_ATE_MS = 3 * 60 * 1000; // o heartbeat chega a cada 60 s
 router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (req, res) => {
   try {
     const tipo = String(req.body?.tipo || '').toLowerCase();
@@ -138,14 +138,14 @@ router.get('/resumo', verifyToken, async (req, res) => {
         e.status AS evento_status,
         e.data AS evento_date,
         COUNT(*) AS total,
-        SUM(CASE WHEN c.status = 'online' THEN 1 ELSE 0 END) AS online
+        SUM(CASE WHEN c.status = 'online' AND c.ultimoVisto >= @limite THEN 1 ELSE 0 END) AS online
       FROM pontoVerificacao c
       INNER JOIN evento e ON e.eventoId = c.eventoId
       WHERE e.empresaId = @empresaId
         AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
       GROUP BY c.eventoId, e.nome, e.status, e.data
       ORDER BY e.data DESC
-    `, { empresaId: req.user.empresaId });
+    `, { empresaId: req.user.empresaId, limite: new Date(Date.now() - ONLINE_ATE_MS) });
 
     res.json(rows.map((row) => {
       const total = Number(row.total) || 0;
@@ -203,7 +203,13 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
     );
 
     // `codigo` é o número do checkpoint (o que o buffet vê); o checkpointId é só o ID interno, gerado pelo banco.
-    const comCodigo = semIdNovo(pontoVerificacao || []).map((cp) => ({ ...cp, codigo: cp.numCheck || cp.codigo || cp.checkpointId }));
+    // `status` é calculado na hora: online só se a placa avisou que está viva nos últimos minutos (o banco não volta para offline sozinho).
+    const agora = Date.now();
+    const comCodigo = semIdNovo(pontoVerificacao || []).map((cp) => ({
+      ...cp,
+      codigo: cp.numCheck || cp.codigo || cp.checkpointId,
+      status: statusEfetivo(cp.status, cp.ultimoVisto, agora),
+    }));
 
     console.log(`📊 [CHECKPOINTS] Encontrados ${comCodigo.length} checkpoints para evento ${eventoId}`);
     res.json(comCodigo);
