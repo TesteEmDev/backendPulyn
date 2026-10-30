@@ -164,11 +164,16 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-// Atualizar time
-router.put('/:id', verifyToken, async (req, res) => {
+// Atualizar time (nome e cor). O nome pode vir como `nome` ou `name`: o painel do admin manda um e o do recreacionista, outro.
+router.put('/:id', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
-    const { nome, color } = req.body;
+    const nome = String(req.body?.nome ?? req.body?.name ?? '').trim();
+    const color = req.body?.color === undefined || req.body?.color === null ? null : String(req.body.color).trim();
     const empresaId = req.user.empresaId;
+
+    if (!nome) return res.status(400).json({ error: 'Informe o nome do time' });
+    if (nome.length > 100) return res.status(400).json({ error: 'O nome do time pode ter até 100 caracteres' });
+    if (color !== null && !/^#[0-9a-fA-F]{6}$/.test(color)) return res.status(400).json({ error: 'Cor inválida' });
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
@@ -180,18 +185,18 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Time não encontrado' });
     }
 
-    if (time.empresaId !== empresaId) {
+    if (String(time.empresaId).toLowerCase() !== String(empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: time não pertence a esta empresa' });
     }
 
-    // ✅ ATUALIZAR
+    // ✅ ATUALIZAR (sem cor no pedido, a cor atual fica)
     await query(
-      'UPDATE "time" SET nome = @nome, cor = @color WHERE timeId = @id',
+      'UPDATE "time" SET nome = @nome, cor = COALESCE(@color, cor) WHERE timeId = @id',
       { nome, color, id: req.params.id }
     );
 
     console.log(`✅ Time atualizado: ${req.params.id}`);
-    res.json({ updated: true });
+    res.json({ updated: true, nome, color });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
