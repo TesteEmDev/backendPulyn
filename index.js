@@ -55,6 +55,7 @@ const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
 const companyMapRoutes = require('./routes/companyMap');
 const uhfRoutes = require('./routes/uhf');
+const telaoRoutes = require('./routes/telao');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -62,6 +63,7 @@ const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureLoginPapeisSchema } = require('./migrations/loginPapeis');
+const { ensureTelaoSchema } = require('./migrations/telao');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
@@ -1903,6 +1905,7 @@ app.use('/api/clientes', clientRoutes);
 // Eventos
 app.use('/api/eventos', eventRoutes);
 app.use('/api/company-map', companyMapRoutes);
+app.use('/api/telao', telaoRoutes);   // link do telão (admin)
 app.use('/api/uhf', uhfRoutes);   // leitores UHF (UR4) e mapa de calor
 
 // Brincadeiras
@@ -2020,6 +2023,7 @@ async function startServer() {
     await ensureEmpresaCnpjSchema();
     await ensureSettingsPerCompanySchema();
     await ensureLoginPapeisSchema();
+    await ensureTelaoSchema();
     await ensureClienteUnidadeSchema();
     await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
