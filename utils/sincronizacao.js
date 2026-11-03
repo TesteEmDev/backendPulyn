@@ -612,6 +612,7 @@ function criarSincronizador({
   return {
     executarAgora, iniciar, parar, status, cargaInicial, esquema, lerEstado,
     puxarDaNuvem: async () => puxar(await esquema()),
+    recarregarAgora: async () => recarregar(await esquema()),
     _estado: estado,
   };
 }
