@@ -12,6 +12,8 @@ const {
   atrasoTentativaMs,
   ordenarTabelas,
   ehErroDeConexao,
+  colunaDeEmpresa,
+  podeEnviarDaEmpresa,
 } = require('../utils/sincronizacaoSql');
 
 test('aspas protege nomes camelCase e aspas dentro do nome', () => {
@@ -119,4 +121,22 @@ test('ehErroDeConexao separa queda de rede de erro de dados', () => {
   assert.equal(ehErroDeConexao({ code: '23503', message: 'violates foreign key', severity: 'ERROR' }), false);
   assert.equal(ehErroDeConexao({ code: '23505', message: 'duplicate key' }), false);
   assert.equal(ehErroDeConexao(null), false);
+});
+
+test('colunaDeEmpresa acha o vínculo com a empresa, nos dois nomes de coluna', () => {
+  assert.equal(colunaDeEmpresa('evento', ['eventoId', 'empresaId']), 'empresaId');
+  assert.equal(colunaDeEmpresa('evento', ['eventoId', 'empresa_id']), 'empresa_id');
+  assert.equal(colunaDeEmpresa('empresas', ['id', 'nome']), 'id');
+  assert.equal(colunaDeEmpresa('clientes', ['clienteId', 'nome']), null);
+});
+
+test('podeEnviarDaEmpresa sobe tudo sem empresa definida e só a empresa com ela', () => {
+  const colunas = ['eventoId', 'empresaId'];
+  assert.equal(podeEnviarDaEmpresa({ tabela: 'evento', colunas, linha: { empresaId: 'x' }, empresaId: null }), true);
+  assert.equal(podeEnviarDaEmpresa({ tabela: 'evento', colunas, linha: { empresaId: 'A' }, empresaId: 'A' }), true);
+  assert.equal(podeEnviarDaEmpresa({ tabela: 'evento', colunas, linha: { empresaId: 'B' }, empresaId: 'A' }), false);
+  assert.equal(podeEnviarDaEmpresa({ tabela: 'evento', colunas, linha: undefined, empresaId: 'A' }), true, 'exclusão da empresa passa');
+  assert.equal(podeEnviarDaEmpresa({ tabela: 'clientes', colunas: ['clienteId'], linha: { clienteId: '1' }, empresaId: 'A' }), false, 'tabela sem vínculo não sobe');
+  assert.equal(podeEnviarDaEmpresa({ tabela: 'empresas', colunas: ['id'], linha: { id: 'A' }, empresaId: 'A' }), true);
+  assert.equal(podeEnviarDaEmpresa({ tabela: 'empresas', colunas: ['id'], linha: { id: 'B' }, empresaId: 'A' }), false);
 });

@@ -6,7 +6,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const {
   STATUS, PROPOSITOS, normalizarMac,
-  podeTransferir, podeCancelarTransferencia, podeExcluir,
+  podeTransferir, podeExcluir,
 } = require('../utils/checkpointTransferencia');
 
 // O ID do checkpoint é gerado pelo banco (autoincremento, só números) e o único valor que uma pessoa define é o
@@ -171,7 +171,8 @@ router.patch('/:id', async (req, res) => {
   }
 });
 
-// Transfere do estoque para um buffet. Fica 'pendente' até o admin do buffet aceitar.
+// Transfere do estoque para um buffet. O checkpoint já passa a ser do buffet, sem número: o admin dele o define depois,
+// na tela local, e não precisa estar online para isso.
 router.post('/:id/transferir', async (req, res) => {
   try {
     const id = lerId(req, res);
@@ -192,46 +193,17 @@ router.post('/:id/transferir', async (req, res) => {
     // A condição no WHERE evita transferir duas vezes se dois pedidos chegarem juntos.
     const atualizado = await queryOne(
       `UPDATE pontoVerificacao
-       SET statusTransferencia = @pendente, empresaDestinoId = @empresaId, transferidoEm = now(), atualizadoEm = now()
+       SET statusTransferencia = @aceito, empresaId = @empresaId, empresaDestinoId = NULL, transferidoEm = now(), atualizadoEm = now()
        WHERE id = @id AND statusTransferencia = @estoque
        RETURNING id`,
-      { id, empresaId, pendente: STATUS.PENDENTE, estoque: STATUS.ESTOQUE }
+      { id, empresaId, aceito: STATUS.ACEITO, estoque: STATUS.ESTOQUE }
     );
     if (!atualizado) return res.status(409).json({ error: 'O checkpoint mudou de situação; atualize a lista e tente de novo' });
 
-    console.log(`📤 [MASTER-CHECKPOINTS] Checkpoint ${id} transferido para "${empresa.nome}" (pendente)`);
+    console.log(`📤 [MASTER-CHECKPOINTS] Checkpoint ${id} transferido para "${empresa.nome}"`);
     res.json(await buscar(id));
   } catch (err) {
     console.error('❌ [MASTER-CHECKPOINTS] Erro ao transferir:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Desfaz uma transferência que o buffet ainda não aceitou: volta para o estoque.
-router.post('/:id/cancelar-transferencia', async (req, res) => {
-  try {
-    const id = lerId(req, res);
-    if (id === null) return;
-
-    const atual = await buscar(id);
-    if (!atual) return res.status(404).json({ error: 'Checkpoint não encontrado' });
-    if (!podeCancelarTransferencia(atual.statusTransferencia)) {
-      return res.status(409).json({ error: `Só dá para cancelar uma transferência pendente (este está "${atual.statusTransferencia}")` });
-    }
-
-    const atualizado = await queryOne(
-      `UPDATE pontoVerificacao
-       SET statusTransferencia = @estoque, empresaDestinoId = NULL, transferidoEm = NULL, atualizadoEm = now()
-       WHERE id = @id AND statusTransferencia = @pendente
-       RETURNING id`,
-      { id, estoque: STATUS.ESTOQUE, pendente: STATUS.PENDENTE }
-    );
-    if (!atualizado) return res.status(409).json({ error: 'O checkpoint mudou de situação; atualize a lista e tente de novo' });
-
-    console.log(`↩️ [MASTER-CHECKPOINTS] Transferência do checkpoint ${id} cancelada`);
-    res.json(await buscar(id));
-  } catch (err) {
-    console.error('❌ [MASTER-CHECKPOINTS] Erro ao cancelar transferência:', err);
     res.status(500).json({ error: err.message });
   }
 });

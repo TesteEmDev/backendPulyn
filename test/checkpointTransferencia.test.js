@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   STATUS, normalizarMac, validarNumCheck,
-  podeTransferir, podeCancelarTransferencia, podeExcluir, semIdNovo,
+  podeTransferir, podeExcluir, semIdNovo,
 } = require('../utils/checkpointTransferencia');
 
 test('as respostas atuais não levam o id novo, para o apelido id -> checkpointId do frontend continuar valendo', () => {
@@ -54,28 +54,11 @@ test('o número do checkpoint recusa espaço, símbolos de URL e mais de 40 cara
 
 test('só transfere o que está em estoque', () => {
   assert.equal(podeTransferir(STATUS.ESTOQUE), true);
-  assert.equal(podeTransferir(STATUS.PENDENTE), false);
   assert.equal(podeTransferir(STATUS.ACEITO), false);
-});
-
-test('só cancela a transferência que ainda está pendente', () => {
-  assert.equal(podeCancelarTransferencia(STATUS.PENDENTE), true);
-  assert.equal(podeCancelarTransferencia(STATUS.ESTOQUE), false);
-  assert.equal(podeCancelarTransferencia(STATUS.ACEITO), false);
-});
-
-test('o buffet só aceita ou recusa o que está pendente para ele', () => {
-  const { podeAceitar, podeRecusar } = require('../utils/checkpointTransferencia');
-  for (const pode of [podeAceitar, podeRecusar]) {
-    assert.equal(pode(STATUS.PENDENTE), true);
-    assert.equal(pode(STATUS.ESTOQUE), false);
-    assert.equal(pode(STATUS.ACEITO), false);
-  }
 });
 
 test('só exclui o que nunca saiu do estoque', () => {
   assert.equal(podeExcluir(STATUS.ESTOQUE), true);
-  assert.equal(podeExcluir(STATUS.PENDENTE), false);
   assert.equal(podeExcluir(STATUS.ACEITO), false);
 });
 

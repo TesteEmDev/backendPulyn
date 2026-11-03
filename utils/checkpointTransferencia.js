@@ -2,11 +2,11 @@
 //
 // Ciclo de vida (pontoVerificacao.statusTransferencia):
 //   estoque  -> cadastrado pelo super admin, ainda sem buffet (empresaId NULL)
-//   pendente -> transferido para um buffet (empresaDestinoId), à espera do aceite do admin dele
-//   aceito   -> o buffet aceitou: empresaId preenchido, num_check definido por ele
+//   aceito   -> transferido para um buffet (empresaId preenchido). Não há aceite: o admin do buffet só define o
+//               num_check depois, na tela local, e o checkpoint pode ficar sem número até lá.
 // Os checkpoints que já existiam antes deste fluxo ficam como 'aceito'.
 
-const STATUS = Object.freeze({ ESTOQUE: 'estoque', PENDENTE: 'pendente', ACEITO: 'aceito' });
+const STATUS = Object.freeze({ ESTOQUE: 'estoque', ACEITO: 'aceito' });
 const PROPOSITOS = ['game', 'reception'];
 
 // "aa-bb-cc-dd-ee-ff", "AABBCCDDEEFF" ou "aa:bb:cc:dd:ee:ff" -> "AA:BB:CC:DD:EE:FF". null se não for um MAC.
@@ -29,10 +29,6 @@ function validarNumCheck(valor) {
 }
 
 const podeTransferir = (status) => status === STATUS.ESTOQUE;
-const podeCancelarTransferencia = (status) => status === STATUS.PENDENTE;
-// O buffet só responde (aceita ou recusa) ao que está pendente para ele.
-const podeAceitar = (status) => status === STATUS.PENDENTE;
-const podeRecusar = (status) => status === STATUS.PENDENTE;
 const podeExcluir = (status) => status === STATUS.ESTOQUE;
 
 // O ID do checkpoint é gerado pelo banco (migrations/checkpointIdNumerico.js): `id` é o inteiro autoincremento e
@@ -56,8 +52,5 @@ module.exports = {
   normalizarMac,
   validarNumCheck,
   podeTransferir,
-  podeCancelarTransferencia,
-  podeAceitar,
-  podeRecusar,
   podeExcluir,
 };
