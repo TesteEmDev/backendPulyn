@@ -130,4 +130,46 @@ router.get('/evento/:eventoId/zonas', async (req, res) => {
   }
 });
 
+// Engajamento por checkpoint de UM evento, calculado das leituras reais (tabela leitura).
+// Checkpoints sem nenhuma leitura continuam na lista (com zero) para o admin ver onde ninguém passou.
+router.get('/evento/:eventoId/checkpoints', async (req, res) => {
+  try {
+    const empresaId = resolveEmpresaId(req);
+    if (!empresaId) return res.status(400).json({ error: 'Empresa não identificada' });
+    const eventoId = String(req.params.eventoId || '').trim();
+
+    const evento = await queryOne(
+      'SELECT eventoId FROM evento WHERE eventoId = @eventoId AND empresaId = @empresaId',
+      { eventoId, empresaId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+
+    const rows = await allQuery(`
+      SELECT cp.checkpointId, cp.nome, NULLIF(TRIM(cp.zona), '') AS zona,
+        COUNT(l.leituraId) AS leituras,
+        COUNT(DISTINCT l.criancaId) AS participantes,
+        COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
+      FROM pontoVerificacao cp
+      LEFT JOIN leitura l ON l.checkpointId = cp.checkpointId AND l.criancaId IS NOT NULL
+      WHERE cp.eventoId = @eventoId
+        AND cp.empresaId = @empresaId
+        AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
+      GROUP BY cp.checkpointId, cp.nome, NULLIF(TRIM(cp.zona), '')
+      ORDER BY leituras DESC, cp.nome
+    `, { eventoId: evento.eventoId, empresaId });
+
+    res.json(rows.map((row) => ({
+      checkpointId: row.checkpointId,
+      nome: row.nome,
+      zona: row.zona || null,
+      leituras: Number(row.leituras) || 0,
+      participantes: Number(row.participantes) || 0,
+      pontos: Number(row.pontos) || 0,
+    })));
+  } catch (err) {
+    console.error('❌ Erro ao calcular engajamento por checkpoint:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
