@@ -17,11 +17,21 @@ async function main() {
   const evento = await queryOne("SELECT eventoId, empresaId, nome FROM evento WHERE nome = 'Festa do João'");
   assert.ok(evento, 'a Festa do João existe');
   const times = await allQuery('SELECT timeId, nome FROM "time" WHERE eventoId = @e ORDER BY nome', { e: evento.eventoId });
-  const criancas = await allQuery('SELECT criancaId, timeId FROM crianca WHERE eventoId = @e ORDER BY criancaId', { e: evento.eventoId });
-  assert.ok(times.length >= 2 && criancas.length >= 6, 'precisa de 2+ times e 6+ participantes');
+  let criancas = [];
+  assert.ok(times.length >= 2, 'precisa de 2+ times');
 
   try {
     await withTransaction(async () => {
+      criancas = await allQuery('SELECT criancaId FROM crianca WHERE eventoId = @e ORDER BY criancaId', { e: evento.eventoId });
+      for (let i = criancas.length; i < 6; i += 1) {
+        const criancaId = crypto.randomUUID();
+        await query(
+          `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, pontos, status)
+           VALUES (@id, @e, @emp, NULL, @nome, @nome, 8, NULL, 0, 'active')`,
+          { id: criancaId, e: evento.eventoId, emp: evento.empresaId, nome: `Ensaio${i}` }
+        );
+        criancas.push({ criancaId });
+      }
       // Montagem: 4 participantes numa equipe e 2 na outra (leituras necessárias 2 e 1), checkpoints ligados e um jogo de tesouro
       const [t1, t2] = times;
       for (const [i, c] of criancas.entries()) {

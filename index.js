@@ -1045,9 +1045,11 @@ async function stopGameForEvento(eventoId) {
     // Parar com Caça ao Tesouro/Monstro em andamento: se já existe uma equipe
     // vencedora (a mais rápida / a primeira a derrotar o monstro), ela leva o
     // bônus antes de a partida ser encerrada. Uma falha aqui não impede a parada.
+    let premio = null;
     try {
-      await awardTreasureBonusOnStop(eventoId);
-      await awardMonsterBonusOnStop(eventoId);
+      const premioTesouro = await awardTreasureBonusOnStop(eventoId);
+      const premioMonstro = await awardMonsterBonusOnStop(eventoId);
+      premio = [premioTesouro, premioMonstro].find((item) => item?.awarded) || null;
     } catch (bonusError) {
       console.error('❌ [PARAR-JOGO] Erro ao pagar bônus da equipe vencedora:', bonusError.message);
     }
@@ -1186,6 +1188,8 @@ async function stopGameForEvento(eventoId) {
     return {
       ok: true,
       status: gameStatus,
+      // Equipe que ganhou o bônus ao parar o jogo (Caça ao Tesouro / Monstro), para o recreacionista ver quem levou
+      bonus: premio ? { teamName: premio.teamName, pointsPerMember: premio.pointsPerMember, membersAwarded: premio.membersAwarded } : null,
       verification: {
         statusAntes: eventoAntes?.status,
         statusDepois: eventoDepois?.status,

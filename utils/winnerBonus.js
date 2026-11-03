@@ -5,6 +5,15 @@ const { query, queryOne, allQuery } = require('../database');
 // cada membro da equipe vencedora recebe este bônus.
 const WINNER_BONUS_POINTS = 200;
 
+// Quem lidera quando o jogo é parado à força e ninguém terminou: o maior valor (> 0), sem empate no topo.
+// itens: [{ teamId, valor }]. Devolve o teamId do líder ou null (ninguém avançou ou há empate).
+function escolherLider(itens) {
+  const ordenados = itens.filter((item) => Number(item.valor) > 0).sort((a, b) => Number(b.valor) - Number(a.valor));
+  if (ordenados.length === 0) return null;
+  if (ordenados.length > 1 && Number(ordenados[1].valor) === Number(ordenados[0].valor)) return null;
+  return ordenados[0].teamId;
+}
+
 /**
  * Paga o bônus de vitória a todos os membros da equipe vencedora de uma partida
  * e recalcula os pontos da equipe (soma dos pontos dos membros, como no resto do
@@ -86,4 +95,4 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
   };
 }
 
-module.exports = { WINNER_BONUS_POINTS, awardWinnerBonus };
+module.exports = { WINNER_BONUS_POINTS, awardWinnerBonus, escolherLider };

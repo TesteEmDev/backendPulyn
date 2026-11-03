@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
-const { awardWinnerBonus } = require('./winnerBonus');
+const { awardWinnerBonus, escolherLider } = require('./winnerBonus');
 
 const TREASURE_GAME_TYPE = 'treasure_hunt';
 const TREASURE_TURN_DELAY_MS = 10 * 1000;
@@ -208,19 +208,33 @@ function chooseRandom(values) {
   return values[Math.floor(Math.random() * values.length)];
 }
 
-// Parada manual (ou por tempo) com a partida em andamento: se alguma equipe já
-// concluiu a corrida, a mais rápida é a vencedora e recebe o bônus. Sem nenhuma
-// equipe concluída, ninguém ganha.
+// Quem está na frente pelo progresso: a equipe com mais checkpoints da partida acesos (dominados) agora.
+// Só a equipe da vez tem checkpoints acesos (ao trocar de equipe o mapa zera), então é ela, se já acendeu algum.
+async function getTeamWithMostProgress(eventoId, session) {
+  const ids = await getTreasureCheckpointIds(eventoId, session.brincadeiraId, session);
+  const dominados = new Map();
+  for (const checkpoint of await getEventCheckpoints(eventoId)) {
+    if (!checkpoint.territorioDonoTimeId || !ids.some(id => sameId(id, checkpoint.checkpointId))) continue;
+    const dono = String(checkpoint.territorioDonoTimeId);
+    dominados.set(dono, (dominados.get(dono) || 0) + 1);
+  }
+  return escolherLider([...dominados].map(([teamId, valor]) => ({ teamId, valor })));
+}
+
+// Parada manual (ou por tempo) com a partida em andamento: a equipe que concluiu a corrida mais rápido ganha o bônus.
+// Se nenhuma concluiu, ganha a que está na frente (mais checkpoints acesos); sem ninguém na frente (ninguém acendeu
+// nada ou há empate), ninguém ganha.
 async function awardTreasureBonusOnStop(eventoId) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
   const winner = getFastestCompletedTeam(await getTeamRaceTimes(eventoId, session));
-  if (!winner) return null;
+  const teamId = winner?.teamId || await getTeamWithMostProgress(eventoId, session);
+  if (!teamId) return null;
   return awardWinnerBonus({
     eventoId,
     partidaId: session.partidaId,
     gameType: TREASURE_GAME_TYPE,
-    teamId: winner.teamId,
+    teamId,
   });
 }
 
