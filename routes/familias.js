@@ -9,6 +9,12 @@ const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamili
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
 const { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
+const { normalizarTelefone } = require('../utils/telefone');
+const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
+
+// O telefone do responsável é obrigatório no cadastro pelo site. O app ainda não o envia: enquanto ele não for atualizado,
+// o servidor só exige quando EXIGIR_TELEFONE_RESPONSAVEL=1 (sem a variável, aceita o cadastro sem telefone, mas valida o que vier).
+const EXIGIR_TELEFONE = process.env.EXIGIR_TELEFONE_RESPONSAVEL === '1';
 const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
 
 const STAFF_ROLES = ['admin', 'reception', 'master'];
@@ -240,6 +246,24 @@ router.post('/invites/:token/register', async (req, res) => {
     if (String(senha).length < 6) {
       return res.status(400).json({ error: 'Senha deve ter no mínimo 6 caracteres' });
     }
+    // Telefone do responsável (só dígitos, com DDD)
+    const telefoneInformado = String(req.body.telefone ?? '').trim();
+    const telefone = telefoneInformado ? normalizarTelefone(telefoneInformado) : null;
+    if (telefoneInformado && !telefone) {
+      return res.status(400).json({ error: 'Telefone inválido. Informe o DDD e o número, por exemplo (11) 91234-5678.' });
+    }
+    if (!telefone && EXIGIR_TELEFONE) {
+      return res.status(400).json({ error: 'O telefone do responsável é obrigatório' });
+    }
+    // Data de nascimento das crianças (no lugar da idade): confere antes de gravar qualquer coisa
+    const nascimentos = [];
+    for (const [indice, criancaPayload] of childrenPayload.entries()) {
+      if (criancaPayload?.dataNascimento) {
+        const nascimento = normalizarDataNascimento(criancaPayload.dataNascimento);
+        if (nascimento.erro) return res.status(400).json({ error: `Criança ${indice + 1}: ${nascimento.erro}` });
+        nascimentos[indice] = nascimento.data;
+      }
+    }
     // O responsável pode se cadastrar sem crianças (vincula depois pelo QR Code no app)
     const plan = planInviteRegistration({ linkedChildId: invite.linked_child_id, children: childrenPayload });
     if (plan.error) {
@@ -275,8 +299,8 @@ router.post('/invites/:token/register', async (req, res) => {
       const loginId = existingLogin?.loginId || crypto.randomUUID();
       if (!existingLogin) {
         await query(`
-          INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
-          VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', @loginStatus, GETDATE())
+          INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao, telefone)
+          VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', @loginStatus, GETDATE(), @telefone)
         `, {
           id: loginId,
           empresaId: invite.empresaId,
@@ -284,7 +308,11 @@ router.post('/invites/:token/register', async (req, res) => {
           senha: Buffer.from(String(senha)).toString('base64'),
           familyNome: familyName,
           loginStatus: plan.loginStatus,
+          telefone,
         });
+      } else if (telefone) {
+        // Conta que já existia e ainda não tinha telefone: ganha o informado agora (sem sobrescrever um já cadastrado)
+        await query('UPDATE login SET telefone = @telefone WHERE loginId = @loginId AND telefone IS NULL', { telefone, loginId });
       }
 
       // O evento do convite entra na conta (aparece em "Meus eventos" mesmo sem criança vinculada)
@@ -303,27 +331,30 @@ router.post('/invites/:token/register', async (req, res) => {
       if (invite.linked_child_id) {
         childIds.push(invite.linked_child_id);
       } else {
-        for (const childData of childrenPayload) {
+        for (const [indice, childData] of childrenPayload.entries()) {
           const childId = crypto.randomUUID();
           const childNomeLimpo = String(childData.name).trim();
           const childApelido = String(childData.nickname || childData.name).trim();
-          const childIdade = Number.isFinite(Number(childData.age)) ? Number(childData.age) : null;
+          // Com a data de nascimento a idade é calculada dela; sem ela vale a idade informada (versões antigas do app)
+          const childNascimento = nascimentos[indice] || null;
+          const childIdade = childNascimento ? idadeNaData(childNascimento) : (Number.isFinite(Number(childData.age)) ? Number(childData.age) : null);
           const perfilId = await criarPerfil({
             empresaId: invite.empresaId, eventoId: invite.eventoId,
-            nome: childNomeLimpo, apelido: childApelido, idade: childIdade, avatar: '👤',
+            nome: childNomeLimpo, apelido: childApelido, idade: childIdade, avatar: '👤', dataNascimento: childNascimento,
           });
           await query(`
             INSERT INTO crianca
-              (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, pontos, status, perfilCriancaId)
-            VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @apelido, @age, '👤', 0, 'active', @perfilId)
+              (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, dataNascimento, avatar, pontos, status, perfilCriancaId)
+            VALUES (@id, @eventoId, @empresaId, NULL, @childNome, @apelido, @age, @dataNascimento, '👤', 0, 'active', @perfilId)
           `, {
+            dataNascimento: childNascimento,
             id: childId,
             perfilId,
             eventoId: invite.eventoId,
             empresaId: invite.empresaId,
             childNome: String(childData.name).trim(),
             apelido: String(childData.nickname || childData.name).trim(),
-            age: Number.isFinite(Number(childData.age)) ? Number(childData.age) : null,
+            age: childIdade,
           });
           childIds.push(childId);
         }

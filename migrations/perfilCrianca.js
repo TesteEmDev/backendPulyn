@@ -66,6 +66,18 @@ async function ensurePerfilCriancaSchema() {
     WHERE perfilCriancaId IS NULL
       AND EXISTS (SELECT 1 FROM perfilCrianca p WHERE p.perfilCriancaId = crianca.criancaId)
   `);
+
+  // Cor que o participante escolhe no cadastro (sem ela, a cor continua saindo do id, como antes)
+  if (isPostgres) {
+    await query('ALTER TABLE crianca ADD COLUMN IF NOT EXISTS cor varchar(20)');
+    // Data de nascimento no lugar da idade digitada (a idade segue gravada, calculada da data)
+    await query('ALTER TABLE crianca ADD COLUMN IF NOT EXISTS dataNascimento date');
+    await query('ALTER TABLE perfilCrianca ADD COLUMN IF NOT EXISTS dataNascimento date');
+  } else {
+    await query("IF COL_LENGTH('crianca', 'cor') IS NULL ALTER TABLE crianca ADD cor NVARCHAR(20) NULL");
+    await query("IF COL_LENGTH('crianca', 'dataNascimento') IS NULL ALTER TABLE crianca ADD dataNascimento DATE NULL");
+    await query("IF COL_LENGTH('perfilCrianca', 'dataNascimento') IS NULL ALTER TABLE perfilCrianca ADD dataNascimento DATE NULL");
+  }
 }
 
 module.exports = { ensurePerfilCriancaSchema };

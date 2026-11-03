@@ -3,10 +3,13 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { getAvatarForCreate } = require('../utils/avatar');
+const { isAdventurerAvatarId } = require('../utils/avatar');
+const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
+const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const {
   criarPerfil, buscarPerfil, registrarVolta, buscarPerfisParaKiosk, idadeValida, copiarVinculosParaParticipacao,
 } = require('../utils/perfilCrianca');
+const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 
 const router = express.Router();
 const CLOSED_EVENT_STATUSES = new Set(['completed', 'cancelled', 'canceled', 'finished']);
@@ -152,22 +155,54 @@ router.get('/profiles', async (req, res) => {
   }
 });
 
+// Avatares que os participantes do evento já usam (o kiosk os mostra indisponíveis e escolhe um livre de início).
+router.get('/events/:eventId/avatars-in-use', async (req, res) => {
+  try {
+    const banco = require('../database');
+    const event = await banco.queryOne(
+      'SELECT eventoId FROM evento WHERE eventoId = @eventId AND empresaId = @empresaId',
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
+    res.json({
+      avatares: [...new Set(await avataresEmUso(banco, event.eventoId))],
+      cores: [...new Set(await coresEmUso(banco, event.eventoId))],
+    });
+  } catch (error) {
+    console.error('❌ Kiosk: erro ao listar avatares em uso:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os avatares' });
+  }
+});
+
 // Cadastro atômico: cria (se necessário) e vincula a pulseira junto com a criança.
 // Criança nova: cria o cadastro permanente (perfilCrianca) e a participação no evento.
 // Criança que volta (perfilCriancaId): reaproveita o cadastro e só cria a participação no evento.
 router.post('/participants', async (req, res) => {
   try {
     const { eventId, nome, apelido, avatar, braceletCode, timeId, perfilCriancaId } = req.body || {};
-    const idadeInformada = req.body?.idade ?? req.body?.age;
+    // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a idade informada (versões antigas)
+    let dataNascimento = null;
+    if (req.body?.dataNascimento) {
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+      dataNascimento = nascimento.data;
+    }
+    const idadeInformada = dataNascimento ? idadeNaData(dataNascimento) : (req.body?.idade ?? req.body?.age);
     const codigo = normalizeUid(braceletCode);
     let cleanName = String(nome || '').trim();
-    const avatarValue = getAvatarForCreate(avatar);
+    // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
+    const avatarPedido = avatar ? String(avatar) : null;
 
-    if (!avatarValue) {
+    if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
+    // Cor escolhida (opcional): sem ela, entra uma livre
+    const corPedida = req.body?.cor ? normalizarCor(req.body.cor) : null;
+    if (req.body?.cor && !corPedida) {
+      return res.status(400).json({ error: 'Cor inválida' });
+    }
     if (!perfilCriancaId && (idadeValida(idadeInformada) === null)) {
-      return res.status(400).json({ error: 'Idade é obrigatória' });
+      return res.status(400).json({ error: 'A data de nascimento é obrigatória' });
     }
 
     // O time é opcional: o recreacionista define (ou sorteia) os time depois do cadastro.
@@ -229,25 +264,48 @@ router.post('/participants', async (req, res) => {
         throw httpError('Esta pulseira não está disponível para vínculo', 409);
       }
 
+      // Avatar sem repetir no evento: quem volta tenta manter o do cadastro (se outro já o usa, entra um livre)
+      const escolhaAvatar = escolherAvatar({
+        pedido: avatarPedido,
+        preferido: perfilExistente?.avatar,
+        emUso: await avataresEmUso(tx, event.eventoId),
+      });
+      if (escolhaAvatar.conflito) {
+        const erro = httpError(MENSAGEM_AVATAR_EM_USO, 409);
+        erro.avataresLivres = escolhaAvatar.livres;
+        throw erro;
+      }
+      const avatarValue = escolhaAvatar.avatar;
+
+      const escolhaCor = escolherCor({ pedido: corPedida, emUso: await coresEmUso(tx, event.eventoId) });
+      if (escolhaCor.conflito) {
+        const erro = httpError(MENSAGEM_COR_EM_USO, 409);
+        erro.coresLivres = escolhaCor.livres;
+        throw erro;
+      }
+      const corValue = escolhaCor.cor;
+
       // Quem volta mantém o apelido, a idade e o avatar do cadastro, a menos que tenha escolhido outros agora.
       const apelidoFinal = String(apelido || '').trim() || perfilExistente?.apelido || cleanName.split(/\s+/)[0];
-      const idadeFinal = idadeValida(idadeInformada) ?? perfilExistente?.idade ?? 0;
+      // Quem volta e já tem data de nascimento no cadastro: a idade é a de hoje
+      const nascimentoFinal = dataNascimento || (perfilExistente?.dataNascimento ? String(perfilExistente.dataNascimento).slice(0, 10) : null);
+      const idadeFinal = (nascimentoFinal ? idadeNaData(nascimentoFinal) : null) ?? idadeValida(idadeInformada) ?? perfilExistente?.idade ?? 0;
 
       let perfilId = perfilExistente?.perfilCriancaId;
       if (perfilId) {
-        await registrarVolta({ perfilCriancaId: perfilId, eventoId: event.eventoId, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue });
+        await registrarVolta({ perfilCriancaId: perfilId, eventoId: event.eventoId, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue, dataNascimento });
       } else {
         perfilId = await criarPerfil({
           empresaId: event.empresaId, eventoId: event.eventoId,
-          nome: cleanName, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue,
+          nome: cleanName, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue, dataNascimento,
         });
       }
 
       const childId = uuidv4();
       await tx.query(
         `INSERT INTO crianca
-          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, pontos, perfilCriancaId)
-         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @codigo, 0, @perfilId)`,
+          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, dataNascimento, avatar, cor, codigoPulseira, pontos, perfilCriancaId)
+         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @dataNascimento, @avatar, @cor, @codigo, 0, @perfilId)`,
         {
           id: childId,
           eventId: event.eventoId,
@@ -256,7 +314,9 @@ router.post('/participants', async (req, res) => {
           nome: cleanName,
           apelido: apelidoFinal,
           age: idadeFinal,
+          dataNascimento: nascimentoFinal,
           avatar: avatarValue,
+          cor: corValue,
           codigo,
           perfilId,
         }
@@ -289,7 +349,9 @@ router.post('/participants', async (req, res) => {
         name: cleanName,
         nickname: apelidoFinal,
         age: idadeFinal,
+        birthDate: nascimentoFinal,
         avatar: avatarValue,
+        color: corValue,
         braceletCode: codigo,
         timeId: team ? team.timeId : null,
         teamName: team ? team.nome : null,
@@ -299,7 +361,7 @@ router.post('/participants', async (req, res) => {
 
     res.status(201).json(participant);
   } catch (error) {
-    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.avataresLivres ? { avataresLivres: error.avataresLivres } : {}), ...(error.coresLivres ? { coresLivres: error.coresLivres } : {}) });
     if (isDuplicateKeyError(error)) return res.status(409).json({ error: 'Esta pulseira já foi cadastrada. Aproxime-a novamente para atualizar o estado.' });
     console.error('❌ Kiosk: erro ao cadastrar participante:', error.message);
     res.status(500).json({ error: 'Não foi possível concluir o cadastro' });

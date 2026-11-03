@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
-const { awardWinnerBonus } = require('./winnerBonus');
+const { awardWinnerBonus, escolherLider } = require('./winnerBonus');
 
 const TREASURE_GAME_TYPE = 'treasure_hunt';
 const TREASURE_TURN_DELAY_MS = 10 * 1000;
@@ -169,24 +169,72 @@ async function getParticipatingTeams(eventoId) {
   );
 }
 
+// Leituras da equipe da vez para liberar o próximo ponto: metade dos participantes, arredondando para baixo.
+// Equipe de 1 participante precisa de 1 leitura (metade de 1 seria zero).
+function leiturasNecessarias(participantes) {
+  return Math.max(1, Math.floor(Number(participantes) / 2) || 0);
+}
+
+// Escolhe `quantidade` checkpoints ao acaso entre os `ids` (sem repetir).
+function sortearCheckpoints(ids, quantidade, aleatorio = Math.random) {
+  const embaralhado = [...ids];
+  for (let i = embaralhado.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(aleatorio() * (i + 1));
+    [embaralhado[i], embaralhado[j]] = [embaralhado[j], embaralhado[i]];
+  }
+  return embaralhado.slice(0, quantidade);
+}
+
+// O alvo nunca repete em seguida, então o jogo precisa de pelo menos dois checkpoints (mesmo mínimo de gameRequirements).
+const MIN_CHECKPOINTS_USADOS = 2;
+
+// Quantidade de checkpoints que o recreacionista escolheu usar: vazio = todos; senão um inteiro de 2 até os disponíveis.
+// Devolve o número (ou null para "todos") ou lança um erro 400 com a mensagem para a tela.
+function normalizarQuantidadeCheckpoints(quantidade, disponiveis) {
+  if (quantidade === undefined || quantidade === null || String(quantidade).trim() === '') return null;
+  const n = Number(quantidade);
+  if (!Number.isInteger(n) || n < MIN_CHECKPOINTS_USADOS || n > disponiveis) {
+    const erro = new Error(disponiveis < MIN_CHECKPOINTS_USADOS
+      ? `O Caça ao Tesouro precisa de pelo menos ${MIN_CHECKPOINTS_USADOS} checkpoints online, mas há ${disponiveis}.`
+      : `Escolha de ${MIN_CHECKPOINTS_USADOS} a ${disponiveis} checkpoints para o Caça ao Tesouro.`);
+    erro.statusCode = 400;
+    throw erro;
+  }
+  return n;
+}
+
 function chooseRandom(values) {
   if (!values.length) return null;
   return values[Math.floor(Math.random() * values.length)];
 }
 
-// Parada manual (ou por tempo) com a partida em andamento: se alguma equipe já
-// concluiu a corrida, a mais rápida é a vencedora e recebe o bônus. Sem nenhuma
-// equipe concluída, ninguém ganha.
+// Quem está na frente pelo progresso: a equipe com mais checkpoints da partida acesos (dominados) agora.
+// Só a equipe da vez tem checkpoints acesos (ao trocar de equipe o mapa zera), então é ela, se já acendeu algum.
+async function getTeamWithMostProgress(eventoId, session) {
+  const ids = await getTreasureCheckpointIds(eventoId, session.brincadeiraId, session);
+  const dominados = new Map();
+  for (const checkpoint of await getEventCheckpoints(eventoId)) {
+    if (!checkpoint.territorioDonoTimeId || !ids.some(id => sameId(id, checkpoint.checkpointId))) continue;
+    const dono = String(checkpoint.territorioDonoTimeId);
+    dominados.set(dono, (dominados.get(dono) || 0) + 1);
+  }
+  return escolherLider([...dominados].map(([teamId, valor]) => ({ teamId, valor })));
+}
+
+// Parada manual (ou por tempo) com a partida em andamento: a equipe que concluiu a corrida mais rápido ganha o bônus.
+// Se nenhuma concluiu, ganha a que está na frente (mais checkpoints acesos); sem ninguém na frente (ninguém acendeu
+// nada ou há empate), ninguém ganha.
 async function awardTreasureBonusOnStop(eventoId) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
   const winner = getFastestCompletedTeam(await getTeamRaceTimes(eventoId, session));
-  if (!winner) return null;
+  const teamId = winner?.teamId || await getTeamWithMostProgress(eventoId, session);
+  if (!teamId) return null;
   return awardWinnerBonus({
     eventoId,
     partidaId: session.partidaId,
     gameType: TREASURE_GAME_TYPE,
-    teamId: winner.teamId,
+    teamId,
   });
 }
 
@@ -198,7 +246,17 @@ async function stopTreasureGame(eventoId) {
   );
 }
 
-async function getTreasureCheckpointIds(eventoId, brincadeiraId) {
+// Checkpoints do jogo que estão online. Com `session` de uma partida que usa só parte deles (o recreacionista escolheu a
+// quantidade), vale só o subconjunto sorteado para ela.
+async function getTreasureCheckpointIds(eventoId, brincadeiraId, session = null) {
+  const todos = await getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId);
+  const usados = parseJson(session?.checkpointsUsadosIds, []).map(id => String(id).trim().toLowerCase());
+  if (!usados.length) return todos;
+  const usadosSet = new Set(usados);
+  return todos.filter(id => usadosSet.has(String(id).trim().toLowerCase()));
+}
+
+async function getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId) {
   const checkpoints = await getEventCheckpoints(eventoId);
   if (!brincadeiraId) return checkpoints.map(checkpoint => String(checkpoint.checkpointId));
 
@@ -274,17 +332,31 @@ async function getTeamOwnershipProgress(eventoId, teamId, allowedCheckpointIds =
   };
 }
 
-async function startTreasureGame(eventoId, brincadeiraId) {
+// Quantos checkpoints o jogo pode usar agora (da lista do jogo, online): é o máximo da escolha do recreacionista.
+async function contarCheckpointsDisponiveis(eventoId, brincadeiraId) {
+  return (await getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId)).length;
+}
+
+// Confere a quantidade ANTES de qualquer alteração do jogo (a rota de início chama isto primeiro).
+async function validarQuantidadeCheckpoints(eventoId, brincadeiraId, quantidade) {
+  return normalizarQuantidadeCheckpoints(quantidade, await contarCheckpointsDisponiveis(eventoId, brincadeiraId));
+}
+
+async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null } = {}) {
   const game = await getGameForEvent(eventoId, brincadeiraId);
   if (!game || game.tipo !== TREASURE_GAME_TYPE) {
     throw new Error('Jogo Caça ao Tesouro não encontrado para este evento');
   }
 
   // O primeiro alvo deve pertencer à lista configurada na brincadeira e estar online.
-  const ids = await getTreasureCheckpointIds(eventoId, brincadeiraId);
-  if (!ids.length) {
+  const todosOsIds = await getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId);
+  if (!todosOsIds.length) {
     throw new Error('O Caça ao Tesouro precisa de pelo menos um checkpoint configurado e online');
   }
+  // O recreacionista pode escolher usar só parte deles: sorteia quais e guarda na partida
+  const quantidadeUsada = normalizarQuantidadeCheckpoints(quantidade, todosOsIds.length);
+  const usarSubconjunto = quantidadeUsada !== null && quantidadeUsada < todosOsIds.length;
+  const ids = usarSubconjunto ? sortearCheckpoints(todosOsIds, quantidadeUsada) : todosOsIds;
 
   const participatingTeams = await getParticipatingTeams(eventoId);
   if (participatingTeams.length < 2) {
@@ -304,19 +376,20 @@ async function startTreasureGame(eventoId, brincadeiraId) {
     `INSERT INTO cacaTesourPartida
       (partidaId, eventoId, brincadeiraId, status, numeroRonda, timeInicialId,
        timeVezId, vezDisponvelEm, checkpointAlvoId, checkpointsCompletadosIds,
-       iniciadoEm, rondaIniciadaEm)
+       checkpointsUsadosIds, iniciadoEm, rondaIniciadaEm)
      VALUES (@id, @eventoId, @brincadeiraId, 'active', 1, @startingTeamId,
        @turnTeamId, @turnAvailableAt, @targetCheckpointId, @completedCheckpointIds,
-       @startedAt, @roundStartedAt)`,
+       @usedCheckpointIds, @startedAt, @roundStartedAt)`,
     {
       id: partidaId,
       eventoId,
       brincadeiraId,
-      startingTeamId: startingTeam.id,
-      turnTeamId: startingTeam.id,
+      startingTeamId: startingTeam.timeId,
+      turnTeamId: startingTeam.timeId,
       turnAvailableAt: initialTurnAvailableAt,
       targetCheckpointId,
       completedCheckpointIds: JSON.stringify([]),
+      usedCheckpointIds: usarSubconjunto ? JSON.stringify(ids) : null,
       startedAt: now,
       roundStartedAt: initialTurnAvailableAt,
     }
@@ -334,7 +407,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
         timeId: team.timeId,
         // A equipe sorteada começa a correr depois dos 10 segundos de preparação.
         // O cronômetro de cada equipe começa quando sua primeira vez for liberada.
-        startedAt: sameId(team.timeId, startingTeam.id) ? initialTurnAvailableAt : null,
+        startedAt: sameId(team.timeId, startingTeam.timeId) ? initialTurnAvailableAt : null,
       }
     );
   }
@@ -344,16 +417,18 @@ async function startTreasureGame(eventoId, brincadeiraId) {
     eventoId,
     brincadeiraId,
     roundNumber: 1,
-    startingTeamId: startingTeam.id,
-    startingTeamName: startingTeam.name,
-    turnTeamId: startingTeam.id,
-    turnTeamName: startingTeam.name,
+    startingTeamId: startingTeam.timeId,
+    startingTeamName: startingTeam.nome,
+    turnTeamId: startingTeam.timeId,
+    turnTeamName: startingTeam.nome,
     turnAvailableAt: initialTurnAvailableAt.toISOString(),
     turnRemainingSeconds: TREASURE_TURN_DELAY_MS / 1000,
     turnWaitSeconds: TREASURE_TURN_DELAY_MS / 1000,
     initialWait: true,
     targetCheckpointId,
     completedCheckpointIds: [],
+    totalCheckpoints: ids.length,
+    usedCheckpointIds: ids.map(String),
     status: 'active',
   };
 }
@@ -410,7 +485,7 @@ async function getTreasureEventStatus(eventoId) {
     };
   }
 
-  const configuredCheckpointIds = await getTreasureCheckpointIds(eventoId, session.brincadeiraId);
+  const configuredCheckpointIds = await getTreasureCheckpointIds(eventoId, session.brincadeiraId, session);
   const configuredCheckpointSet = new Set(configuredCheckpointIds.map(id => String(id).trim().toLowerCase()));
   const checkpoints = (await getEventCheckpoints(eventoId)).filter(checkpoint => (
     configuredCheckpointSet.size === 0
@@ -446,9 +521,9 @@ async function getTreasureEventStatus(eventoId) {
     partidaId: session.partidaId,
     roundNumber: session.numeroRonda,
     startingTeamId: session.timeInicialId || null,
-    startingTeamName: startingTeam?.name || null,
+    startingTeamName: startingTeam?.nome || null,
     turnTeamId: session.timeVezId || null,
-    turnTeamName: turnTeam?.name || null,
+    turnTeamName: turnTeam?.nome || null,
     turnAvailableAt: session.vezDisponvelEm || null,
     turnRemainingSeconds,
     initialWait,
@@ -488,21 +563,28 @@ async function getTeamsProgress(eventoId, session) {
     { eventoId, partidaId: session.partidaId, roundNumber: session.numeroRonda }
   );
 
-  return teams.map(team => ({
-    teamId: team.timeId,
-    teamName: team.nome,
-    teamColor: team.cor,
-    scanned: Number(team.scanned || 0),
-    total: Number(team.total || 0),
-    complete: Number(team.total || 0) > 0 && Number(team.scanned || 0) >= Number(team.total || 0),
-  }));
+  // total = quantas leituras a equipe precisa para liberar o próximo ponto (metade dos participantes, para baixo)
+  return teams.map(team => {
+    const members = Number(team.total || 0);
+    const required = members > 0 ? leiturasNecessarias(members) : 0;
+    const scanned = Number(team.scanned || 0);
+    return {
+      teamId: team.timeId,
+      teamName: team.nome,
+      teamColor: team.cor,
+      scanned,
+      total: required,
+      members,
+      complete: required > 0 && scanned >= required,
+    };
+  });
 }
 
 async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeiraId, uid, now }) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
 
-  const treasureCheckpointIds = await getTreasureCheckpointIds(eventoId, brincadeiraId);
+  const treasureCheckpointIds = await getTreasureCheckpointIds(eventoId, brincadeiraId, session);
   if (!treasureCheckpointIds.length) {
     return {
       handled: true,
@@ -538,11 +620,19 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     ? await queryOne('SELECT nome FROM "time" WHERE timeId = @timeId', { timeId: turnTeamId })
     : null;
 
-  if (turnTeamId && !sameId(turnTeamId, crianca.timeId)) {
+  if (!turnTeamId) {
     return {
       handled: true,
       accepted: false,
-      error: `Agora é a vez da equipe ${turnTeam?.name || 'da vez'}`,
+      error: 'Aguarde: a equipe que começa ainda não foi definida',
+    };
+  }
+
+  if (!sameId(turnTeamId, crianca.timeId)) {
+    return {
+      handled: true,
+      accepted: false,
+      error: `Agora é a vez da equipe ${turnTeam?.nome || 'da vez'}`,
       turnTeamId,
     };
   }
@@ -553,7 +643,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     return {
       handled: true,
       accepted: false,
-      error: `Aguarde ${remainingSeconds} segundos para começar a vez da equipe ${turnTeam?.name || ''}`.trim(),
+      error: `Aguarde ${remainingSeconds} segundos para começar a vez da equipe ${turnTeam?.nome || ''}`.trim(),
       turnTeamId,
       turnAvailableAt: turnAvailableAt.toISOString(),
       remainingSeconds,
@@ -581,6 +671,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   if (!members.length) {
     return { handled: true, accepted: false, error: 'Equipe sem participantes cadastrados' };
   }
+  const required = leiturasNecessarias(members.length);
 
   const alreadyScanned = await queryOne(
     `SELECT scanId FROM cacaTesourScan
@@ -603,7 +694,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       duplicate: true,
       message: 'Esta criança já participou desta etapa',
       scanned: Number(duplicateCount?.total || 0),
-      total: members.length,
+      total: required,
     };
   }
 
@@ -643,7 +734,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
         duplicate: true,
         message: 'Esta criança já participou desta etapa',
         scanned: Number(duplicateCount?.total || 0),
-        total: members.length,
+        total: required,
       };
     }
     throw error;
@@ -658,15 +749,15 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   );
   const scanned = Number(countResult?.total || 0);
 
-  if (scanned < members.length) {
+  if (scanned < required) {
     return {
       handled: true,
       accepted: true,
       teamComplete: false,
       roundNumber: session.numeroRonda,
       scanned,
-      total: members.length,
-      message: `Participante confirmado: ${scanned}/${members.length}`,
+      total: required,
+      message: `Participante confirmado: ${scanned}/${required}`,
     };
   }
 
@@ -694,7 +785,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
 
   const ownership = await getTeamOwnershipProgress(eventoId, crianca.timeId, treasureCheckpointIds);
   if (ownership.won) {
-    await completeTeamRace(session.id, crianca.timeId, now);
+    await completeTeamRace(session.partidaId, crianca.timeId, now);
   }
 
   const raceTimes = await getTeamRaceTimes(eventoId, session);
@@ -721,7 +812,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       : now;
 
   if (nextTurnTeam && nextTurnAvailableAt) {
-    await startTeamRaceTimer(session.id, nextTurnTeam.teamId, nextTurnAvailableAt);
+    await startTeamRaceTimer(session.partidaId, nextTurnTeam.teamId, nextTurnAvailableAt);
   }
 
   const nextTargetCheckpointId = raceFinished
@@ -798,7 +889,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       duplicate: true,
       message: 'Esta etapa já foi concluída por outra equipe',
       scanned,
-      total: members.length,
+      total: required,
     };
   }
 
@@ -825,7 +916,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
     roundNumber: raceFinished ? session.numeroRonda : session.numeroRonda + 1,
     finished: raceFinished,
     scanned,
-    total: members.length,
+    total: required,
     teamId: crianca.timeId,
     teamName: team?.nome || 'Equipe',
     teamColor: team?.cor || '#00AA00',
@@ -857,7 +948,7 @@ async function refreshTreasureTargetAfterListChange(eventoId) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
 
-  const ids = await getTreasureCheckpointIds(eventoId, session.brincadeiraId);
+  const ids = await getTreasureCheckpointIds(eventoId, session.brincadeiraId, session);
   if (!ids.length) return null;
   if (session.checkpointAlvoId && ids.some(id => sameId(id, session.checkpointAlvoId))) {
     return { changed: false, targetCheckpointId: String(session.checkpointAlvoId) };
@@ -880,6 +971,11 @@ async function refreshTreasureTargetAfterListChange(eventoId) {
 }
 
 module.exports = {
+  sortearCheckpoints,
+  normalizarQuantidadeCheckpoints,
+  contarCheckpointsDisponiveis,
+  validarQuantidadeCheckpoints,
+  leiturasNecessarias,
   refreshTreasureTargetAfterListChange,
   TREASURE_GAME_TYPE,
   getGameForEvent,

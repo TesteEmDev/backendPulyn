@@ -3,7 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
-const { planRandomDistribution, DISTRIBUTION_MODES } = require('../utils/teamDistribution');
+const { planRandomDistribution, montarFormacaoDosTimes, DISTRIBUTION_MODES } = require('../utils/teamDistribution');
 const { planDefaultTeams } = require('../utils/defaultTeams');
 
 const TEAM_MANAGER_ROLES = ['admin', 'reception', 'game_master', 'master'];
@@ -164,11 +164,16 @@ router.post('/', verifyToken, async (req, res) => {
   }
 });
 
-// Atualizar time
-router.put('/:id', verifyToken, async (req, res) => {
+// Atualizar time (nome e cor). O nome pode vir como `nome` ou `name`: o painel do admin manda um e o do recreacionista, outro.
+router.put('/:id', verifyToken, requireRole(TEAM_MANAGER_ROLES), async (req, res) => {
   try {
-    const { nome, color } = req.body;
+    const nome = String(req.body?.nome ?? req.body?.name ?? '').trim();
+    const color = req.body?.color === undefined || req.body?.color === null ? null : String(req.body.color).trim();
     const empresaId = req.user.empresaId;
+
+    if (!nome) return res.status(400).json({ error: 'Informe o nome do time' });
+    if (nome.length > 100) return res.status(400).json({ error: 'O nome do time pode ter até 100 caracteres' });
+    if (color !== null && !/^#[0-9a-fA-F]{6}$/.test(color)) return res.status(400).json({ error: 'Cor inválida' });
 
     // ✅ VERIFICAR QUE PERTENCE À EMPRESA
     const time = await queryOne(
@@ -180,18 +185,18 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Time não encontrado' });
     }
 
-    if (time.empresaId !== empresaId) {
+    if (String(time.empresaId).toLowerCase() !== String(empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: time não pertence a esta empresa' });
     }
 
-    // ✅ ATUALIZAR
+    // ✅ ATUALIZAR (sem cor no pedido, a cor atual fica)
     await query(
-      'UPDATE "time" SET nome = @nome, cor = @color WHERE timeId = @id',
+      'UPDATE "time" SET nome = @nome, cor = COALESCE(@color, cor) WHERE timeId = @id',
       { nome, color, id: req.params.id }
     );
 
     console.log(`✅ Time atualizado: ${req.params.id}`);
-    res.json({ updated: true });
+    res.json({ updated: true, nome, color });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -246,6 +251,7 @@ router.post(
         return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
       }
 
+      let sorteadosIds = [];
       const result = await withTransaction(async (tx) => {
         const teams = await tx.allQuery(
           'SELECT timeId, nome FROM "time" WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY nome',
@@ -260,6 +266,7 @@ router.post(
           { eventoId: evento.eventoId, empresaId: evento.empresaId }
         );
         const assignments = planRandomDistribution({ children, teamIds: teams.map(t => t.timeId), mode });
+        sorteadosIds = assignments.map(a => a.criancaId);
 
         for (const { criancaId, timeId } of assignments) {
           await tx.query(
@@ -293,6 +300,31 @@ router.post(
 
       if (result.error) return res.status(400).json({ error: result.error });
       console.log(`🎲 Distribuição aleatória (${mode}): ${result.distributed} criança(s) no evento ${evento.eventoId}`);
+
+      // O telão mostra a formação dos times assim que o sorteio acaba. Falha aqui não desfaz o sorteio.
+      try {
+        const timesDoEvento = await allQuery(
+          'SELECT timeId, nome, cor FROM "time" WHERE eventoId = @eventoId AND empresaId = @empresaId ORDER BY nome',
+          { eventoId: evento.eventoId, empresaId: evento.empresaId }
+        );
+        const criancas = await allQuery(
+          'SELECT criancaId, nome, apelido, avatar, timeId FROM crianca WHERE eventoId = @eventoId AND empresaId = @empresaId AND timeId IS NOT NULL',
+          { eventoId: evento.eventoId, empresaId: evento.empresaId }
+        );
+        if (global.broadcastToEvent) {
+          global.broadcastToEvent(evento.eventoId, {
+            type: 'TEAMS_DRAWN',
+            payload: {
+              eventoId: evento.eventoId,
+              drawnAt: new Date().toISOString(),
+              mode,
+              teams: montarFormacaoDosTimes({ teams: timesDoEvento, children: criancas, sorteadosIds }),
+            },
+          });
+        }
+      } catch (broadcastErr) {
+        console.error('⚠️ Sorteio feito, mas o aviso ao telão falhou:', broadcastErr.message);
+      }
       return res.json(result);
     } catch (err) {
       console.error('❌ Erro ao distribuir participantes:', err);

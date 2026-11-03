@@ -57,3 +57,19 @@ test('sem times ou sem crianças não há o que distribuir; modo inválido falha
   assert.deepEqual(planRandomDistribution({ children: [], teamIds: ['A'] }), []);
   assert.throws(() => planRandomDistribution({ children: kids(1), teamIds: ['A'], mode: 'x' }));
 });
+
+test('formação dos times para o telão: membros por time, em ordem, marcando quem foi sorteado agora', () => {
+  const { montarFormacaoDosTimes } = require('../utils/teamDistribution');
+  const teams = [{ timeId: 'A', nome: 'Azul', cor: '#00F' }, { timeId: 'V', nome: 'Verde', cor: null }];
+  const children = [
+    { criancaId: '1', nome: 'Zeca Silva', apelido: 'Zeca', avatar: 'a1', timeId: 'A' },
+    { criancaId: '2', nome: 'Ana Souza', apelido: null, avatar: null, timeId: 'A' },
+    { criancaId: '3', nome: 'Bia', apelido: 'Bibi', avatar: 'a3', timeId: 'V' },
+    { criancaId: '4', nome: 'Sem Time', apelido: 'Solto', avatar: null, timeId: null },
+  ];
+  const formacao = montarFormacaoDosTimes({ teams, children, sorteadosIds: ['2', 3] });
+  assert.deepEqual(formacao.map((t) => [t.id, t.name, t.color]), [['A', 'Azul', '#00F'], ['V', 'Verde', null]]);
+  assert.deepEqual(formacao[0].members.map((m) => [m.nickname, m.novo]), [['Ana Souza', true], ['Zeca', false]]);
+  assert.deepEqual(formacao[1].members.map((m) => [m.nickname, m.novo, m.avatar]), [['Bibi', true, 'a3']]);
+  assert.equal(formacao.flatMap((t) => t.members).some((m) => m.nickname === 'Solto'), false);
+});
