@@ -109,6 +109,7 @@ const {
   TREASURE_GAME_TYPE,
   getGameForEvent,
   startTreasureGame,
+  validarQuantidadeCheckpoints,
   stopTreasureGame,
   awardTreasureBonusOnStop,
 } = require('./utils/treasure');
@@ -700,6 +701,10 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       ? (selectedGame.tipo === 'individual' ? 'individual' : 'team')
       : null;
     let treasureStart = null;
+    // Caça ao Tesouro: quantos checkpoints usar (vazio = todos). Confere antes de mexer em qualquer jogo.
+    const treasureQuantidade = gameType === TREASURE_GAME_TYPE
+      ? await validarQuantidadeCheckpoints(eventoId, selectedGame.brincadeiraId, req.body.quantidadeCheckpoints)
+      : null;
     let monsterStart = null;
     let zoneConquestStart = null;
     if (gameType !== bombaJogo.BOMBA_GAME_TYPE) await bombaJogo.pararJogo(eventoId);
@@ -707,7 +712,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
-      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId);
+      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId, { quantidade: treasureQuantidade });
       await stopMonsterGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
@@ -1011,7 +1016,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
   } catch (err) {
     console.error('❌ [INICIAR-JOGO] Erro ao iniciar jogo:', err.message);
     console.error('   Stack:', err.stack);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 

@@ -175,6 +175,34 @@ function leiturasNecessarias(participantes) {
   return Math.max(1, Math.floor(Number(participantes) / 2) || 0);
 }
 
+// Escolhe `quantidade` checkpoints ao acaso entre os `ids` (sem repetir).
+function sortearCheckpoints(ids, quantidade, aleatorio = Math.random) {
+  const embaralhado = [...ids];
+  for (let i = embaralhado.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(aleatorio() * (i + 1));
+    [embaralhado[i], embaralhado[j]] = [embaralhado[j], embaralhado[i]];
+  }
+  return embaralhado.slice(0, quantidade);
+}
+
+// O alvo nunca repete em seguida, então o jogo precisa de pelo menos dois checkpoints (mesmo mínimo de gameRequirements).
+const MIN_CHECKPOINTS_USADOS = 2;
+
+// Quantidade de checkpoints que o recreacionista escolheu usar: vazio = todos; senão um inteiro de 2 até os disponíveis.
+// Devolve o número (ou null para "todos") ou lança um erro 400 com a mensagem para a tela.
+function normalizarQuantidadeCheckpoints(quantidade, disponiveis) {
+  if (quantidade === undefined || quantidade === null || String(quantidade).trim() === '') return null;
+  const n = Number(quantidade);
+  if (!Number.isInteger(n) || n < MIN_CHECKPOINTS_USADOS || n > disponiveis) {
+    const erro = new Error(disponiveis < MIN_CHECKPOINTS_USADOS
+      ? `O Caça ao Tesouro precisa de pelo menos ${MIN_CHECKPOINTS_USADOS} checkpoints online, mas há ${disponiveis}.`
+      : `Escolha de ${MIN_CHECKPOINTS_USADOS} a ${disponiveis} checkpoints para o Caça ao Tesouro.`);
+    erro.statusCode = 400;
+    throw erro;
+  }
+  return n;
+}
+
 function chooseRandom(values) {
   if (!values.length) return null;
   return values[Math.floor(Math.random() * values.length)];
@@ -204,7 +232,17 @@ async function stopTreasureGame(eventoId) {
   );
 }
 
-async function getTreasureCheckpointIds(eventoId, brincadeiraId) {
+// Checkpoints do jogo que estão online. Com `session` de uma partida que usa só parte deles (o recreacionista escolheu a
+// quantidade), vale só o subconjunto sorteado para ela.
+async function getTreasureCheckpointIds(eventoId, brincadeiraId, session = null) {
+  const todos = await getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId);
+  const usados = parseJson(session?.checkpointsUsadosIds, []).map(id => String(id).trim().toLowerCase());
+  if (!usados.length) return todos;
+  const usadosSet = new Set(usados);
+  return todos.filter(id => usadosSet.has(String(id).trim().toLowerCase()));
+}
+
+async function getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId) {
   const checkpoints = await getEventCheckpoints(eventoId);
   if (!brincadeiraId) return checkpoints.map(checkpoint => String(checkpoint.checkpointId));
 
@@ -280,17 +318,31 @@ async function getTeamOwnershipProgress(eventoId, teamId, allowedCheckpointIds =
   };
 }
 
-async function startTreasureGame(eventoId, brincadeiraId) {
+// Quantos checkpoints o jogo pode usar agora (da lista do jogo, online): é o máximo da escolha do recreacionista.
+async function contarCheckpointsDisponiveis(eventoId, brincadeiraId) {
+  return (await getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId)).length;
+}
+
+// Confere a quantidade ANTES de qualquer alteração do jogo (a rota de início chama isto primeiro).
+async function validarQuantidadeCheckpoints(eventoId, brincadeiraId, quantidade) {
+  return normalizarQuantidadeCheckpoints(quantidade, await contarCheckpointsDisponiveis(eventoId, brincadeiraId));
+}
+
+async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null } = {}) {
   const game = await getGameForEvent(eventoId, brincadeiraId);
   if (!game || game.tipo !== TREASURE_GAME_TYPE) {
     throw new Error('Jogo Caça ao Tesouro não encontrado para este evento');
   }
 
   // O primeiro alvo deve pertencer à lista configurada na brincadeira e estar online.
-  const ids = await getTreasureCheckpointIds(eventoId, brincadeiraId);
-  if (!ids.length) {
+  const todosOsIds = await getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId);
+  if (!todosOsIds.length) {
     throw new Error('O Caça ao Tesouro precisa de pelo menos um checkpoint configurado e online');
   }
+  // O recreacionista pode escolher usar só parte deles: sorteia quais e guarda na partida
+  const quantidadeUsada = normalizarQuantidadeCheckpoints(quantidade, todosOsIds.length);
+  const usarSubconjunto = quantidadeUsada !== null && quantidadeUsada < todosOsIds.length;
+  const ids = usarSubconjunto ? sortearCheckpoints(todosOsIds, quantidadeUsada) : todosOsIds;
 
   const participatingTeams = await getParticipatingTeams(eventoId);
   if (participatingTeams.length < 2) {
@@ -310,10 +362,10 @@ async function startTreasureGame(eventoId, brincadeiraId) {
     `INSERT INTO cacaTesourPartida
       (partidaId, eventoId, brincadeiraId, status, numeroRonda, timeInicialId,
        timeVezId, vezDisponvelEm, checkpointAlvoId, checkpointsCompletadosIds,
-       iniciadoEm, rondaIniciadaEm)
+       checkpointsUsadosIds, iniciadoEm, rondaIniciadaEm)
      VALUES (@id, @eventoId, @brincadeiraId, 'active', 1, @startingTeamId,
        @turnTeamId, @turnAvailableAt, @targetCheckpointId, @completedCheckpointIds,
-       @startedAt, @roundStartedAt)`,
+       @usedCheckpointIds, @startedAt, @roundStartedAt)`,
     {
       id: partidaId,
       eventoId,
@@ -323,6 +375,7 @@ async function startTreasureGame(eventoId, brincadeiraId) {
       turnAvailableAt: initialTurnAvailableAt,
       targetCheckpointId,
       completedCheckpointIds: JSON.stringify([]),
+      usedCheckpointIds: usarSubconjunto ? JSON.stringify(ids) : null,
       startedAt: now,
       roundStartedAt: initialTurnAvailableAt,
     }
@@ -360,6 +413,8 @@ async function startTreasureGame(eventoId, brincadeiraId) {
     initialWait: true,
     targetCheckpointId,
     completedCheckpointIds: [],
+    totalCheckpoints: ids.length,
+    usedCheckpointIds: ids.map(String),
     status: 'active',
   };
 }
@@ -416,7 +471,7 @@ async function getTreasureEventStatus(eventoId) {
     };
   }
 
-  const configuredCheckpointIds = await getTreasureCheckpointIds(eventoId, session.brincadeiraId);
+  const configuredCheckpointIds = await getTreasureCheckpointIds(eventoId, session.brincadeiraId, session);
   const configuredCheckpointSet = new Set(configuredCheckpointIds.map(id => String(id).trim().toLowerCase()));
   const checkpoints = (await getEventCheckpoints(eventoId)).filter(checkpoint => (
     configuredCheckpointSet.size === 0
@@ -515,7 +570,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   const session = await getActiveSession(eventoId);
   if (!session) return null;
 
-  const treasureCheckpointIds = await getTreasureCheckpointIds(eventoId, brincadeiraId);
+  const treasureCheckpointIds = await getTreasureCheckpointIds(eventoId, brincadeiraId, session);
   if (!treasureCheckpointIds.length) {
     return {
       handled: true,
@@ -879,7 +934,7 @@ async function refreshTreasureTargetAfterListChange(eventoId) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
 
-  const ids = await getTreasureCheckpointIds(eventoId, session.brincadeiraId);
+  const ids = await getTreasureCheckpointIds(eventoId, session.brincadeiraId, session);
   if (!ids.length) return null;
   if (session.checkpointAlvoId && ids.some(id => sameId(id, session.checkpointAlvoId))) {
     return { changed: false, targetCheckpointId: String(session.checkpointAlvoId) };
@@ -902,6 +957,10 @@ async function refreshTreasureTargetAfterListChange(eventoId) {
 }
 
 module.exports = {
+  sortearCheckpoints,
+  normalizarQuantidadeCheckpoints,
+  contarCheckpointsDisponiveis,
+  validarQuantidadeCheckpoints,
   leiturasNecessarias,
   refreshTreasureTargetAfterListChange,
   TREASURE_GAME_TYPE,

@@ -94,6 +94,35 @@ async function main() {
       assert.ok(progresso.every((p) => p.total === treasure.leiturasNecessarias(p.members)), 'o progresso mostra o total de leituras necessárias');
       console.log(`  ✔ progresso por equipe: ${progresso.map((p) => `${p.teamName} ${p.scanned}/${p.total} (de ${p.members})`).join(' | ')}`);
 
+      // 4) o recreacionista escolhe quantos checkpoints usar: a partida usa só esse tanto, sorteados entre os do jogo
+      await assert.rejects(() => treasure.validarQuantidadeCheckpoints(evento.eventoId, brincadeiraId, 1), (e) => e.statusCode === 400);
+      await assert.rejects(() => treasure.validarQuantidadeCheckpoints(evento.eventoId, brincadeiraId, 99), (e) => e.statusCode === 400);
+      assert.equal(await treasure.validarQuantidadeCheckpoints(evento.eventoId, brincadeiraId, ''), null);
+      assert.equal(await treasure.validarQuantidadeCheckpoints(evento.eventoId, brincadeiraId, '3'), 3);
+      const disponiveis = await treasure.contarCheckpointsDisponiveis(evento.eventoId, brincadeiraId);
+      assert.equal(disponiveis, cps.length);
+
+      const parcial = await treasure.startTreasureGame(evento.eventoId, brincadeiraId, { quantidade: 2 });
+      assert.equal(parcial.usedCheckpointIds.length, 2);
+      assert.ok(parcial.usedCheckpointIds.includes(String(parcial.targetCheckpointId)), 'o alvo sai dos checkpoints usados');
+      const statusParcial = await treasure.getTreasureEventStatus(evento.eventoId);
+      assert.equal(statusParcial.totalCheckpoints, 2);
+      assert.deepEqual(statusParcial.checkpointOwnership.map((c) => c.checkpointId).sort(), [...parcial.usedCheckpointIds].sort());
+      const fora = cps.map((c) => String(c.checkpointId)).find((id) => !parcial.usedCheckpointIds.includes(id));
+      const membrosVez = await allQuery('SELECT criancaId, timeId FROM crianca WHERE eventoId = @e AND timeId = @t ORDER BY criancaId', { e: evento.eventoId, t: statusParcial.turnTeamId });
+      const lerFora = await treasure.processTreasureScan({
+        eventoId: evento.eventoId, checkpointId: fora, crianca: membrosVez[0], brincadeiraId, uid: 'UIDFORA', now: new Date(Date.now() + 15000),
+      });
+      assert.equal(lerFora.accepted, false);
+      assert.match(lerFora.error, /não é o alvo/);
+      console.log(`  ✔ quantidade escolhida: de ${disponiveis} checkpoints a partida usa 2 (${parcial.usedCheckpointIds.join(', ')}); o telão/painel contam 2 e um checkpoint de fora não vale`);
+
+      // sem quantidade: todos, como antes
+      const todos = await treasure.startTreasureGame(evento.eventoId, brincadeiraId);
+      assert.equal((await treasure.getTreasureEventStatus(evento.eventoId)).totalCheckpoints, disponiveis);
+      assert.equal(todos.usedCheckpointIds.length, disponiveis);
+      console.log('  ✔ sem escolher a quantidade: usa todos, como antes');
+
       throw new Desfazer();
     });
   } catch (e) {
