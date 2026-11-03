@@ -1,25 +1,42 @@
 // utils/middleware.js - Middlewares compartilhados
 const jwt = require('jsonwebtoken');
+const { queryOne } = require('../database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 
-function verifyToken(req, res, next) {
+async function verifyToken(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
-  
+
   if (!token) {
     console.log('❌ Token não fornecido');
     return res.status(401).json({ error: 'Token não fornecido' });
   }
 
+  let decoded;
   try {
     // Verificar JWT
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-    next();
+    decoded = jwt.verify(token, JWT_SECRET);
   } catch (err) {
     console.log('❌ Token inválido:', err.message);
-    res.status(401).json({ error: 'Token inválido' });
+    return res.status(401).json({ error: 'Token inválido' });
   }
+
+  // Token com versão (claim `tv`): a conta precisa existir, não ter sido excluída e a versão precisa ser a atual.
+  // Trocar a senha ou excluir a conta derruba as sessões abertas.
+  if (decoded.tv !== undefined) {
+    try {
+      const conta = await queryOne('SELECT status, tokenVersao FROM login WHERE loginId = @id', { id: decoded.id });
+      if (!conta || conta.status === 'excluida' || Number(conta.tokenVersao) !== Number(decoded.tv)) {
+        return res.status(401).json({ error: 'Sessão encerrada. Entre de novo.', codigo: 'SESSAO_ENCERRADA' });
+      }
+    } catch (err) {
+      console.error('❌ Erro ao conferir sessão:', err.message);
+      return res.status(500).json({ error: 'Não foi possível conferir a sessão' });
+    }
+  }
+
+  req.user = decoded;
+  next();
 }
 
 // Helper para verificar se o usuário é master
