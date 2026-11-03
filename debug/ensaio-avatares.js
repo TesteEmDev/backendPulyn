@@ -9,6 +9,8 @@ const withTransaction = database.withTransaction;
 // As rotas abrem a própria transação; no ensaio elas entram na transação externa (a que será desfeita).
 database.withTransaction = (trabalho) => trabalho(database);
 const { ADVENTURER_AVATAR_IDS } = require('../utils/avatar');
+const { CORES_PARTICIPANTE } = require('../utils/corParticipante');
+const { ensurePerfilCriancaSchema } = require('../migrations/perfilCrianca');
 const kiosk = require('../routes/kiosk');
 const criancas = require('../routes/criancas');
 
@@ -30,14 +32,15 @@ async function main() {
   const usuarioKiosk = { id: 'k', role: 'kiosk', empresaId: evento.empresaId };
   const admin = { id: 'a', role: 'admin', empresaId: evento.empresaId };
   let n = 0;
-  const cadastrar = (avatar) => chamar(kiosk, 'post', '/participants', {
+  const cadastrar = (avatar, cor) => chamar(kiosk, 'post', '/participants', {
     usuario: usuarioKiosk,
-    body: { eventId: evento.eventoId, nome: `Ensaio ${++n}`, idade: 8, braceletCode: `0ABC${String(n).padStart(6, '0')}`, ...(avatar ? { avatar } : {}) },
+    body: { eventId: evento.eventoId, nome: `Ensaio ${++n}`, idade: 8, braceletCode: `0ABC${String(n).padStart(6, '0')}`, ...(avatar ? { avatar } : {}), ...(cor ? { cor } : {}) },
   });
   const emUso = async () => new Set((await allQuery('SELECT avatar FROM crianca WHERE eventoId = @e AND avatar IS NOT NULL', { e: evento.eventoId })).map((r) => r.avatar));
 
   try {
     await withTransaction(async () => {
+      await ensurePerfilCriancaSchema();   // a coluna crianca.cor (a migração roda no startup; aqui dentro da transação desfeita)
       // 1) sem avatar: entra um LIVRE (antes todo mundo ficava com o padrão)
       const antes = await emUso();
       const livresAntes = ADVENTURER_AVATAR_IDS.filter((id) => !antes.has(id));
@@ -89,6 +92,30 @@ async function main() {
       });
       assert.equal(troca200.status, 200, JSON.stringify(troca200.corpo));
       console.log('  ✔ recepção trocando avatar: para um em uso 409; para um livre vale');
+
+      // 6b) cor do participante: escolhida na hora do cadastro, sem repetir no evento
+      const coresAntes = new Set((await allQuery('SELECT cor FROM crianca WHERE eventoId = @e AND cor IS NOT NULL', { e: evento.eventoId })).map((r) => String(r.cor).toUpperCase()));
+      const corLivre = CORES_PARTICIPANTE.find((c) => !coresAntes.has(c));
+      const comCor = await cadastrar(undefined, corLivre.toLowerCase());
+      assert.equal(comCor.status, 201, JSON.stringify(comCor.corpo));
+      assert.equal(comCor.corpo.color, corLivre, 'usa a cor escolhida (em maiúsculas)');
+      const gravada = await queryOne('SELECT cor FROM crianca WHERE criancaId = @id', { id: comCor.corpo.id });
+      assert.equal(gravada.cor, corLivre);
+      const corRepetida = await cadastrar(undefined, corLivre);
+      assert.equal(corRepetida.status, 409);
+      assert.match(corRepetida.corpo.error, /cor/i);
+      assert.ok(!corRepetida.corpo.coresLivres.includes(corLivre));
+      assert.equal((await cadastrar(undefined, '#123456')).status, 400);
+      const semCor = await cadastrar();
+      assert.equal(semCor.status, 201);
+      assert.ok(CORES_PARTICIPANTE.includes(semCor.corpo.color) && semCor.corpo.color !== corLivre, 'sem escolher, entra uma cor livre');
+      const listaCores = await chamar(kiosk, 'get', '/events/:eventId/avatars-in-use', { usuario: usuarioKiosk, params: { eventId: evento.eventoId } });
+      assert.ok(listaCores.corpo.cores.includes(corLivre) && listaCores.corpo.cores.includes(semCor.corpo.color));
+      const trocaCor = await chamar(criancas, 'put', '/evento/:eventoId/crianca/:criancaId', {
+        usuario: admin, params: { eventoId: evento.eventoId, criancaId: semCor.corpo.id }, body: { cor: corLivre },
+      });
+      assert.equal(trocaCor.status, 409, JSON.stringify(trocaCor.corpo));
+      console.log('  ✔ cor do participante: escolhida no cadastro (kiosk), gravada, sem repetir no evento (409), inválida 400, sem escolha vem uma livre, troca para cor em uso 409');
 
       // 7) todos em uso: a repetição passa a ser permitida (são só 20 avatares)
       let ultimo;

@@ -66,6 +66,13 @@ async function ensurePerfilCriancaSchema() {
     WHERE perfilCriancaId IS NULL
       AND EXISTS (SELECT 1 FROM perfilCrianca p WHERE p.perfilCriancaId = crianca.criancaId)
   `);
+
+  // Cor que o participante escolhe no cadastro (sem ela, a cor continua saindo do id, como antes)
+  if (isPostgres) {
+    await query('ALTER TABLE crianca ADD COLUMN IF NOT EXISTS cor varchar(20)');
+  } else {
+    await query("IF COL_LENGTH('crianca', 'cor') IS NULL ALTER TABLE crianca ADD cor NVARCHAR(20) NULL");
+  }
 }
 
 module.exports = { ensurePerfilCriancaSchema };

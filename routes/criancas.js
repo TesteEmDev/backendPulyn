@@ -6,6 +6,7 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { isAdventurerAvatarId } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
+const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
 const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil, copiarVinculosParaParticipacao } = require('../utils/perfilCrianca');
 
@@ -81,7 +82,10 @@ router.get('/evento/:eventoId/avatares-em-uso', async (req, res) => {
     if (!isMaster(req) && String(req.user.empresaId).toLowerCase() !== String(evento.empresaId).toLowerCase()) {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
     }
-    res.json({ avatares: [...new Set(await avataresEmUso({ allQuery }, evento.eventoId))] });
+    res.json({
+      avatares: [...new Set(await avataresEmUso({ allQuery }, evento.eventoId))],
+      cores: [...new Set(await coresEmUso({ allQuery }, evento.eventoId))],
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -99,6 +103,11 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
 
     if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
+    }
+    // Cor escolhida (opcional): sem ela, entra uma livre
+    const corPedida = req.body.cor ? normalizarCor(req.body.cor) : null;
+    if (req.body.cor && !corPedida) {
+      return res.status(400).json({ error: 'Cor inválida' });
     }
 
     if (!perfilCriancaId && (!nome || !String(nome).trim())) {
@@ -178,6 +187,12 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     }
     const avatarValue = escolhaAvatar.avatar;
 
+    const escolhaCor = escolherCor({ pedido: corPedida, emUso: await coresEmUso({ allQuery }, eventoId) });
+    if (escolhaCor.conflito) {
+      return res.status(409).json({ error: MENSAGEM_COR_EM_USO, coresLivres: escolhaCor.livres });
+    }
+    const corValue = escolhaCor.cor;
+
     if (perfilDaCrianca) {
       await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue });
     } else {
@@ -186,9 +201,9 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
 
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
     await query(
-      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, perfilCriancaId) 
-       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @braceletCode, @perfilId)`,
-      { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode, perfilId }
+      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, cor, codigoPulseira, perfilCriancaId) 
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @cor, @braceletCode, @perfilId)`,
+      { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), avatar: avatarValue, cor: corValue, braceletCode: normalizedBraceletCode, perfilId }
     );
     await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: id, empresaId });
     
@@ -206,7 +221,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -264,6 +279,17 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       : (isAdventurerAvatarId(avatar) ? avatar : null);
     if (nextAvatar === null) {
       return res.status(400).json({ error: 'Avatar inválido' });
+    }
+    // Cor (opcional): trocar para uma que outro participante do evento já usa não vale
+    let nextCor = crianca.cor || null;
+    if (req.body.cor !== undefined && req.body.cor !== null && req.body.cor !== '') {
+      const corPedida = normalizarCor(req.body.cor);
+      if (!corPedida) return res.status(400).json({ error: 'Cor inválida' });
+      if (corPedida !== String(crianca.cor || '').toUpperCase()) {
+        const escolhaCor = escolherCor({ pedido: corPedida, emUso: await coresEmUso({ allQuery }, eventoId, criancaId) });
+        if (escolhaCor.conflito) return res.status(409).json({ error: MENSAGEM_COR_EM_USO, coresLivres: escolhaCor.livres });
+      }
+      nextCor = corPedida;
     }
     // Trocar para um avatar que outro participante do evento já usa não vale
     if (nextAvatar !== crianca.avatar) {
@@ -339,6 +365,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
         apelido = @apelido, 
         idade = @age, 
         avatar = @avatar, 
+        cor = @cor,
         codigoPulseira = @braceletCode,
         timeId = @timeId
        WHERE criancaId = @criancaId 
@@ -349,6 +376,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
         apelido: apelido || crianca.apelido, 
         age: age ? parseInt(age) : crianca.idade, 
         avatar: nextAvatar,
+        cor: nextCor,
         braceletCode: normalizedBraceletCode,
         criancaId: criancaId,
         eventoId: eventoId,
