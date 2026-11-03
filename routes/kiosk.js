@@ -3,7 +3,8 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { getAvatarForCreate } = require('../utils/avatar');
+const { isAdventurerAvatarId } = require('../utils/avatar');
+const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const {
   criarPerfil, buscarPerfil, registrarVolta, buscarPerfisParaKiosk, idadeValida, copiarVinculosParaParticipacao,
 } = require('../utils/perfilCrianca');
@@ -152,6 +153,22 @@ router.get('/profiles', async (req, res) => {
   }
 });
 
+// Avatares que os participantes do evento já usam (o kiosk os mostra indisponíveis e escolhe um livre de início).
+router.get('/events/:eventId/avatars-in-use', async (req, res) => {
+  try {
+    const banco = require('../database');
+    const event = await banco.queryOne(
+      'SELECT eventoId FROM evento WHERE eventoId = @eventId AND empresaId = @empresaId',
+      { eventId: req.params.eventId, empresaId: req.user.empresaId }
+    );
+    if (!event) return res.status(404).json({ error: 'Evento não encontrado' });
+    res.json({ avatares: [...new Set(await avataresEmUso(banco, event.eventoId))] });
+  } catch (error) {
+    console.error('❌ Kiosk: erro ao listar avatares em uso:', error.message);
+    res.status(500).json({ error: 'Não foi possível carregar os avatares' });
+  }
+});
+
 // Cadastro atômico: cria (se necessário) e vincula a pulseira junto com a criança.
 // Criança nova: cria o cadastro permanente (perfilCrianca) e a participação no evento.
 // Criança que volta (perfilCriancaId): reaproveita o cadastro e só cria a participação no evento.
@@ -161,9 +178,10 @@ router.post('/participants', async (req, res) => {
     const idadeInformada = req.body?.idade ?? req.body?.age;
     const codigo = normalizeUid(braceletCode);
     let cleanName = String(nome || '').trim();
-    const avatarValue = getAvatarForCreate(avatar);
+    // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
+    const avatarPedido = avatar ? String(avatar) : null;
 
-    if (!avatarValue) {
+    if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
     if (!perfilCriancaId && (idadeValida(idadeInformada) === null)) {
@@ -228,6 +246,19 @@ router.post('/participants', async (req, res) => {
       if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.criancaId) {
         throw httpError('Esta pulseira não está disponível para vínculo', 409);
       }
+
+      // Avatar sem repetir no evento: quem volta tenta manter o do cadastro (se outro já o usa, entra um livre)
+      const escolhaAvatar = escolherAvatar({
+        pedido: avatarPedido,
+        preferido: perfilExistente?.avatar,
+        emUso: await avataresEmUso(tx, event.eventoId),
+      });
+      if (escolhaAvatar.conflito) {
+        const erro = httpError(MENSAGEM_AVATAR_EM_USO, 409);
+        erro.avataresLivres = escolhaAvatar.livres;
+        throw erro;
+      }
+      const avatarValue = escolhaAvatar.avatar;
 
       // Quem volta mantém o apelido, a idade e o avatar do cadastro, a menos que tenha escolhido outros agora.
       const apelidoFinal = String(apelido || '').trim() || perfilExistente?.apelido || cleanName.split(/\s+/)[0];
@@ -299,7 +330,7 @@ router.post('/participants', async (req, res) => {
 
     res.status(201).json(participant);
   } catch (error) {
-    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message });
+    if (error.statusCode) return res.status(error.statusCode).json({ error: error.message, ...(error.avataresLivres ? { avataresLivres: error.avataresLivres } : {}) });
     if (isDuplicateKeyError(error)) return res.status(409).json({ error: 'Esta pulseira já foi cadastrada. Aproxime-a novamente para atualizar o estado.' });
     console.error('❌ Kiosk: erro ao cadastrar participante:', error.message);
     res.status(500).json({ error: 'Não foi possível concluir o cadastro' });

@@ -4,7 +4,8 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { getAvatarForCreate, isAdventurerAvatarId } = require('../utils/avatar');
+const { isAdventurerAvatarId } = require('../utils/avatar');
+const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
 const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil, copiarVinculosParaParticipacao } = require('../utils/perfilCrianca');
 
@@ -72,16 +73,31 @@ router.get('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   }
 });
 
+// Avatares que os participantes do evento já usam (a tela de cadastro os mostra indisponíveis)
+router.get('/evento/:eventoId/avatares-em-uso', async (req, res) => {
+  try {
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId', { eventoId: req.params.eventoId });
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && String(req.user.empresaId).toLowerCase() !== String(evento.empresaId).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+    res.json({ avatares: [...new Set(await avataresEmUso({ allQuery }, evento.eventoId))] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Criar criança
 router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
     const { nome, apelido, age, avatar, braceletCode, timeId, perfilCriancaId } = req.body;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
-    const avatarValue = getAvatarForCreate(avatar);
+    // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
+    const avatarPedido = avatar ? String(avatar) : null;
     const { eventoId } = req.params;
     const id = uuidv4();
 
-    if (!avatarValue) {
+    if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
 
@@ -137,9 +153,11 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     // Cadastro permanente: criança que volta reaproveita o perfil; criança nova ganha um perfil.
     let nomeFinal = nome;
     let perfilId = null;
+    let perfilDaCrianca = null;
     if (perfilCriancaId) {
       const perfil = await buscarPerfil(perfilCriancaId, empresaId);
       if (!perfil) return res.status(404).json({ error: 'Cadastro da criança não encontrado' });
+      perfilDaCrianca = perfil;
       const jaNoEvento = await queryOne(
         'SELECT criancaId FROM crianca WHERE perfilCriancaId = @perfilCriancaId AND eventoId = @eventoId',
         { perfilCriancaId, eventoId }
@@ -147,6 +165,20 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       if (jaNoEvento) return res.status(409).json({ error: 'Esta criança já está cadastrada neste evento' });
       nomeFinal = perfil.nome;
       perfilId = perfil.perfilCriancaId;
+    }
+
+    // Avatar sem repetir no evento: quem volta tenta manter o do cadastro (se outro já o usa, entra um livre)
+    const escolhaAvatar = escolherAvatar({
+      pedido: avatarPedido,
+      preferido: perfilDaCrianca?.avatar,
+      emUso: await avataresEmUso({ allQuery }, eventoId),
+    });
+    if (escolhaAvatar.conflito) {
+      return res.status(409).json({ error: MENSAGEM_AVATAR_EM_USO, avataresLivres: escolhaAvatar.livres });
+    }
+    const avatarValue = escolhaAvatar.avatar;
+
+    if (perfilDaCrianca) {
       await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue });
     } else {
       perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue });
@@ -232,6 +264,11 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       : (isAdventurerAvatarId(avatar) ? avatar : null);
     if (nextAvatar === null) {
       return res.status(400).json({ error: 'Avatar inválido' });
+    }
+    // Trocar para um avatar que outro participante do evento já usa não vale
+    if (nextAvatar !== crianca.avatar) {
+      const escolha = escolherAvatar({ pedido: nextAvatar, emUso: await avataresEmUso({ allQuery }, eventoId, criancaId) });
+      if (escolha.conflito) return res.status(409).json({ error: MENSAGEM_AVATAR_EM_USO, avataresLivres: escolha.livres });
     }
 
     const nextTimeId = timeId === undefined ? crianca.timeId : (timeId || null);
