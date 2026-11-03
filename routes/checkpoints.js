@@ -129,6 +129,19 @@ router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (r
 // Resumo dos pontoVerificacao de jogo de TODOS os evento da empresa: quantos estão
 // cadastrados e quantos online, por evento. Os pontoVerificacao de recepção ficam de fora.
 // "Indisponíveis" = cadastrados - online (offline ou sem status).
+// Endereço deste servidor na rede local, para o QR code de instalação: o admin costuma abrir o sistema por "localhost",
+// que o checkpoint não alcança. Devolve o primeiro IPv4 não interno da máquina com a porta em que o servidor escuta.
+router.get('/instalacao', verifyToken, (req, res) => {
+  const os = require('os');
+  const ips = Object.values(os.networkInterfaces()).flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal)
+    .map((i) => i.address);
+  const porta = req.socket.localPort;
+  const protocolo = req.socket.encrypted ? 'https' : 'http';
+  const padrao = (protocolo === 'https' && porta === 443) || (protocolo === 'http' && porta === 80);
+  res.json({ ips, servidor: ips[0] ? `${protocolo}://${ips[0]}${padrao ? '' : `:${porta}`}` : null });
+});
+
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
     const rows = await allQuery(`
