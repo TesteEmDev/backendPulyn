@@ -502,18 +502,19 @@ router.patch('/perfil', verifyToken, async (req, res) => {
     );
     if (!conta || conta.status !== 'active') return res.status(401).json({ error: 'Sessão inválida. Entre de novo.' });
     if (conta.perfil !== 'family') return res.status(403).json({ error: 'Os dados desta conta são alterados pelo administrador do buffet' });
-    // Só quem confirmou o e-mail altera o perfil.
-    if (!conta.emailConfirmadoEm) {
-      return res.status(403).json({ error: 'Confirme seu e-mail para alterar o perfil', codigo: 'EMAIL_NAO_CONFIRMADO' });
-    }
-
     const nomeNovo = String(nome ?? '').trim();
     if (nomeNovo.length < 2 || nomeNovo.length > 120) return res.status(400).json({ error: 'O nome precisa ter entre 2 e 120 caracteres' });
 
     const emailNovo = String(email ?? '').trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(emailNovo) || emailNovo.length > 255) return res.status(400).json({ error: 'Email inválido' });
 
-    if (emailNovo !== String(conta.email).toLowerCase()) {
+    // Trocar o e-mail (canal de recuperação de senha) exige o e-mail atual confirmado e a senha atual.
+    // Nome e telefone podem ser alterados sem confirmação.
+    const mudouEmail = emailNovo !== String(conta.email).toLowerCase();
+    if (mudouEmail) {
+      if (!conta.emailConfirmadoEm) {
+        return res.status(403).json({ error: 'Confirme seu e-mail para poder alterar o e-mail', codigo: 'EMAIL_NAO_CONFIRMADO' });
+      }
       if (!senhaAtual || !verificarSenha(senhaAtual, conta.senha)) {
         return res.status(403).json({ error: 'Para trocar o e-mail, confirme a senha atual' });
       }
@@ -531,9 +532,12 @@ router.patch('/perfil', verifyToken, async (req, res) => {
       if (!/^\d{10,11}$/.test(telefoneNovo)) return res.status(400).json({ error: 'Informe um telefone válido, com DDD' });
     }
 
+    // O e-mail novo ainda não foi confirmado: a confirmação é refeita para ele.
     await query(
-      'UPDATE login SET nomeFamilia = @nome, email = @email, telefone = COALESCE(@telefone, telefone) WHERE loginId = @id',
-      { nome: nomeNovo, email: emailNovo, telefone: telefoneNovo ?? null, id: conta.loginId }
+      `UPDATE login SET nomeFamilia = @nome, email = @email, telefone = COALESCE(@telefone, telefone),
+              emailConfirmadoEm = CASE WHEN @mudouEmail THEN NULL ELSE emailConfirmadoEm END
+       WHERE loginId = @id`,
+      { nome: nomeNovo, email: emailNovo, telefone: telefoneNovo ?? null, mudouEmail, id: conta.loginId }
     );
     res.json({ success: true, user: { id: conta.loginId, nome: nomeNovo, name: nomeNovo, email: emailNovo } });
   } catch (err) {
