@@ -21,9 +21,16 @@ const {
   atrasoTentativaMs,
   ordenarTabelas,
   ehErroDeConexao,
+  colunaDeEmpresa,
+  podeEnviarDaEmpresa,
+  aspas,
 } = require('./sincronizacaoSql');
 
 const TABELAS_DO_MECANISMO = new Set(['sincronizacaoFila', 'sincronizacaoEstado']);
+// Até onde já se puxou da nuvem (filaId da fila da nuvem), guardado no banco local.
+const CURSOR_PUXADA = 'puxarCursor';
+// Data de criação da última alteração puxada: a checagem de retenção compara com ela.
+const CURSOR_PUXADA_EM = 'puxarCursorEm';
 
 // Mensagem legível: erros de rede do Node vêm como AggregateError, sem texto próprio.
 function descreverErro(erro) {
@@ -39,10 +46,21 @@ function criarSincronizador({
   lote = 500,
   intervaloMs = 15000,
   retencaoDias = 7,
+  empresaId = null,
+  margemNuvemSegundos = 60,
+  recarga = false,
   log = console,
   agora = () => new Date(),
 } = {}) {
   if (!local || !nuvem) throw new Error('criarSincronizador precisa de local e nuvem');
+
+  // Com empresaId, só sobe o que é desta empresa. Tabela sem vínculo com empresa é avisada uma vez e fica de fora.
+  const tabelasSemEmpresaAvisadas = new Set();
+  const avisarSemEmpresa = (tabela) => {
+    if (tabelasSemEmpresaAvisadas.has(tabela)) return;
+    tabelasSemEmpresaAvisadas.add(tabela);
+    log.warn(`[sincronização] ${tabela} não tem ligação com a empresa; não sobe enquanto SYNC_EMPRESA_ID estiver definido.`);
+  };
 
   let esquemaCache = null;
   let esquemaEm = 0;
@@ -56,6 +74,7 @@ function criarSincronizador({
     ultimoErro: null,
     ultimoErroEm: null,
     enviadasDesdeAInicializacao: 0,
+    recebidasDesdeAInicializacao: 0,
     tabelasComProblema: {},
   };
 
@@ -161,6 +180,8 @@ function criarSincronizador({
     const cliente = await nuvem.connect();
     try {
       await cliente.query('BEGIN');
+      // O que o envio grava não volta para a fila da nuvem: senão a própria empresa o puxaria de volta.
+      await cliente.query("SELECT set_config('pulyn.sync_ignorar', 'on', true)");
       await trabalho(cliente);
       await cliente.query('COMMIT');
     } catch (erro) {
@@ -201,6 +222,10 @@ function criarSincronizador({
         const paraApagar = [];
         for (const grupo of bloco.grupos) {
           const linha = existentes.get(JSON.stringify(grupo.valores));
+          if (!podeEnviarDaEmpresa({ tabela: bloco.tabela, colunas, linha, empresaId })) {
+            if (empresaId && !colunaDeEmpresa(bloco.tabela, colunas)) avisarSemEmpresa(bloco.tabela);
+            continue;
+          }
           if (linha) paraGravar.push(linha); else paraApagar.push(grupo.valores);
         }
         if (paraGravar.length) await gravarLinhas(cliente, bloco.tabela, colunas, colunasChave, paraGravar);
@@ -253,11 +278,15 @@ function criarSincronizador({
         const colunasChave = sch.colunasChave[tabela];
         const ordem = colunasChave.map((c) => `"${c.replace(/"/g, '""')}"`).join(', ');
         const tamanho = Math.min(lote, linhasPorComando(colunas.length));
-        for (let deslocamento = 0; ; deslocamento += tamanho) {
+        // Sem ligação com a empresa, a tabela não é copiada (o laço nem começa). Com ela, só sobe a empresa desta instalação.
+        const semVinculo = Boolean(empresaId) && !colunaDeEmpresa(tabela, colunas);
+        if (semVinculo) avisarSemEmpresa(tabela);
+        for (let deslocamento = 0; !semVinculo; deslocamento += tamanho) {
           const r = await local.query(`SELECT * FROM "${tabela}" ORDER BY ${ordem} LIMIT ${tamanho} OFFSET ${deslocamento}`);
           if (!r.rows.length) break;
-          await executarNaNuvem((cliente) => gravarLinhas(cliente, tabela, colunas, colunasChave, r.rows));
-          total += r.rows.length;
+          const enviar = r.rows.filter((linha) => podeEnviarDaEmpresa({ tabela, colunas, linha, empresaId }));
+          if (enviar.length) await executarNaNuvem((cliente) => gravarLinhas(cliente, tabela, colunas, colunasChave, enviar));
+          total += enviar.length;
           if (r.rows.length < tamanho) break;
         }
         // O que mudou nessa tabela ANTES da carga já foi copiado por ela; o que mudou durante continua na fila.
@@ -278,6 +307,186 @@ function criarSincronizador({
     const semCarga = sch.ordem.filter((tabela) => !carregadas.has(tabela));
     log.info(`[sincronização] carga inicial: ${total} linha(s) copiadas`
       + (semCarga.length ? `; aguardando correção na nuvem: ${semCarga.join(', ')}.` : '.'));
+    return total;
+  }
+
+  // ---------- nuvem -> local ----------
+  // Chaves de uma tabela que têm alteração local ainda não enviada (texto, para comparar).
+  async function chavesComAlteracaoLocal(tabela, colunasChave) {
+    const r = await local.query('SELECT "chave" FROM "sincronizacaoFila" WHERE "enviadoEm" IS NULL AND "tabela" = $1', [tabela]);
+    return new Set(r.rows.map((linha) => JSON.stringify(colunasChave.map((c) => String(linha.chave[c])))));
+  }
+
+  // Refaz a empresa inteira a partir da nuvem, para quando a retenção já apagou alterações deste buffet. Grava o que a
+  // nuvem tem, apaga aqui o que ela não tem mais, e pula linhas com alteração local ainda não enviada. Marca o cursor
+  // na última alteração já confirmada (com a margem), e o puxar() segue dali.
+  async function recarregar(sch) {
+    const marca = (await nuvem.query(
+      `SELECT "filaId", "criadoEm" FROM "sincronizacaoFila"
+       WHERE "empresaId" = $1 AND "criadoEm" < now() - make_interval(secs => $2)
+       ORDER BY "filaId" DESC LIMIT 1`,
+      [empresaId, margemNuvemSegundos]
+    )).rows[0];
+
+    const porTabela = new Map();
+    for (const tabela of sch.ordem) {
+      const colunas = sch.colunasPorTabela[tabela];
+      const colunasChave = sch.colunasChave[tabela];
+      const colunaEmp = colunaDeEmpresa(tabela, colunas);
+      if (!colunaEmp) continue;
+      const linhas = new Map();
+      for (let deslocamento = 0; ; deslocamento += 1000) {
+        const r = await nuvem.query(
+          `SELECT * FROM ${aspas(tabela)} WHERE ${aspas(colunaEmp)} = $1
+           ORDER BY ${colunasChave.map(aspas).join(', ')} LIMIT 1000 OFFSET $2`,
+          [empresaId, deslocamento]
+        );
+        for (const linha of r.rows) linhas.set(JSON.stringify(colunasChave.map((c) => String(linha[c]))), linha);
+        if (r.rows.length < 1000) break;
+      }
+      porTabela.set(tabela, { colunas, colunasChave, colunaEmp, linhas, pendentes: await chavesComAlteracaoLocal(tabela, colunasChave) });
+    }
+
+    const cliente = await local.connect();
+    try {
+      await cliente.query('BEGIN');
+      await cliente.query("SELECT set_config('pulyn.sync_ignorar', 'on', true)");
+      // Apaga aqui o que a nuvem não tem mais (filhos antes dos pais).
+      for (const tabela of [...sch.ordem].reverse()) {
+        const d = porTabela.get(tabela);
+        if (!d) continue;
+        const locais = await cliente.query(
+          `SELECT ${d.colunasChave.map(aspas).join(', ')} FROM ${aspas(tabela)} WHERE ${aspas(d.colunaEmp)} = $1`,
+          [empresaId]
+        );
+        const apagar = locais.rows
+          .map((l) => d.colunasChave.map((c) => l[c]))
+          .filter((valores) => {
+            const texto = JSON.stringify(valores.map(String));
+            return !d.linhas.has(texto) && !d.pendentes.has(texto);
+          });
+        for (const parte of dividirEmLotes(apagar, 500)) {
+          const comando = montarDelete({ tabela, colunas: d.colunasChave, chaves: parte });
+          await cliente.query(comando.text, comando.values);
+        }
+      }
+      // Grava o que a nuvem tem (pais antes dos filhos), sem mexer nas linhas com alteração local pendente.
+      for (const tabela of sch.ordem) {
+        const d = porTabela.get(tabela);
+        if (!d) continue;
+        const gravar = [...d.linhas.entries()].filter(([texto]) => !d.pendentes.has(texto)).map(([, linha]) => linha);
+        if (gravar.length) await gravarLinhas(cliente, tabela, d.colunas, d.colunasChave, gravar);
+      }
+      await cliente.query(
+        `INSERT INTO "sincronizacaoEstado" ("chave", "valor", "atualizadoEm") VALUES ($1, $2, now()), ($3, $4, now())
+         ON CONFLICT ("chave") DO UPDATE SET "valor" = EXCLUDED."valor", "atualizadoEm" = now()`,
+        [CURSOR_PUXADA, marca ? String(marca.filaId) : '0', CURSOR_PUXADA_EM, marca ? String(marca.criadoEm) : null]
+      );
+      await cliente.query('COMMIT');
+    } catch (erro) {
+      try { await cliente.query('ROLLBACK'); } catch { /* conexão já caiu */ }
+      throw erro;
+    } finally {
+      cliente.release();
+    }
+  }
+
+  // Traz da nuvem as alterações desta empresa, na ordem em que aconteceram lá (filaId da fila da nuvem). Uma linha com
+  // alteração local ainda não enviada fica como está aqui: o envio depois leva a versão local para a nuvem.
+  // Tudo de um lote entra numa transação local que também avança o cursor, então nada se perde se cair no meio.
+  async function puxar(sch) {
+    if (!empresaId) return 0;
+    // Se a retenção da nuvem já apagou alterações depois do ponto do buffet, elas nunca mais chegam: ou refaz a empresa
+    // a partir da nuvem (só com a recarga ligada), ou para e avisa.
+    const cursorInicial = (await lerEstado(CURSOR_PUXADA)) || '0';
+    if (Number(cursorInicial) > 0) {
+      const ultimaEm = await lerEstado(CURSOR_PUXADA_EM);
+      const perdeu = (await nuvem.query('SELECT "sincronizacaoPerdeuAlteracoesDesde"($1) AS perdeu', [ultimaEm])).rows[0].perdeu;
+      if (perdeu) {
+        if (!recarga) throw new Error(`a retenção da nuvem apagou alterações depois do ponto ${cursorInicial}; ligue SYNC_RECARGA=1 para refazer a empresa`);
+        log.warn(`[sincronização] recarga: refazendo a empresa a partir da nuvem (ponto ${cursorInicial} perdido)`);
+        await recarregar(sch);
+      }
+    }
+    let total = 0;
+    for (;;) {
+      const cursor = (await lerEstado(CURSOR_PUXADA)) || '0';
+      // Só alterações com mais de `margemNuvemSegundos`: uma transação que gravou antes pode ainda não ter sido confirmada,
+      // e avançar o cursor por cima dela faria a alteração se perder.
+      const r = await nuvem.query(
+        `SELECT "filaId", "tabela", "chave", "criadoEm" FROM "sincronizacaoFila"
+         WHERE "filaId" > $1 AND "empresaId" = $2 AND "criadoEm" < now() - make_interval(secs => $3)
+         ORDER BY "filaId" LIMIT $4`,
+        [cursor, empresaId, margemNuvemSegundos, lote]
+      );
+      if (!r.rows.length) break;
+      const ultimoFilaId = r.rows[r.rows.length - 1].filaId;
+      const ultimaEm = r.rows[r.rows.length - 1].criadoEm;
+
+      // Chaves mudadas por tabela (só o que o esquema local conhece).
+      const mudadas = new Map();
+      for (const linha of r.rows) {
+        const colunasChave = sch.colunasChave[linha.tabela];
+        if (!colunasChave || TABELAS_DO_MECANISMO.has(linha.tabela)) continue;
+        if (!mudadas.has(linha.tabela)) mudadas.set(linha.tabela, new Map());
+        const valores = colunasChave.map((c) => linha.chave[c]);
+        mudadas.get(linha.tabela).set(JSON.stringify(valores.map(String)), valores);
+      }
+
+      // Estado atual de cada chave na nuvem: o que ainda pertence à empresa é gravado; o resto é apagado aqui.
+      const planos = [];
+      for (const tabela of sch.ordem) {
+        const chaves = mudadas.get(tabela);
+        if (!chaves) continue;
+        const colunasChave = sch.colunasChave[tabela];
+        const colunas = sch.colunasPorTabela[tabela];
+        const comAlteracaoLocal = await chavesComAlteracaoLocal(tabela, colunasChave);
+        const emNuvem = [...chaves.entries()].filter(([texto]) => !comAlteracaoLocal.has(texto)).map(([, valores]) => valores);
+        const atuais = new Map();
+        for (const parte of dividirEmLotes(emNuvem, 500)) {
+          const consulta = montarSelectPorChave({ tabela, colunas: colunasChave, chaves: parte });
+          const atual = await nuvem.query(consulta.text, consulta.values);
+          for (const linha of atual.rows) atuais.set(JSON.stringify(colunasChave.map((c) => String(linha[c]))), linha);
+        }
+        const gravar = [];
+        const apagar = [];
+        for (const valores of emNuvem) {
+          const linha = atuais.get(JSON.stringify(valores.map(String)));
+          if (linha && podeEnviarDaEmpresa({ tabela, colunas, linha, empresaId })) gravar.push(linha); else apagar.push(valores);
+        }
+        planos.push({ tabela, colunas, colunasChave, gravar, apagar });
+      }
+
+      const cliente = await local.connect();
+      try {
+        await cliente.query('BEGIN');
+        // Aplicar o que veio da nuvem não pode voltar para a fila de envio.
+        await cliente.query("SELECT set_config('pulyn.sync_ignorar', 'on', true)");
+        // Apaga os filhos antes dos pais; grava os pais antes dos filhos.
+        for (const plano of [...planos].reverse()) {
+          for (const parte of dividirEmLotes(plano.apagar, 500)) {
+            const comando = montarDelete({ tabela: plano.tabela, colunas: plano.colunasChave, chaves: parte });
+            await cliente.query(comando.text, comando.values);
+          }
+        }
+        for (const plano of planos) {
+          if (plano.gravar.length) await gravarLinhas(cliente, plano.tabela, plano.colunas, plano.colunasChave, plano.gravar);
+        }
+        await cliente.query(
+          `INSERT INTO "sincronizacaoEstado" ("chave", "valor", "atualizadoEm") VALUES ($1, $2, now()), ($3, $4, now())
+           ON CONFLICT ("chave") DO UPDATE SET "valor" = EXCLUDED."valor", "atualizadoEm" = now()`,
+          [CURSOR_PUXADA, String(ultimoFilaId), CURSOR_PUXADA_EM, String(ultimaEm)]
+        );
+        await cliente.query('COMMIT');
+      } catch (erro) {
+        try { await cliente.query('ROLLBACK'); } catch { /* conexão já caiu */ }
+        throw erro;
+      } finally {
+        cliente.release();
+      }
+      total += r.rows.length;
+      if (r.rows.length < lote) break;
+    }
     return total;
   }
 
@@ -348,6 +557,8 @@ function criarSincronizador({
       await cargaInicial();
       const enviadas = await processarFila();
       if (enviadas) { estado.ultimoEnvioEm = agora().toISOString(); estado.enviadasDesdeAInicializacao += enviadas; }
+      const recebidas = await puxar(sch);
+      if (recebidas) estado.recebidasDesdeAInicializacao += recebidas;
       await limparAntigos();
       estado.ultimoErro = null;
       return { ok: true, enviadas };
@@ -398,7 +609,12 @@ function criarSincronizador({
     return { ...estado, ...fila, cargaInicialEm, rodando: Boolean(temporizador) };
   }
 
-  return { executarAgora, iniciar, parar, status, cargaInicial, esquema, lerEstado, _estado: estado };
+  return {
+    executarAgora, iniciar, parar, status, cargaInicial, esquema, lerEstado,
+    puxarDaNuvem: async () => puxar(await esquema()),
+    recarregarAgora: async () => recarregar(await esquema()),
+    _estado: estado,
+  };
 }
 
 // ---------- instância ligada pelo ambiente ----------
@@ -447,6 +663,9 @@ function obterSincronizador() {
     lote: Number(process.env.SYNC_LOTE || 500),
     intervaloMs: Number(process.env.SYNC_INTERVALO_MS || 15000),
     retencaoDias: Number(process.env.SYNC_RETENCAO_DIAS || 7),
+    empresaId: process.env.SYNC_EMPRESA_ID || null,
+    margemNuvemSegundos: Number(process.env.SYNC_MARGEM_SEGUNDOS || 60),
+    recarga: process.env.SYNC_RECARGA === '1',
   });
   instancia._pools = { local, nuvem };
   return instancia;

@@ -123,8 +123,27 @@ function ehErroDeConexao(erro) {
     && !erro.severity;
 }
 
+// Coluna que liga a linha a uma empresa. `empresas` se liga pelo próprio id. Tabela sem essa ligação (clientes, zonas
+// etc.) não tem como ser separada por empresa aqui, então não sobe quando há uma empresa definida.
+function colunaDeEmpresa(tabela, colunas) {
+  if (tabela === 'empresas') return 'id';
+  return ['empresaId', 'empresa_id'].find((coluna) => colunas.includes(coluna)) || null;
+}
+
+// Diz se a linha pode subir para a nuvem. Sem empresa definida, sobe tudo. `linha` vazia é uma exclusão: o banco local
+// só guarda a empresa desta instalação, então a exclusão também é dela.
+function podeEnviarDaEmpresa({ tabela, colunas, linha, empresaId }) {
+  if (!empresaId) return true;
+  const coluna = colunaDeEmpresa(tabela, colunas);
+  if (!coluna) return false;
+  if (!linha) return true;
+  return String(linha[coluna]) === String(empresaId);
+}
+
 module.exports = {
   aspas,
+  colunaDeEmpresa,
+  podeEnviarDaEmpresa,
   dividirEmLotes,
   linhasPorComando,
   agruparFila,
