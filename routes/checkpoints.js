@@ -52,7 +52,11 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
   try {
     const { checkpointId } = req.params;
     const now = new Date();
-    const ip = ipDoCheckpoint(req.body?.ip);
+    // Placas antigas não mandam o IP no corpo: usa o endereço de origem da conexão quando é da rede local
+    // (atrás de proxy/nuvem o endereço de origem não é o da placa e fica de fora).
+    const origem = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
+    const origemLocal = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(origem) ? origem : null;
+    const ip = ipDoCheckpoint(req.body?.ip) || ipDoCheckpoint(origemLocal);
     const campoIp = ip ? ', ip = @ip' : '';
     const extra = ip ? { ip } : {};
 
