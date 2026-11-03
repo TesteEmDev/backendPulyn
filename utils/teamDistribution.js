@@ -43,4 +43,21 @@ function planRandomDistribution({ children, teamIds, mode = 'unassigned', random
   return assignments;
 }
 
-module.exports = { planRandomDistribution, DISTRIBUTION_MODES };
+// Formação dos times depois do sorteio, no formato que o telão mostra: cada time com os apelidos dos membros.
+// teams: [{ timeId, nome, cor }] | children: [{ criancaId, nome, apelido, avatar, timeId }] | sorteadosIds: quem mudou de time agora
+// Quem não tem time não aparece. Os membros saem em ordem alfabética do apelido (ou do nome, sem apelido).
+function montarFormacaoDosTimes({ teams, children, sorteadosIds = [] }) {
+  const sorteados = new Set(sorteadosIds.map(String));
+  const nomeDe = (c) => String(c.apelido || c.nome || 'Participante').trim();
+  return teams.map((team) => ({
+    id: team.timeId,
+    name: team.nome,
+    color: team.cor || null,
+    members: children
+      .filter((c) => c.timeId && String(c.timeId) === String(team.timeId))
+      .map((c) => ({ id: c.criancaId, nickname: nomeDe(c), avatar: c.avatar || null, novo: sorteados.has(String(c.criancaId)) }))
+      .sort((a, b) => a.nickname.localeCompare(b.nickname, 'pt-BR')),
+  }));
+}
+
+module.exports = { planRandomDistribution, montarFormacaoDosTimes, DISTRIBUTION_MODES };

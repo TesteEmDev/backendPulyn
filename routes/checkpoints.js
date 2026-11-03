@@ -7,6 +7,7 @@ const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 const comandos = require('../utils/comandosCheckpoint');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
+const { ONLINE_ATE_MS, statusEfetivo } = require('../utils/statusCheckpoint');
 
 function sameId(left, right) {
   return left !== null && left !== undefined
@@ -44,6 +45,15 @@ function ipDoCheckpoint(valor) {
   return valido ? ip : null;
 }
 
+function ipLocalDeOrigem(req) {
+  const privado = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+  const candidatos = [
+    String(req.headers['x-forwarded-for'] || '').split(',')[0].trim(),
+    String(req.socket?.remoteAddress || '').replace(/^::ffff:/, ''),
+  ];
+  return candidatos.find((ip) => privado.test(ip)) || null;
+}
+
 // ✨ NOVO: Heartbeat - Checkpoint registra que está online
 // SEM autenticação: Arduino envia heartbeat sem token
 // O corpo pode trazer o IP da placa ({"ip":"192.168.0.50"}). Placas antigas mandam "{}" e o IP fica como está.
@@ -51,7 +61,9 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
   try {
     const { checkpointId } = req.params;
     const now = new Date();
-    const ip = ipDoCheckpoint(req.body?.ip);
+    // Placas antigas não mandam o IP no corpo: usa o endereço de origem da conexão quando é da rede local. Atrás de um
+    // proxy (IIS) vale o primeiro endereço do X-Forwarded-For; na nuvem a origem não é a da placa e fica de fora.
+    const ip = ipDoCheckpoint(req.body?.ip) || ipDoCheckpoint(ipLocalDeOrigem(req));
     const campoIp = ip ? ', ip = @ip' : '';
     const extra = ip ? { ip } : {};
 
@@ -99,7 +111,6 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
 
 // POST - Testar o LED ou o som da placa. O comando espera na fila até a placa buscá-lo (até ~10 s); ver
 // utils/comandosCheckpoint.js. Só o admin do buffet dono do checkpoint que já aceitou, e só se a placa está online.
-const ONLINE_ATE_MS = 3 * 60 * 1000; // o heartbeat chega a cada 60 s
 router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (req, res) => {
   try {
     const tipo = String(req.body?.tipo || '').toLowerCase();
@@ -129,6 +140,22 @@ router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (r
 // Resumo dos pontoVerificacao de jogo de TODOS os evento da empresa: quantos estão
 // cadastrados e quantos online, por evento. Os pontoVerificacao de recepção ficam de fora.
 // "Indisponíveis" = cadastrados - online (offline ou sem status).
+// Endereço deste servidor na rede local, para o QR code de instalação: o admin costuma abrir o sistema por "localhost",
+// que o checkpoint não alcança. Devolve o primeiro IPv4 não interno da máquina com a porta em que o servidor escuta.
+router.get('/instalacao', verifyToken, (req, res) => {
+  const os = require('os');
+  const ips = Object.values(os.networkInterfaces()).flat()
+    .filter((i) => i && i.family === 'IPv4' && !i.internal)
+    .map((i) => i.address);
+  const porta = req.socket.localPort;
+  const protocolo = req.socket.encrypted ? 'https' : 'http';
+  const padrao = (protocolo === 'https' && porta === 443) || (protocolo === 'http' && porta === 80);
+  // CHECKPOINT_SERVER_URL fixa o endereço que os checkpoints usam (por exemplo https://192.168.0.50 quando há um proxy
+  // na porta 443 na frente do Node); sem ela vale o endereço direto do Node.
+  const configurado = String(process.env.CHECKPOINT_SERVER_URL || '').trim().replace(/\/+$/, '');
+  res.json({ ips, servidor: configurado || (ips[0] ? `${protocolo}://${ips[0]}${padrao ? '' : `:${porta}`}` : null) });
+});
+
 router.get('/resumo', verifyToken, async (req, res) => {
   try {
     const rows = await allQuery(`
@@ -138,14 +165,14 @@ router.get('/resumo', verifyToken, async (req, res) => {
         e.status AS evento_status,
         e.data AS evento_date,
         COUNT(*) AS total,
-        SUM(CASE WHEN c.status = 'online' THEN 1 ELSE 0 END) AS online
+        SUM(CASE WHEN c.status = 'online' AND c.ultimoVisto >= @limite THEN 1 ELSE 0 END) AS online
       FROM pontoVerificacao c
       INNER JOIN evento e ON e.eventoId = c.eventoId
       WHERE e.empresaId = @empresaId
         AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
       GROUP BY c.eventoId, e.nome, e.status, e.data
       ORDER BY e.data DESC
-    `, { empresaId: req.user.empresaId });
+    `, { empresaId: req.user.empresaId, limite: new Date(Date.now() - ONLINE_ATE_MS) });
 
     res.json(rows.map((row) => {
       const total = Number(row.total) || 0;
@@ -203,7 +230,13 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
     );
 
     // `codigo` é o número do checkpoint (o que o buffet vê); o checkpointId é só o ID interno, gerado pelo banco.
-    const comCodigo = semIdNovo(pontoVerificacao || []).map((cp) => ({ ...cp, codigo: cp.numCheck || cp.codigo || cp.checkpointId }));
+    // `status` é calculado na hora: online só se a placa avisou que está viva nos últimos minutos (o banco não volta para offline sozinho).
+    const agora = Date.now();
+    const comCodigo = semIdNovo(pontoVerificacao || []).map((cp) => ({
+      ...cp,
+      codigo: cp.numCheck || cp.codigo || cp.checkpointId,
+      status: statusEfetivo(cp.status, cp.ultimoVisto, agora),
+    }));
 
     console.log(`📊 [CHECKPOINTS] Encontrados ${comCodigo.length} checkpoints para evento ${eventoId}`);
     res.json(comCodigo);

@@ -55,6 +55,8 @@ const familyLinkingRoutes = require('./routes/family-linking');
 const zoneConquestRoutes = require('./routes/zoneConquest');
 const companyMapRoutes = require('./routes/companyMap');
 const uhfRoutes = require('./routes/uhf');
+const telaoRoutes = require('./routes/telao');
+const gameSelectionRoutes = require('./routes/gameSelection');
 const { ensureFamilySchema } = require('./migrations/family');
 const { ensureGameStateSchema } = require('./migrations/gameState');
 const { ensureEventControlSchema } = require('./migrations/eventControl');
@@ -62,8 +64,7 @@ const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureLoginPapeisSchema } = require('./migrations/loginPapeis');
-const { ensureSessaoContaSchema } = require('./migrations/sessaoConta');
-const { ensureCodigoEmailSchema } = require('./migrations/codigoEmail');
+const { ensureTelaoSchema } = require('./migrations/telao');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
@@ -108,6 +109,7 @@ const {
   TREASURE_GAME_TYPE,
   getGameForEvent,
   startTreasureGame,
+  validarQuantidadeCheckpoints,
   stopTreasureGame,
   awardTreasureBonusOnStop,
 } = require('./utils/treasure');
@@ -699,6 +701,10 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
       ? (selectedGame.tipo === 'individual' ? 'individual' : 'team')
       : null;
     let treasureStart = null;
+    // Caça ao Tesouro: quantos checkpoints usar (vazio = todos). Confere antes de mexer em qualquer jogo.
+    const treasureQuantidade = gameType === TREASURE_GAME_TYPE
+      ? await validarQuantidadeCheckpoints(eventoId, selectedGame.brincadeiraId, req.body.quantidadeCheckpoints)
+      : null;
     let monsterStart = null;
     let zoneConquestStart = null;
     if (gameType !== bombaJogo.BOMBA_GAME_TYPE) await bombaJogo.pararJogo(eventoId);
@@ -706,7 +712,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
-      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId);
+      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId, { quantidade: treasureQuantidade });
       await stopMonsterGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
@@ -1010,7 +1016,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
   } catch (err) {
     console.error('❌ [INICIAR-JOGO] Erro ao iniciar jogo:', err.message);
     console.error('   Stack:', err.stack);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 });
 
@@ -1039,9 +1045,11 @@ async function stopGameForEvento(eventoId) {
     // Parar com Caça ao Tesouro/Monstro em andamento: se já existe uma equipe
     // vencedora (a mais rápida / a primeira a derrotar o monstro), ela leva o
     // bônus antes de a partida ser encerrada. Uma falha aqui não impede a parada.
+    let premio = null;
     try {
-      await awardTreasureBonusOnStop(eventoId);
-      await awardMonsterBonusOnStop(eventoId);
+      const premioTesouro = await awardTreasureBonusOnStop(eventoId);
+      const premioMonstro = await awardMonsterBonusOnStop(eventoId);
+      premio = [premioTesouro, premioMonstro].find((item) => item?.awarded) || null;
     } catch (bonusError) {
       console.error('❌ [PARAR-JOGO] Erro ao pagar bônus da equipe vencedora:', bonusError.message);
     }
@@ -1180,6 +1188,8 @@ async function stopGameForEvento(eventoId) {
     return {
       ok: true,
       status: gameStatus,
+      // Equipe que ganhou o bônus ao parar o jogo (Caça ao Tesouro / Monstro), para o recreacionista ver quem levou
+      bonus: premio ? { teamName: premio.teamName, pointsPerMember: premio.pointsPerMember, membersAwarded: premio.membersAwarded } : null,
       verification: {
         statusAntes: eventoAntes?.status,
         statusDepois: eventoDepois?.status,
@@ -1905,6 +1915,8 @@ app.use('/api/clientes', clientRoutes);
 // Eventos
 app.use('/api/eventos', eventRoutes);
 app.use('/api/company-map', companyMapRoutes);
+app.use('/api/debug', gameSelectionRoutes);   // "Sem jogos": tira a seleção do jogo
+app.use('/api/telao', telaoRoutes);   // link do telão (admin)
 app.use('/api/uhf', uhfRoutes);   // leitores UHF (UR4) e mapa de calor
 
 // Brincadeiras
@@ -2022,8 +2034,7 @@ async function startServer() {
     await ensureEmpresaCnpjSchema();
     await ensureSettingsPerCompanySchema();
     await ensureLoginPapeisSchema();
-    await ensureSessaoContaSchema();
-    await ensureCodigoEmailSchema();
+    await ensureTelaoSchema();
     await ensureClienteUnidadeSchema();
     await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
@@ -2052,8 +2063,8 @@ async function startServer() {
     await ensureZoneConquestIndividualSchema();
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
-    // DISABLED: Event lifecycle scheduler incompatible with Supabase schema
-    // eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
+    // Início e encerramento automáticos dos eventos (autoInicio/autoFim): varredura a cada 15 s
+    eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);

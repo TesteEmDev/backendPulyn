@@ -156,7 +156,8 @@ async function processZoneConquestIndividualScan({
       console.log(`   📝 Participant state não encontrado - criando sob demanda...`);
       // Criar participant state sob demanda
       const participantId = uuidv4();
-      const participantColor = generateColorFromId(crianca.criancaId);
+      // A cor que o participante escolheu no cadastro; sem ela, a de antes (calculada do id)
+      const participantColor = crianca.cor || generateColorFromId(crianca.criancaId);
       await query(
         `INSERT INTO zonaConquistaEstadoParticipanteIndividual
          (id, partidaId, empresaId, eventoId, criancaId, status, checkpointsLidos, pontosTotais, ranking, cor, versao, iniciadoEm, criadoEm, atualizadoEm)

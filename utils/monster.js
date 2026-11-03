@@ -1,6 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
-const { awardWinnerBonus } = require('./winnerBonus');
+const { awardWinnerBonus, escolherLider } = require('./winnerBonus');
 
 const MONSTER_GAME_TYPE = 'monster_hunt';
 const MONSTER_DEFAULTS = Object.freeze({
@@ -251,12 +251,30 @@ async function awardMonsterWinnerBonus(session) {
   });
 }
 
-// Parada manual (ou por tempo) com a partida em andamento: se alguma equipe já
-// derrotou o monstro, a primeira a conseguir vence e recebe o bônus.
+// Quem está na frente quando ninguém derrotou o monstro: a equipe que causou mais dano ao seu monstro (sem empate no topo).
+async function getMonsterLeaderTeamId(session) {
+  const estados = await allQuery(`
+    SELECT timeId, vida, vidaMaxima FROM monsterCacaEstadoTime
+    WHERE LOWER(partidaId) = LOWER(@partidaId) AND status = 'active'`, { partidaId: session.id });
+  return escolherLider(estados.map((estado) => ({
+    teamId: estado.timeId,
+    valor: Number(estado.vidaMaxima || 0) - Number(estado.vida || 0),
+  })));
+}
+
+// Parada manual (ou por tempo) com a partida em andamento: se alguma equipe já derrotou o monstro, a primeira a
+// conseguir vence e recebe o bônus; senão, ganha a que mais machucou o monstro (sem empate no topo).
 async function awardMonsterBonusOnStop(eventoId) {
   const session = await getActiveMonsterGame(eventoId);
   if (!session) return null;
-  return awardMonsterWinnerBonus(session);
+  const teamId = (await getMonsterWinnerTeamId(session)) || (await getMonsterLeaderTeamId(session));
+  if (!teamId) return null;
+  return awardWinnerBonus({
+    eventoId: session.eventoId,
+    partidaId: session.id,
+    gameType: MONSTER_GAME_TYPE,
+    teamId,
+  });
 }
 
 async function stopMonsterGame(eventoId) {

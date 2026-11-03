@@ -4,21 +4,16 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query, queryOne } = require('../database');
-const { verifyToken } = require('../utils/middleware');
+const { verifyToken, requireRole } = require('../utils/middleware');
 const { papeisDaConta } = require('../utils/papeis');
-const { hashSenha, verificarSenha, precisaAtualizar, validarSenhaNova } = require('../utils/senhas');
-const { enviarEmail, emailConfigurado } = require('../utils/email');
-const { modeloCodigo } = require('../utils/emailModelos');
-
-const MINUTOS_CODIGO = 15;
-const TENTATIVAS_CODIGO = 5;
-const SEGUNDOS_ENTRE_CODIGOS = 60;
+const { normalizarCodigoTelao } = require('../utils/codigoTelao');
+const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk', 'score_kiosk']);
 
 // Token da conta na área `role`. `papeis` é a lista de áreas que a conta pode usar (vai junto para o front).
-function assinarToken(login, role, papeis) {
+function assinarToken(login, role, papeis, expiresIn = '24h') {
   return jwt.sign(
     {
       id: login.loginId,
@@ -31,7 +26,7 @@ function assinarToken(login, role, papeis) {
       tv: Number(login.tokenVersao || 0)   // versão da sessão: trocar a senha ou excluir a conta derruba este token
     },
     JWT_SECRET,
-    { expiresIn: '24h' }
+    { expiresIn }
   );
 }
 
@@ -126,6 +121,70 @@ router.post('/login', async (req, res) => {
   } catch (err) {
     console.error('❌ Erro ao fazer login:', err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// Telão sem login: o link /telao/<código> troca o código do buffet por um token do perfil display (só deste buffet).
+// Token de 7 dias: o telão fica ligado nos eventos; a página guarda o código e entra de novo quando o token vence.
+const TELAO_TOKEN_VALIDADE = '7d';
+const tentativasDeTelao = criarLimitador({ max: 15, janelaMs: 10 * 60 * 1000 });
+
+// Sessão do telão: não é uma conta, o id do token é o do buffet (nada no backend procura o login de um telão).
+function sessaoDeTelao(empresa) {
+  const token = assinarToken(
+    { loginId: empresa.empresaId, email: 'telao', empresaId: empresa.empresaId, empresa_nome: empresa.nome, plano: empresa.plano },
+    'display', ['display'], TELAO_TOKEN_VALIDADE
+  );
+  return {
+    success: true,
+    token,
+    user: {
+      id: empresa.empresaId,
+      name: empresa.nome,
+      email: 'telao',
+      role: 'display',
+      papeis: ['display'],
+      redirect: ROLE_REDIRECTS.display,
+      plan: empresa.plano,
+      empresaId: empresa.empresaId
+    }
+  };
+}
+
+// POST /auth/telao  { codigo }
+router.post('/telao', async (req, res) => {
+  try {
+    const quem = ipDoCliente(req);
+    if (tentativasDeTelao.bloqueado(quem)) {
+      return res.status(429).json({ error: 'Muitas tentativas. Aguarde alguns minutos e tente de novo.' });
+    }
+
+    const codigo = normalizarCodigoTelao(req.body?.codigo);
+    const empresa = codigo
+      ? await queryOne('SELECT empresaId, nome, [plano] FROM empresa WHERE codigoTelao = @codigo', { codigo })
+      : null;
+    if (!empresa) {
+      tentativasDeTelao.registrarFalha(quem);
+      return res.status(404).json({ error: 'Link do telão inválido ou desativado' });
+    }
+
+    res.json(sessaoDeTelao(empresa));
+  } catch (err) {
+    console.error('❌ Erro ao entrar no telão:', err);
+    res.status(500).json({ error: 'Erro ao abrir o telão' });
+  }
+});
+
+// Telão aberto pela equipe logada (botão "Abrir telão" da recepção): a conta pede a sessão de telão do PRÓPRIO buffet.
+// POST /auth/telao-da-equipe  (com o token da conta)
+router.post('/telao-da-equipe', verifyToken, requireRole(['admin', 'reception', 'game_master']), async (req, res) => {
+  try {
+    const empresa = await queryOne('SELECT empresaId, nome, [plano] FROM empresa WHERE empresaId = @empresaId', { empresaId: req.user.empresaId });
+    if (!empresa) return res.status(404).json({ error: 'Buffet não encontrado' });
+    res.json(sessaoDeTelao(empresa));
+  } catch (err) {
+    console.error('❌ Erro ao abrir o telão pela equipe:', err);
+    res.status(500).json({ error: 'Erro ao abrir o telão' });
   }
 });
 

@@ -5,6 +5,7 @@
 // participam da transação aberta por withTransaction.
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
+const { idadeNaData } = require('./nascimento');
 
 const ACENTOS = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
 const SEM_ACENTOS = 'aaaaaeeeeiiiiooooouuuucn';
@@ -38,12 +39,12 @@ function idadeValida(idade) {
 }
 
 // Cria o perfil de uma criança nova e já aponta o último evento para o evento atual.
-async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar }) {
+async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, dataNascimento = null }) {
   if (!String(nome || '').trim()) throw new Error('Nome da criança é obrigatório');
   const perfilCriancaId = uuidv4();
   await query(
-    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId)
-     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId)`,
+    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, dataNascimento)
+     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId, @dataNascimento)`,
     {
       perfilCriancaId,
       empresaId,
@@ -52,6 +53,7 @@ async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar }
       idade: idadeValida(idade),
       avatar: avatar || null,
       eventoId: eventoId || null,
+      dataNascimento: dataNascimento || null,
     }
   );
   return perfilCriancaId;
@@ -61,20 +63,21 @@ async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar }
 async function buscarPerfil(perfilCriancaId, empresaId) {
   if (!perfilCriancaId) return null;
   return (await queryOne(
-    `SELECT perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId
+    `SELECT perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, CAST(dataNascimento AS text) AS dataNascimento
      FROM perfilCrianca WHERE perfilCriancaId = @perfilCriancaId AND empresaId = @empresaId`,
     { perfilCriancaId, empresaId }
   )) || null;
 }
 
 // A criança voltou: marca o evento atual como o último e atualiza o que mudou (idade, apelido, avatar).
-async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avatar }) {
+async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avatar, dataNascimento = null }) {
   await query(
     `UPDATE perfilCrianca
      SET ultimoEventoId = @eventoId,
          apelido = COALESCE(@apelido, apelido),
          idade = COALESCE(@idade, idade),
          avatar = COALESCE(@avatar, avatar),
+         dataNascimento = COALESCE(@dataNascimento, dataNascimento),
          atualizadoEm = CURRENT_TIMESTAMP
      WHERE perfilCriancaId = @perfilCriancaId`,
     {
@@ -83,12 +86,13 @@ async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avata
       apelido: String(apelido || '').trim() || null,
       idade: idadeValida(idade),
       avatar: avatar || null,
+      dataNascimento: dataNascimento || null,
     }
   );
 }
 
 // Quando alguém edita uma participação, o cadastro permanente acompanha.
-async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, avatar }) {
+async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, avatar, dataNascimento = null }) {
   if (!perfilCriancaId) return;
   await query(
     `UPDATE perfilCrianca
@@ -96,6 +100,7 @@ async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, a
          apelido = COALESCE(@apelido, apelido),
          idade = COALESCE(@idade, idade),
          avatar = COALESCE(@avatar, avatar),
+         dataNascimento = COALESCE(@dataNascimento, dataNascimento),
          atualizadoEm = CURRENT_TIMESTAMP
      WHERE perfilCriancaId = @perfilCriancaId`,
     {
@@ -104,6 +109,7 @@ async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, a
       apelido: String(apelido || '').trim() || null,
       idade: idadeValida(idade),
       avatar: avatar || null,
+      dataNascimento: dataNascimento || null,
     }
   );
 }
@@ -129,7 +135,7 @@ async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, limite = 8 })
   const busca = normalizarBusca(termo);
   if (busca.length < 2) return [];
   const rows = await allQuery(
-    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar
+    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento
      FROM perfilCrianca p
      WHERE p.empresaId = @empresaId
        AND (${semAcentosSql('p.apelido')} LIKE @padrao OR ${semAcentosSql('p.nome')} LIKE @padrao)
@@ -143,7 +149,8 @@ async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, limite = 8 })
     perfilCriancaId: row.perfilCriancaId,
     nomeExibicao: nomeParaExibir(row.nome),
     apelido: row.apelido || '',
-    idade: row.idade,
+    // Com a data de nascimento a idade é a de hoje (a idade gravada é a do último cadastro)
+    idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
     avatar: row.avatar,
   }));
 }

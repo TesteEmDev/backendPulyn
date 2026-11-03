@@ -4,6 +4,7 @@
 // jogo dentro do evento não muda mais esse status (antes, "iniciar jogo" virava
 // o evento para 'active' e "parar jogo" voltava para 'scheduled').
 const { query, queryOne, allQuery } = require('../database');
+const { releaseBraceletsForEvent } = require('./braceletRelease');
 
 // Data e hora do evento são digitadas pelo buffet no relógio local dele, sem fuso.
 // O servidor (Render) roda em UTC, então o "agora" é convertido para esse fuso.
@@ -40,7 +41,7 @@ function wallClockOf(dateStr, timeStr) {
 }
 
 function durationMsOf(row) {
-  const minutes = Number(row.duration);
+  const minutes = Number(row.duracao);
   return (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_DURATION_MINUTES) * 60000;
 }
 
@@ -155,7 +156,24 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
     type: 'EVENT_STATUS_CHANGED',
     payload: { eventoId: evento.eventoId, status: 'finished', source },
   });
-  return { changed: true };
+
+  // Ao encerrar a festa, o vínculo de todas as pulseiras dela acaba na hora (as pulseiras voltam a ficar livres para a
+  // próxima festa). A pontuação, as leituras e a pulseira usada (ultimaPulseira, para os relatórios) continuam.
+  // A varredura de braceletRelease segue como rede de segurança. Uma falha aqui não desfaz o encerramento.
+  let pulseiras = { braceletsReleased: 0, childrenCleared: 0 };
+  try {
+    pulseiras = await releaseBraceletsForEvent(evento.eventoId);
+    if (pulseiras.braceletsReleased > 0) {
+      console.log(`🔓 [EVENTO] ${evento.eventoId}: ${pulseiras.braceletsReleased} pulseira(s) liberada(s) ao encerrar`);
+      broadcastCompany(evento.empresaId, {
+        type: 'BRACELETS_RELEASED',
+        payload: { eventoId: evento.eventoId, braceletsReleased: pulseiras.braceletsReleased },
+      });
+    }
+  } catch (err) {
+    console.error(`❌ [EVENTO] Não foi possível liberar as pulseiras de ${evento.eventoId}: ${err.message}`);
+  }
+  return { changed: true, ...pulseiras };
 }
 
 // Reabre um evento encerrado: volta para "agendado" na nova data/horário (e duração, se informada),
@@ -209,11 +227,11 @@ async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
     const action = evaluateLifecycle(row, now);
     if (!action) continue;
     try {
-      if (action === 'start') await startEvent(row.id, { source: 'auto' });
-      else await finishEvent(row.id, { source: 'auto', stopGame });
-      actions.push({ eventoId: row.id, action });
+      if (action === 'start') await startEvent(row.eventoId, { source: 'auto' });
+      else await finishEvent(row.eventoId, { source: 'auto', stopGame });
+      actions.push({ eventoId: row.eventoId, action });
     } catch (err) {
-      console.error(`❌ [EVENTO] Falha ao aplicar '${action}' automático em ${row.id}:`, err.message);
+      console.error(`❌ [EVENTO] Falha ao aplicar '${action}' automático em ${row.eventoId}:`, err.message);
     }
   }
   return actions;

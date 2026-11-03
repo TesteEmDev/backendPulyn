@@ -4,7 +4,10 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { getAvatarForCreate, isAdventurerAvatarId } = require('../utils/avatar');
+const { isAdventurerAvatarId } = require('../utils/avatar');
+const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
+const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
+const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
 const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil, copiarVinculosParaParticipacao } = require('../utils/perfilCrianca');
 
@@ -72,17 +75,48 @@ router.get('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   }
 });
 
+// Avatares que os participantes do evento já usam (a tela de cadastro os mostra indisponíveis)
+router.get('/evento/:eventoId/avatares-em-uso', async (req, res) => {
+  try {
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @eventoId', { eventoId: req.params.eventoId });
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && String(req.user.empresaId).toLowerCase() !== String(evento.empresaId).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence à sua empresa' });
+    }
+    res.json({
+      avatares: [...new Set(await avataresEmUso({ allQuery }, evento.eventoId))],
+      cores: [...new Set(await coresEmUso({ allQuery }, evento.eventoId))],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Criar criança
 router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
-    const { nome, apelido, age, avatar, braceletCode, timeId, perfilCriancaId } = req.body;
+    const { nome, apelido, avatar, braceletCode, timeId, perfilCriancaId } = req.body;
+    // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada (versões antigas)
+    let dataNascimento = null;
+    if (req.body.dataNascimento) {
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+      dataNascimento = nascimento.data;
+    }
+    const age = dataNascimento ? idadeNaData(dataNascimento) : req.body.age;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
-    const avatarValue = getAvatarForCreate(avatar);
+    // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
+    const avatarPedido = avatar ? String(avatar) : null;
     const { eventoId } = req.params;
     const id = uuidv4();
 
-    if (!avatarValue) {
+    if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
+    }
+    // Cor escolhida (opcional): sem ela, entra uma livre
+    const corPedida = req.body.cor ? normalizarCor(req.body.cor) : null;
+    if (req.body.cor && !corPedida) {
+      return res.status(400).json({ error: 'Cor inválida' });
     }
 
     if (!perfilCriancaId && (!nome || !String(nome).trim())) {
@@ -137,9 +171,11 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     // Cadastro permanente: criança que volta reaproveita o perfil; criança nova ganha um perfil.
     let nomeFinal = nome;
     let perfilId = null;
+    let perfilDaCrianca = null;
     if (perfilCriancaId) {
       const perfil = await buscarPerfil(perfilCriancaId, empresaId);
       if (!perfil) return res.status(404).json({ error: 'Cadastro da criança não encontrado' });
+      perfilDaCrianca = perfil;
       const jaNoEvento = await queryOne(
         'SELECT criancaId FROM crianca WHERE perfilCriancaId = @perfilCriancaId AND eventoId = @eventoId',
         { perfilCriancaId, eventoId }
@@ -147,16 +183,36 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       if (jaNoEvento) return res.status(409).json({ error: 'Esta criança já está cadastrada neste evento' });
       nomeFinal = perfil.nome;
       perfilId = perfil.perfilCriancaId;
-      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue });
+    }
+
+    // Avatar sem repetir no evento: quem volta tenta manter o do cadastro (se outro já o usa, entra um livre)
+    const escolhaAvatar = escolherAvatar({
+      pedido: avatarPedido,
+      preferido: perfilDaCrianca?.avatar,
+      emUso: await avataresEmUso({ allQuery }, eventoId),
+    });
+    if (escolhaAvatar.conflito) {
+      return res.status(409).json({ error: MENSAGEM_AVATAR_EM_USO, avataresLivres: escolhaAvatar.livres });
+    }
+    const avatarValue = escolhaAvatar.avatar;
+
+    const escolhaCor = escolherCor({ pedido: corPedida, emUso: await coresEmUso({ allQuery }, eventoId) });
+    if (escolhaCor.conflito) {
+      return res.status(409).json({ error: MENSAGEM_COR_EM_USO, coresLivres: escolhaCor.livres });
+    }
+    const corValue = escolhaCor.cor;
+
+    if (perfilDaCrianca) {
+      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento });
     } else {
-      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue });
+      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento });
     }
 
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
     await query(
-      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, codigoPulseira, perfilCriancaId) 
-       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @braceletCode, @perfilId)`,
-      { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), avatar: avatarValue, braceletCode: normalizedBraceletCode, perfilId }
+      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, dataNascimento, avatar, cor, codigoPulseira, perfilCriancaId) 
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @dataNascimento, @avatar, @cor, @braceletCode, @perfilId)`,
+      { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), dataNascimento, avatar: avatarValue, cor: corValue, braceletCode: normalizedBraceletCode, perfilId }
     );
     await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: id, empresaId });
     
@@ -174,7 +230,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, avatar: avatarValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -209,7 +265,15 @@ router.get('/crianca/by-bracelet/:codigo', verifyToken, async (req, res) => {
 // Atualizar criança
 router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res) => {
   try {
-    const { nome, apelido, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, apelido, avatar, braceletCode, timeId } = req.body;
+    // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada
+    let dataNascimento = null;
+    if (req.body.dataNascimento) {
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+      dataNascimento = nascimento.data;
+    }
+    const age = dataNascimento ? idadeNaData(dataNascimento) : req.body.age;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     const { eventoId, criancaId } = req.params;
     
@@ -232,6 +296,22 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       : (isAdventurerAvatarId(avatar) ? avatar : null);
     if (nextAvatar === null) {
       return res.status(400).json({ error: 'Avatar inválido' });
+    }
+    // Cor (opcional): trocar para uma que outro participante do evento já usa não vale
+    let nextCor = crianca.cor || null;
+    if (req.body.cor !== undefined && req.body.cor !== null && req.body.cor !== '') {
+      const corPedida = normalizarCor(req.body.cor);
+      if (!corPedida) return res.status(400).json({ error: 'Cor inválida' });
+      if (corPedida !== String(crianca.cor || '').toUpperCase()) {
+        const escolhaCor = escolherCor({ pedido: corPedida, emUso: await coresEmUso({ allQuery }, eventoId, criancaId) });
+        if (escolhaCor.conflito) return res.status(409).json({ error: MENSAGEM_COR_EM_USO, coresLivres: escolhaCor.livres });
+      }
+      nextCor = corPedida;
+    }
+    // Trocar para um avatar que outro participante do evento já usa não vale
+    if (nextAvatar !== crianca.avatar) {
+      const escolha = escolherAvatar({ pedido: nextAvatar, emUso: await avataresEmUso({ allQuery }, eventoId, criancaId) });
+      if (escolha.conflito) return res.status(409).json({ error: MENSAGEM_AVATAR_EM_USO, avataresLivres: escolha.livres });
     }
 
     const nextTimeId = timeId === undefined ? crianca.timeId : (timeId || null);
@@ -301,7 +381,9 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
         nome = @nome, 
         apelido = @apelido, 
         idade = @age, 
+        dataNascimento = COALESCE(@dataNascimento, dataNascimento),
         avatar = @avatar, 
+        cor = @cor,
         codigoPulseira = @braceletCode,
         timeId = @timeId
        WHERE criancaId = @criancaId 
@@ -310,8 +392,10 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       { 
         nome: nome || crianca.nome, 
         apelido: apelido || crianca.apelido, 
-        age: age ? parseInt(age) : crianca.idade, 
+        age: age !== undefined && age !== null && age !== '' ? parseInt(age) : crianca.idade, 
+        dataNascimento,
         avatar: nextAvatar,
+        cor: nextCor,
         braceletCode: normalizedBraceletCode,
         criancaId: criancaId,
         eventoId: eventoId,
@@ -320,7 +404,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       }
     );
 
-    await atualizarDadosDoPerfil(crianca.perfilCriancaId, { nome, apelido, idade: age, avatar: nextAvatar });
+    await atualizarDadosDoPerfil(crianca.perfilCriancaId, { nome, apelido, idade: age, avatar: nextAvatar, dataNascimento });
 
     const affectedTeamIds = [...new Set([crianca.timeId, nextTimeId].filter(Boolean))];
     for (const affectedTeamId of affectedTeamIds) {
