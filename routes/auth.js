@@ -6,6 +6,13 @@ const crypto = require('crypto');
 const { query, queryOne } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { papeisDaConta } = require('../utils/papeis');
+const { hashSenha, verificarSenha, precisaAtualizar, validarSenhaNova } = require('../utils/senhas');
+const { enviarEmail, emailConfigurado } = require('../utils/email');
+const { modeloCodigo } = require('../utils/emailModelos');
+
+const MINUTOS_CODIGO = 15;
+const TENTATIVAS_CODIGO = 5;
+const SEGUNDOS_ENTRE_CODIGOS = 60;
 const { normalizarCodigoTelao } = require('../utils/codigoTelao');
 const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
 
