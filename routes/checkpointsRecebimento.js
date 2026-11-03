@@ -5,7 +5,7 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
-const { STATUS, validarNumCheck, podeAceitar, podeRecusar } = require('../utils/checkpointTransferencia');
+const { STATUS, validarNumCheck } = require('../utils/checkpointTransferencia');
 
 router.use(verifyToken, requireRole('admin'));
 
@@ -31,24 +31,21 @@ const numeroEmUso = (empresaId, numCheck, ignorarCheckpointId) => queryOne(
   { empresaId, numCheck, ignorar: ignorarCheckpointId }
 );
 
-// Pendente para o buffet ou já dele. Quem não tem nada a ver com o checkpoint recebe 404, sem saber que ele existe.
-const eDoBuffet = (cp, empresaId) => cp.empresaDestinoId === empresaId || cp.empresaId === empresaId;
-
 const violouUnicidade = (err) => err && err.code === '23505';
 
-// Checkpoints transferidos para este buffet que esperam o aceite.
-router.get('/pendentes', async (req, res) => {
+// Checkpoints recebidos do super admin que ainda não têm número: o admin do buffet os define nesta lista.
+router.get('/sem-numero', async (req, res) => {
   try {
     const linhas = await allQuery(
-      `SELECT p.checkpointId, p.numCheck, p.macAddress, p.nome, p.tipo, p.proposito, p.transferidoEm
-       FROM pontoVerificacao p
-       WHERE p.empresaDestinoId = @empresaId AND p.statusTransferencia = @pendente
+      `SELECT ${COLUNAS}
+       FROM pontoVerificacao p LEFT JOIN evento e ON e.eventoId = p.eventoId
+       WHERE p.empresaId = @empresaId AND p.statusTransferencia = @aceito AND p.numCheck IS NULL
        ORDER BY p.transferidoEm, p.checkpointId`,
-      { empresaId: req.user.empresaId, pendente: STATUS.PENDENTE }
+      { empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
     );
     res.json(linhas);
   } catch (err) {
-    console.error('❌ [RECEBIMENTO] Erro ao listar pendentes:', err);
+    console.error('❌ [RECEBIMENTO] Erro ao listar checkpoints sem número:', err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -67,79 +64,6 @@ router.get('/sem-evento', async (req, res) => {
     res.json(linhas);
   } catch (err) {
     console.error('❌ [RECEBIMENTO] Erro ao listar checkpoints sem evento:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Aceita o checkpoint: passa a ser do buffet, com o número que o admin definir e, se quiser já, um evento.
-router.post('/:checkpointId/aceitar', async (req, res) => {
-  try {
-    const { empresaId } = req.user;
-    const atual = await buscar(req.params.checkpointId);
-    if (!atual || !eDoBuffet(atual, empresaId)) return res.status(404).json({ error: 'Checkpoint não encontrado' });
-    if (!podeAceitar(atual.statusTransferencia)) {
-      return res.status(409).json({ error: `Este checkpoint não está pendente (situação: "${atual.statusTransferencia}")` });
-    }
-
-    const numero = validarNumCheck(req.body.numCheck);   // só o admin do buffet define o número
-    if (!numero.ok) return res.status(400).json({ error: numero.erro });
-    if (!numero.valor) return res.status(400).json({ error: 'Informe o número do checkpoint' });
-
-    const repetido = await numeroEmUso(empresaId, numero.valor, atual.checkpointId);
-    if (repetido) {
-      return res.status(409).json({ error: `Já existe um checkpoint com o número "${numero.valor}" no seu buffet (${repetido.nome}). Use outro número.` });
-    }
-
-    let eventoId = null;
-    if (req.body.eventoId) {
-      const evento = await eventoDoBuffet(String(req.body.eventoId), empresaId);
-      if (!evento) return res.status(404).json({ error: 'Evento não encontrado neste buffet' });
-      eventoId = evento.eventoId;
-    }
-
-    // `codigo` acompanha o número enquanto as rotas atuais ainda o usam como o ID exibido do checkpoint.
-    const atualizado = await queryOne(
-      `UPDATE pontoVerificacao
-       SET statusTransferencia = @aceito, empresaId = @empresaId, empresaDestinoId = NULL,
-           numCheck = @numCheck, codigo = @numCheck, eventoId = @eventoId, atualizadoEm = now()
-       WHERE checkpointId = @checkpointId AND statusTransferencia = @pendente AND empresaDestinoId = @empresaId
-       RETURNING checkpointId`,
-      { aceito: STATUS.ACEITO, pendente: STATUS.PENDENTE, empresaId, numCheck: numero.valor, eventoId, checkpointId: atual.checkpointId }
-    );
-    if (!atualizado) return res.status(409).json({ error: 'O checkpoint mudou de situação; atualize a lista e tente de novo' });
-
-    console.log(`✅ [RECEBIMENTO] Buffet ${empresaId} aceitou o checkpoint ${atual.checkpointId} como nº ${numero.valor}${eventoId ? ` (evento ${eventoId})` : ''}`);
-    res.json(await buscar(atual.checkpointId));
-  } catch (err) {
-    if (violouUnicidade(err)) return res.status(409).json({ error: 'Já existe um checkpoint com esse número no seu buffet' });
-    console.error('❌ [RECEBIMENTO] Erro ao aceitar:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Recusa: o checkpoint volta ao estoque do super admin.
-router.post('/:checkpointId/recusar', async (req, res) => {
-  try {
-    const { empresaId } = req.user;
-    const atual = await buscar(req.params.checkpointId);
-    if (!atual || !eDoBuffet(atual, empresaId)) return res.status(404).json({ error: 'Checkpoint não encontrado' });
-    if (!podeRecusar(atual.statusTransferencia)) {
-      return res.status(409).json({ error: `Este checkpoint não está pendente (situação: "${atual.statusTransferencia}")` });
-    }
-
-    const atualizado = await queryOne(
-      `UPDATE pontoVerificacao
-       SET statusTransferencia = @estoque, empresaDestinoId = NULL, transferidoEm = NULL, atualizadoEm = now()
-       WHERE checkpointId = @checkpointId AND statusTransferencia = @pendente AND empresaDestinoId = @empresaId
-       RETURNING checkpointId`,
-      { estoque: STATUS.ESTOQUE, pendente: STATUS.PENDENTE, empresaId, checkpointId: atual.checkpointId }
-    );
-    if (!atualizado) return res.status(409).json({ error: 'O checkpoint mudou de situação; atualize a lista e tente de novo' });
-
-    console.log(`↩️ [RECEBIMENTO] Buffet ${empresaId} recusou o checkpoint ${atual.checkpointId}`);
-    res.json({ success: true });
-  } catch (err) {
-    console.error('❌ [RECEBIMENTO] Erro ao recusar:', err);
     res.status(500).json({ error: err.message });
   }
 });

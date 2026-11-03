@@ -30,6 +30,12 @@ CREATE INDEX IF NOT EXISTS "sincronizacaoFilaPendente"
 CREATE INDEX IF NOT EXISTS "sincronizacaoFilaEnviadoEm"
   ON "sincronizacaoFila" ("enviadoEm") WHERE "enviadoEm" IS NOT NULL;
 
+-- Empresa a que a alteração pertence. Na nuvem é ela que o buffet usa para puxar só as próprias alterações.
+ALTER TABLE "sincronizacaoFila" ADD COLUMN IF NOT EXISTS "empresaId" text;
+
+CREATE INDEX IF NOT EXISTS "sincronizacaoFilaEmpresa"
+  ON "sincronizacaoFila" ("empresaId", "filaId");
+
 -- Estado do sincronizador (carga inicial, último envio etc.)
 CREATE TABLE IF NOT EXISTS "sincronizacaoEstado" (
   "chave" text PRIMARY KEY,
@@ -46,7 +52,12 @@ DECLARE
   chaveNova jsonb := '{}'::jsonb;
   chaveAntiga jsonb := '{}'::jsonb;
   i integer;
+  empresaAntiga text;
+  empresaNova text;
 BEGIN
+  -- Alteração que o próprio sincronizador está aplicando (envio ou puxada): não volta para a fila.
+  IF current_setting('pulyn.sync_ignorar', true) = 'on' THEN RETURN NULL; END IF;
+
   IF TG_OP <> 'INSERT' THEN antiga := to_jsonb(OLD); END IF;
   IF TG_OP <> 'DELETE' THEN nova := to_jsonb(NEW); END IF;
 
@@ -59,15 +70,24 @@ BEGIN
     END IF;
   END LOOP;
 
+  -- Empresa da linha: a tabela `empresas` se liga pelo próprio id; as outras pela coluna empresaId (ou empresa_id).
+  IF TG_TABLE_NAME = 'empresas' THEN
+    empresaAntiga := chaveAntiga ->> 'id';
+    empresaNova := chaveNova ->> 'id';
+  ELSE
+    empresaAntiga := COALESCE(antiga ->> 'empresaId', antiga ->> 'empresa_id');
+    empresaNova := COALESCE(nova ->> 'empresaId', nova ->> 'empresa_id');
+  END IF;
+
   IF TG_OP = 'DELETE' THEN
-    INSERT INTO "sincronizacaoFila" ("tabela", "operacao", "chave") VALUES (TG_TABLE_NAME, 'D', chaveAntiga);
+    INSERT INTO "sincronizacaoFila" ("tabela", "operacao", "chave", "empresaId") VALUES (TG_TABLE_NAME, 'D', chaveAntiga, empresaAntiga);
   ELSE
     -- Mudança da própria chave primária: a linha antiga some na nuvem e a nova aparece.
     IF TG_OP = 'UPDATE' AND chaveAntiga <> chaveNova THEN
-      INSERT INTO "sincronizacaoFila" ("tabela", "operacao", "chave") VALUES (TG_TABLE_NAME, 'D', chaveAntiga);
+      INSERT INTO "sincronizacaoFila" ("tabela", "operacao", "chave", "empresaId") VALUES (TG_TABLE_NAME, 'D', chaveAntiga, empresaAntiga);
     END IF;
-    INSERT INTO "sincronizacaoFila" ("tabela", "operacao", "chave")
-      VALUES (TG_TABLE_NAME, left(TG_OP, 1), chaveNova);
+    INSERT INTO "sincronizacaoFila" ("tabela", "operacao", "chave", "empresaId")
+      VALUES (TG_TABLE_NAME, left(TG_OP, 1), chaveNova, empresaNova);
   END IF;
 
   RETURN NULL;
