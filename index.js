@@ -62,6 +62,8 @@ const { ensureEventLifecycleSchema } = require('./migrations/eventLifecycle');
 const { ensureEmpresaCnpjSchema } = require('./migrations/empresaCnpj');
 const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerCompany');
 const { ensureLoginPapeisSchema } = require('./migrations/loginPapeis');
+const { ensureSessaoContaSchema } = require('./migrations/sessaoConta');
+const { ensureCodigoEmailSchema } = require('./migrations/codigoEmail');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
@@ -2020,6 +2022,8 @@ async function startServer() {
     await ensureEmpresaCnpjSchema();
     await ensureSettingsPerCompanySchema();
     await ensureLoginPapeisSchema();
+    await ensureSessaoContaSchema();
+    await ensureCodigoEmailSchema();
     await ensureClienteUnidadeSchema();
     await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
