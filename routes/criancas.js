@@ -6,6 +6,7 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { isAdventurerAvatarId } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
+const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
 const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil, copiarVinculosParaParticipacao } = require('../utils/perfilCrianca');
@@ -94,7 +95,15 @@ router.get('/evento/:eventoId/avatares-em-uso', async (req, res) => {
 // Criar criança
 router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
-    const { nome, apelido, age, avatar, braceletCode, timeId, perfilCriancaId } = req.body;
+    const { nome, apelido, avatar, braceletCode, timeId, perfilCriancaId } = req.body;
+    // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada (versões antigas)
+    let dataNascimento = null;
+    if (req.body.dataNascimento) {
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+      dataNascimento = nascimento.data;
+    }
+    const age = dataNascimento ? idadeNaData(dataNascimento) : req.body.age;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
     const avatarPedido = avatar ? String(avatar) : null;
@@ -194,16 +203,16 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const corValue = escolhaCor.cor;
 
     if (perfilDaCrianca) {
-      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue });
+      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento });
     } else {
-      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue });
+      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento });
     }
 
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
     await query(
-      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, cor, codigoPulseira, perfilCriancaId) 
-       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @cor, @braceletCode, @perfilId)`,
-      { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), avatar: avatarValue, cor: corValue, braceletCode: normalizedBraceletCode, perfilId }
+      `INSERT INTO crianca (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, dataNascimento, avatar, cor, codigoPulseira, perfilCriancaId) 
+       VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @dataNascimento, @avatar, @cor, @braceletCode, @perfilId)`,
+      { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), dataNascimento, avatar: avatarValue, cor: corValue, braceletCode: normalizedBraceletCode, perfilId }
     );
     await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: id, empresaId });
     
@@ -221,7 +230,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -256,7 +265,15 @@ router.get('/crianca/by-bracelet/:codigo', verifyToken, async (req, res) => {
 // Atualizar criança
 router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res) => {
   try {
-    const { nome, apelido, age, avatar, braceletCode, timeId } = req.body;
+    const { nome, apelido, avatar, braceletCode, timeId } = req.body;
+    // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada
+    let dataNascimento = null;
+    if (req.body.dataNascimento) {
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+      dataNascimento = nascimento.data;
+    }
+    const age = dataNascimento ? idadeNaData(dataNascimento) : req.body.age;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     const { eventoId, criancaId } = req.params;
     
@@ -364,6 +381,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
         nome = @nome, 
         apelido = @apelido, 
         idade = @age, 
+        dataNascimento = COALESCE(@dataNascimento, dataNascimento),
         avatar = @avatar, 
         cor = @cor,
         codigoPulseira = @braceletCode,
@@ -374,7 +392,8 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       { 
         nome: nome || crianca.nome, 
         apelido: apelido || crianca.apelido, 
-        age: age ? parseInt(age) : crianca.idade, 
+        age: age !== undefined && age !== null && age !== '' ? parseInt(age) : crianca.idade, 
+        dataNascimento,
         avatar: nextAvatar,
         cor: nextCor,
         braceletCode: normalizedBraceletCode,
@@ -385,7 +404,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
       }
     );
 
-    await atualizarDadosDoPerfil(crianca.perfilCriancaId, { nome, apelido, idade: age, avatar: nextAvatar });
+    await atualizarDadosDoPerfil(crianca.perfilCriancaId, { nome, apelido, idade: age, avatar: nextAvatar, dataNascimento });
 
     const affectedTeamIds = [...new Set([crianca.timeId, nextTimeId].filter(Boolean))];
     for (const affectedTeamId of affectedTeamIds) {

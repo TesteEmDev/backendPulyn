@@ -9,6 +9,7 @@ const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require(
 const {
   criarPerfil, buscarPerfil, registrarVolta, buscarPerfisParaKiosk, idadeValida, copiarVinculosParaParticipacao,
 } = require('../utils/perfilCrianca');
+const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 
 const router = express.Router();
 const CLOSED_EVENT_STATUSES = new Set(['completed', 'cancelled', 'canceled', 'finished']);
@@ -179,7 +180,14 @@ router.get('/events/:eventId/avatars-in-use', async (req, res) => {
 router.post('/participants', async (req, res) => {
   try {
     const { eventId, nome, apelido, avatar, braceletCode, timeId, perfilCriancaId } = req.body || {};
-    const idadeInformada = req.body?.idade ?? req.body?.age;
+    // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a idade informada (versões antigas)
+    let dataNascimento = null;
+    if (req.body?.dataNascimento) {
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+      dataNascimento = nascimento.data;
+    }
+    const idadeInformada = dataNascimento ? idadeNaData(dataNascimento) : (req.body?.idade ?? req.body?.age);
     const codigo = normalizeUid(braceletCode);
     let cleanName = String(nome || '').trim();
     // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
@@ -194,7 +202,7 @@ router.post('/participants', async (req, res) => {
       return res.status(400).json({ error: 'Cor inválida' });
     }
     if (!perfilCriancaId && (idadeValida(idadeInformada) === null)) {
-      return res.status(400).json({ error: 'Idade é obrigatória' });
+      return res.status(400).json({ error: 'A data de nascimento é obrigatória' });
     }
 
     // O time é opcional: o recreacionista define (ou sorteia) os time depois do cadastro.
@@ -279,23 +287,25 @@ router.post('/participants', async (req, res) => {
 
       // Quem volta mantém o apelido, a idade e o avatar do cadastro, a menos que tenha escolhido outros agora.
       const apelidoFinal = String(apelido || '').trim() || perfilExistente?.apelido || cleanName.split(/\s+/)[0];
-      const idadeFinal = idadeValida(idadeInformada) ?? perfilExistente?.idade ?? 0;
+      // Quem volta e já tem data de nascimento no cadastro: a idade é a de hoje
+      const nascimentoFinal = dataNascimento || (perfilExistente?.dataNascimento ? String(perfilExistente.dataNascimento).slice(0, 10) : null);
+      const idadeFinal = (nascimentoFinal ? idadeNaData(nascimentoFinal) : null) ?? idadeValida(idadeInformada) ?? perfilExistente?.idade ?? 0;
 
       let perfilId = perfilExistente?.perfilCriancaId;
       if (perfilId) {
-        await registrarVolta({ perfilCriancaId: perfilId, eventoId: event.eventoId, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue });
+        await registrarVolta({ perfilCriancaId: perfilId, eventoId: event.eventoId, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue, dataNascimento });
       } else {
         perfilId = await criarPerfil({
           empresaId: event.empresaId, eventoId: event.eventoId,
-          nome: cleanName, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue,
+          nome: cleanName, apelido: apelidoFinal, idade: idadeFinal, avatar: avatarValue, dataNascimento,
         });
       }
 
       const childId = uuidv4();
       await tx.query(
         `INSERT INTO crianca
-          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, avatar, cor, codigoPulseira, pontos, perfilCriancaId)
-         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @avatar, @cor, @codigo, 0, @perfilId)`,
+          (criancaId, eventoId, empresaId, timeId, nome, apelido, idade, dataNascimento, avatar, cor, codigoPulseira, pontos, perfilCriancaId)
+         VALUES (@id, @eventId, @empresaId, @timeId, @nome, @apelido, @age, @dataNascimento, @avatar, @cor, @codigo, 0, @perfilId)`,
         {
           id: childId,
           eventId: event.eventoId,
@@ -304,6 +314,7 @@ router.post('/participants', async (req, res) => {
           nome: cleanName,
           apelido: apelidoFinal,
           age: idadeFinal,
+          dataNascimento: nascimentoFinal,
           avatar: avatarValue,
           cor: corValue,
           codigo,
@@ -338,6 +349,7 @@ router.post('/participants', async (req, res) => {
         name: cleanName,
         nickname: apelidoFinal,
         age: idadeFinal,
+        birthDate: nascimentoFinal,
         avatar: avatarValue,
         color: corValue,
         braceletCode: codigo,

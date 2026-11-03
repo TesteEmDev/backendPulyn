@@ -34,6 +34,8 @@ async function ensureFamilySchema() {
       )
     `);
     await query('ALTER TABLE login ADD COLUMN IF NOT EXISTS nomeFamilia varchar(255)');
+    // Telefone do responsável (só dígitos, com DDD)
+    await query('ALTER TABLE login ADD COLUMN IF NOT EXISTS telefone varchar(20)');
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uqConviteFamiliaHashToken ON conviteFamilia (hashToken)');
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uqVinculoFamiliarLoginCrianca ON vinculoFamiliar (loginId, criancaId)');
     // Vínculo passa a seguir o cadastro permanente da criança, não só a participação no evento.
