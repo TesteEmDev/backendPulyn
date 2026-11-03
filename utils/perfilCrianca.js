@@ -37,13 +37,25 @@ function idadeValida(idade) {
   return Number.isFinite(valor) ? Math.max(0, valor) : null;
 }
 
+// Idade em anos completos a partir da data de nascimento (AAAA-MM-DD). null se a data não for válida.
+function idadeDeNascimento(dataISO, hoje = new Date()) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(dataISO || '').trim());
+  if (!m) return null;
+  const nasc = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (nasc.getMonth() !== Number(m[2]) - 1 || nasc.getDate() !== Number(m[3])) return null;
+  let anos = hoje.getFullYear() - nasc.getFullYear();
+  const aniversarioAindaNao = hoje.getMonth() < nasc.getMonth() || (hoje.getMonth() === nasc.getMonth() && hoje.getDate() < nasc.getDate());
+  if (aniversarioAindaNao) anos -= 1;
+  return anos < 0 ? null : anos;
+}
+
 // Cria o perfil de uma criança nova e já aponta o último evento para o evento atual.
-async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar }) {
+async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, dataNascimento }) {
   if (!String(nome || '').trim()) throw new Error('Nome da criança é obrigatório');
   const perfilCriancaId = uuidv4();
   await query(
-    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId)
-     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId)`,
+    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, dataNascimento)
+     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId, @dataNascimento)`,
     {
       perfilCriancaId,
       empresaId,
@@ -52,6 +64,7 @@ async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar }
       idade: idadeValida(idade),
       avatar: avatar || null,
       eventoId: eventoId || null,
+      dataNascimento: dataNascimento || null,
     }
   );
   return perfilCriancaId;
@@ -219,6 +232,7 @@ async function copiarVinculosParaParticipacao({ perfilCriancaId, criancaId, empr
 }
 
 module.exports = {
+  idadeDeNascimento,
   criarPerfil,
   buscarPerfil,
   registrarVolta,

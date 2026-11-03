@@ -64,6 +64,7 @@ const { ensureSettingsPerCompanySchema } = require('./migrations/settingsPerComp
 const { ensureLoginPapeisSchema } = require('./migrations/loginPapeis');
 const { ensureSessaoContaSchema } = require('./migrations/sessaoConta');
 const { ensureCodigoEmailSchema } = require('./migrations/codigoEmail');
+const { ensureCadastroFamiliaSchema } = require('./migrations/cadastroFamilia');
 const { ensureClienteUnidadeSchema } = require('./migrations/clienteUnidade');
 const { ensureBraceletHistorySchema } = require('./migrations/braceletHistory');
 const { ensurePerfilCriancaSchema } = require('./migrations/perfilCrianca');
@@ -2024,6 +2025,7 @@ async function startServer() {
     await ensureLoginPapeisSchema();
     await ensureSessaoContaSchema();
     await ensureCodigoEmailSchema();
+    await ensureCadastroFamiliaSchema();
     await ensureClienteUnidadeSchema();
     await ensureCacaTesouroSchema();
     await ensureBraceletHistorySchema();
