@@ -45,6 +45,15 @@ function ipDoCheckpoint(valor) {
   return valido ? ip : null;
 }
 
+function ipLocalDeOrigem(req) {
+  const privado = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
+  const candidatos = [
+    String(req.headers['x-forwarded-for'] || '').split(',')[0].trim(),
+    String(req.socket?.remoteAddress || '').replace(/^::ffff:/, ''),
+  ];
+  return candidatos.find((ip) => privado.test(ip)) || null;
+}
+
 // ✨ NOVO: Heartbeat - Checkpoint registra que está online
 // SEM autenticação: Arduino envia heartbeat sem token
 // O corpo pode trazer o IP da placa ({"ip":"192.168.0.50"}). Placas antigas mandam "{}" e o IP fica como está.
@@ -52,11 +61,9 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
   try {
     const { checkpointId } = req.params;
     const now = new Date();
-    // Placas antigas não mandam o IP no corpo: usa o endereço de origem da conexão quando é da rede local
-    // (atrás de proxy/nuvem o endereço de origem não é o da placa e fica de fora).
-    const origem = String(req.socket?.remoteAddress || '').replace(/^::ffff:/, '');
-    const origemLocal = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(origem) ? origem : null;
-    const ip = ipDoCheckpoint(req.body?.ip) || ipDoCheckpoint(origemLocal);
+    // Placas antigas não mandam o IP no corpo: usa o endereço de origem da conexão quando é da rede local. Atrás de um
+    // proxy (IIS) vale o primeiro endereço do X-Forwarded-For; na nuvem a origem não é a da placa e fica de fora.
+    const ip = ipDoCheckpoint(req.body?.ip) || ipDoCheckpoint(ipLocalDeOrigem(req));
     const campoIp = ip ? ', ip = @ip' : '';
     const extra = ip ? { ip } : {};
 
@@ -143,7 +150,10 @@ router.get('/instalacao', verifyToken, (req, res) => {
   const porta = req.socket.localPort;
   const protocolo = req.socket.encrypted ? 'https' : 'http';
   const padrao = (protocolo === 'https' && porta === 443) || (protocolo === 'http' && porta === 80);
-  res.json({ ips, servidor: ips[0] ? `${protocolo}://${ips[0]}${padrao ? '' : `:${porta}`}` : null });
+  // CHECKPOINT_SERVER_URL fixa o endereço que os checkpoints usam (por exemplo https://192.168.0.50 quando há um proxy
+  // na porta 443 na frente do Node); sem ela vale o endereço direto do Node.
+  const configurado = String(process.env.CHECKPOINT_SERVER_URL || '').trim().replace(/\/+$/, '');
+  res.json({ ips, servidor: configurado || (ips[0] ? `${protocolo}://${ips[0]}${padrao ? '' : `:${porta}`}` : null) });
 });
 
 router.get('/resumo', verifyToken, async (req, res) => {
