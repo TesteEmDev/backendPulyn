@@ -41,7 +41,7 @@ function wallClockOf(dateStr, timeStr) {
 }
 
 function durationMsOf(row) {
-  const minutes = Number(row.duration);
+  const minutes = Number(row.duracao);
   return (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_DURATION_MINUTES) * 60000;
 }
 
@@ -227,11 +227,11 @@ async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
     const action = evaluateLifecycle(row, now);
     if (!action) continue;
     try {
-      if (action === 'start') await startEvent(row.id, { source: 'auto' });
-      else await finishEvent(row.id, { source: 'auto', stopGame });
-      actions.push({ eventoId: row.id, action });
+      if (action === 'start') await startEvent(row.eventoId, { source: 'auto' });
+      else await finishEvent(row.eventoId, { source: 'auto', stopGame });
+      actions.push({ eventoId: row.eventoId, action });
     } catch (err) {
-      console.error(`❌ [EVENTO] Falha ao aplicar '${action}' automático em ${row.id}:`, err.message);
+      console.error(`❌ [EVENTO] Falha ao aplicar '${action}' automático em ${row.eventoId}:`, err.message);
     }
   }
   return actions;

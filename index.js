@@ -2063,8 +2063,8 @@ async function startServer() {
     await ensureZoneConquestIndividualSchema();
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
-    // DISABLED: Event lifecycle scheduler incompatible with Supabase schema
-    // eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
+    // Início e encerramento automáticos dos eventos (autoInicio/autoFim): varredura a cada 15 s
+    eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);
