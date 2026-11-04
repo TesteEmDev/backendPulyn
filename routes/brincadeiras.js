@@ -7,6 +7,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
 const { validarDuracao } = require('../utils/jogosDoPlano');
+const { JOGOS_PADRAO } = require('../utils/jogosPadrao');
 const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { buildCheckpointConfigs, parseConfigItems, idOf } = require('../utils/liveCheckpoints');
 const { refreshTreasureTargetAfterListChange } = require('../utils/treasure');
@@ -165,8 +166,11 @@ const MENSAGEM_JOGOS_DO_PLANO = 'Os jogos já vêm cadastrados pelo seu plano. V
 router.post('/', verifyToken, async (req, res) => {
   try {
     if (!isMaster(req)) return res.status(403).json({ error: MENSAGEM_JOGOS_DO_PLANO });
-    const { nome, description, rules, tipo, duration, pontosPadrao, eventoId, checkpoints } = req.body;
+    let { nome, description, rules } = req.body;
+    const { tipo, duration, pontosPadrao, eventoId, checkpoints } = req.body;
     const empresaId = req.user.empresaId;
+    // Nome, descrição e regras são o padrão do sistema para o tipo (todos os clientes têm o mesmo texto)
+    if (JOGOS_PADRAO[tipo]) ({ nome, descricao: description, regras: rules } = JOGOS_PADRAO[tipo]);
     if (!Object.keys(TIPOS_DE_JOGO).includes(tipo)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
     }
@@ -254,6 +258,8 @@ router.put('/:id', verifyToken, async (req, res) => {
       rules = brincadeira.regras;
       tipo = brincadeira.tipo;
     }
+    // O texto do jogo é sempre o padrão do tipo, também para o master
+    if (JOGOS_PADRAO[tipo]) ({ nome, descricao: description, regras: rules } = JOGOS_PADRAO[tipo]);
     if (!Object.keys(TIPOS_DE_JOGO).includes(tipo)) {
       return res.status(400).json({ error: 'Tipo de jogo inválido' });
     }

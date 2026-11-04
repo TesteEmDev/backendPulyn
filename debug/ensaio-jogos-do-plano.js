@@ -5,7 +5,8 @@
 require('dotenv').config();
 const assert = require('node:assert/strict');
 const database = require('../database');
-const { garantirJogosDaEmpresa, garantirJogosDeTodasAsEmpresas } = require('../utils/jogosDoPlano');
+const { garantirJogosDaEmpresa, garantirJogosDeTodasAsEmpresas, padronizarJogos } = require('../utils/jogosDoPlano');
+const { JOGOS_PADRAO } = require('../utils/jogosPadrao');
 const { tiposDeJogoDoPlano } = require('../utils/planDefinitions');
 
 class Desfazer extends Error {}
@@ -44,6 +45,18 @@ async function main() {
         assert.ok(outros.length >= 3, 'os outros jogos continuam');
         console.log('  ✔ jogo arquivado é entregue de novo; os outros não mudam');
       }
+
+      // padronização: todos os jogos de cada tipo ficam com o mesmo nome, descrição e regras
+      await q.query("UPDATE brincadeira SET descricao = 'EDITADA', regras = 'EDITADA' WHERE tipo = 'monster_hunt'");
+      const mudados = await padronizarJogos(q);
+      console.log(`  jogos padronizados: ${mudados}`);
+      assert.ok(mudados >= 1);
+      for (const [tipo, p] of Object.entries(JOGOS_PADRAO)) {
+        const jogos = await q.allQuery("SELECT nome, descricao, regras FROM brincadeira WHERE tipo = @tipo AND LOWER(COALESCE(status,'active')) <> 'archived'", { tipo });
+        for (const j of jogos) { assert.equal(j.nome, p.nome); assert.equal(j.descricao, p.descricao); assert.equal(j.regras, p.regras); }
+      }
+      assert.equal(await padronizarJogos(q), 0, 'segunda passada não muda nada');
+      console.log('  ✔ todos os jogos de cada tipo têm o mesmo nome, descrição e regras do padrão');
 
       const depois = Number((await q.queryOne('SELECT COUNT(*)::int AS n FROM brincadeira')).n);
       console.log(`  brincadeiras: ${antes} -> ${depois}`);

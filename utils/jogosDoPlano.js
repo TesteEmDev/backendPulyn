@@ -45,6 +45,23 @@ async function garantirJogosDaEmpresa(empresaId, db = { query, queryOne, allQuer
   return criados;
 }
 
+// Nome, descrição e regras são iguais para todos os clientes: o padrão do sistema (utils/jogosPadrao.js) é a única fonte.
+// Reescreve os jogos que ficaram diferentes (editados antes de os jogos virem do plano) e devolve quantos mudaram.
+// Duração e pontos não entram: a duração é escolhida por cliente e os pontos são configurados por jogo.
+async function padronizarJogos(db = { query, queryOne, allQuery }) {
+  let alterados = 0;
+  for (const [tipo, padrao] of Object.entries(JOGOS_PADRAO)) {
+    const r = await db.query(
+      `UPDATE brincadeira SET nome = @nome, descricao = @descricao, regras = @regras
+       WHERE tipo = @tipo AND LOWER(COALESCE(status, 'active')) <> 'archived'
+         AND (nome IS DISTINCT FROM @nome OR descricao IS DISTINCT FROM @descricao OR regras IS DISTINCT FROM @regras)`,
+      { tipo, nome: padrao.nome, descricao: padrao.descricao, regras: padrao.regras }
+    );
+    alterados += Number(r?.rowsAffected?.[0] || 0);
+  }
+  return alterados;
+}
+
 // Todas as empresas (na subida do servidor): garante os jogos de quem ainda não tem.
 async function garantirJogosDeTodasAsEmpresas(db = { query, queryOne, allQuery }) {
   const empresas = await db.allQuery("SELECT empresaId FROM empresa WHERE nome <> 'Master Admin'");
@@ -64,4 +81,4 @@ function validarDuracao(valor) {
   return { ok: true, valor: n };
 }
 
-module.exports = { garantirJogosDaEmpresa, garantirJogosDeTodasAsEmpresas, validarDuracao, DURACAO_MIN, DURACAO_MAX, PLANOS_SEM_JOGOS };
+module.exports = { garantirJogosDaEmpresa, garantirJogosDeTodasAsEmpresas, padronizarJogos, validarDuracao, DURACAO_MIN, DURACAO_MAX, PLANOS_SEM_JOGOS };

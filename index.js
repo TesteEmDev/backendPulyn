@@ -72,7 +72,7 @@ const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
 const { ensureCheckpointTransferSchema } = require('./migrations/checkpointTransferencia');
-const { garantirJogosDeTodasAsEmpresas } = require('./utils/jogosDoPlano');
+const { garantirJogosDeTodasAsEmpresas, padronizarJogos } = require('./utils/jogosDoPlano');
 const { ensureCheckpointIdNumericoSchema } = require('./migrations/checkpointIdNumerico');
 const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
 const { ensureUhfSchema } = require('./migrations/uhf');
@@ -2068,6 +2068,8 @@ async function startServer() {
     try {
       const criados = await garantirJogosDeTodasAsEmpresas();
       if (criados) console.log(`🎮 ${criados} jogo(s) do plano entregue(s) aos clientes`);
+      const padronizados = await padronizarJogos();
+      if (padronizados) console.log(`🎮 ${padronizados} jogo(s) com nome, descrição e regras padronizados`);
     } catch (err) {
       console.warn(`⚠️ Não foi possível entregar os jogos do plano: ${err.message}`);
     }
