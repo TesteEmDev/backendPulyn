@@ -183,7 +183,7 @@ router.post('/participants', async (req, res) => {
     // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a idade informada (versões antigas)
     let dataNascimento = null;
     if (req.body?.dataNascimento) {
-      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
       if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
       dataNascimento = nascimento.data;
     }

@@ -49,3 +49,11 @@ test('telefone: formatação', () => {
   assert.equal(formatarTelefone('1132345678'), '(11) 3234-5678');
   assert.equal(formatarTelefone('123'), '123');
 });
+
+test('sem limite de idade (check-in e autoatendimento): data antiga vale; data no futuro e dia inexistente continuam recusados', () => {
+  const hoje = new Date('2026-11-04T12:00:00-03:00');
+  assert.deepEqual(normalizarDataNascimento('1980-01-01', hoje, { limiteIdade: null }), { data: '1980-01-01' });
+  assert.match(normalizarDataNascimento('1980-01-01', hoje).erro, /mais de 18/, 'o cadastro pelos pais mantém o limite');
+  assert.match(normalizarDataNascimento('2027-01-01', hoje, { limiteIdade: null }).erro, /futuro/);
+  assert.match(normalizarDataNascimento('31/02/2018', hoje, { limiteIdade: null }).erro, /não existe/);
+});

@@ -99,7 +99,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada (versões antigas)
     let dataNascimento = null;
     if (req.body.dataNascimento) {
-      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
       if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
       dataNascimento = nascimento.data;
     }
@@ -269,7 +269,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
     // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada
     let dataNascimento = null;
     if (req.body.dataNascimento) {
-      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
       if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
       dataNascimento = nascimento.data;
     }
