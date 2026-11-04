@@ -850,7 +850,7 @@ router.post('/perfis', verifyToken, async (req, res) => {
 
     const dados = validarPreCadastro(req.body);
     if (!dados.ok) return res.status(400).json({ error: dados.error });
-    const { eventoId, nome, apelido, idade } = dados.value;
+    const { eventoId, nome, apelido, idade, dataNascimento } = dados.value;
 
     const evento = await queryOne(
       'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @eventoId',
@@ -867,6 +867,7 @@ router.post('/perfis', verifyToken, async (req, res) => {
         apelido,
         idade,
         avatar: getAvatarForCreate(null),
+        dataNascimento,
       });
       await query(
         `INSERT INTO perfilVinculoFamiliar (vinculoId, loginId, perfilCriancaId, empresaId, relacionamento)
@@ -881,7 +882,7 @@ router.post('/perfis', verifyToken, async (req, res) => {
       return perfilId;
     });
 
-    res.status(201).json({ perfilCriancaId, nome, apelido, idade });
+    res.status(201).json({ perfilCriancaId, nome, apelido, idade, dataNascimento });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao pré-cadastrar criança:', err.message);
     res.status(500).json({ error: err.message });

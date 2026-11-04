@@ -31,7 +31,9 @@ async function enviarEmail({ para, assunto, texto, html, transporte = fetch }) {
     }),
   });
   if (!resposta.ok) {
-    throw new Error(`Brevo recusou o envio (HTTP ${resposta.status})`);
+    // O Brevo explica o motivo no corpo (ex.: IP não autorizado, remetente não validado).
+    const motivo = await resposta.text().catch(() => '');
+    throw new Error(`Brevo recusou o envio (HTTP ${resposta.status}): ${motivo.slice(0, 300)}`);
   }
 }
 

@@ -6,6 +6,13 @@ const crypto = require('crypto');
 const { query, queryOne } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { papeisDaConta } = require('../utils/papeis');
+const { hashSenha, verificarSenha, precisaAtualizar, validarSenhaNova } = require('../utils/senhas');
+const { enviarEmail, emailConfigurado } = require('../utils/email');
+const { modeloCodigo } = require('../utils/emailModelos');
+
+const MINUTOS_CODIGO = 15;
+const TENTATIVAS_CODIGO = 5;
+const SEGUNDOS_ENTRE_CODIGOS = 60;
 const { normalizarCodigoTelao } = require('../utils/codigoTelao');
 const { criarLimitador, ipDoCliente } = require('../utils/limiteTentativas');
 
@@ -71,6 +78,9 @@ router.post('/login', async (req, res) => {
     // Senha ainda guardada em base64: passa a ser guardada com hash, agora que sabemos que está certa.
     if (precisaAtualizar(login.senha)) {
       await query('UPDATE login SET senha = @senha WHERE loginId = @id', { senha: hashSenha(senha), id: login.loginId });
+    }
+    if (login.status === 'aguardando_email') {
+      return res.status(403).json({ error: 'Confirme seu e-mail para entrar', codigo: 'EMAIL_NAO_CONFIRMADO', email: login.email });
     }
     if (login.status === 'pending') {
       return res.status(403).json({ error: 'Sua conta familiar aguarda aprovação da recepção', codigo: 'FAMILY_PENDING' });
@@ -330,6 +340,12 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email inválido' });
     }
 
+    // Telefone do responsável: o buffet precisa dele se acontecer algo com a criança.
+    const telefone = String(req.body.telefone || '').replace(/\D/g, '');
+    if (!/^\d{10,11}$/.test(telefone)) {
+      return res.status(400).json({ error: 'Informe um telefone válido, com DDD' });
+    }
+
     console.log('📝 Criando nova empresa para família...');
     
     // Criar empresa para a família (buffet pessoal)
@@ -351,17 +367,42 @@ router.post('/register', async (req, res) => {
     const loginId = crypto.randomUUID();
     console.log('📝 Criando login para família...');
     
+    // Com e-mail configurado, a conta só entra depois de confirmar o e-mail com o código enviado.
+    const aguardandoEmail = emailConfigurado();
     await query(
-      `INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao)
-       VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', 'active', GETDATE())`,
+      `INSERT INTO login (loginId, empresaId, email, senha, nomeFamilia, perfil, status, dataCriacao, telefone)
+       VALUES (@id, @empresaId, @email, @senha, @familyNome, 'family', @status, GETDATE(), @telefone)`,
       {
         id: loginId,
         empresaId: empresaId,
         email: normalizedEmail,
         senha: hashedPassword,
-        familyNome: nomeFamilia || nome
+        familyNome: nomeFamilia || nome,
+        status: aguardandoEmail ? 'aguardando_email' : 'active',
+        telefone
       }
     );
+
+    if (aguardandoEmail) {
+      const codigo = await emitirCodigo(loginId, 'email');
+      try {
+        await mandarCodigoPorEmail(normalizedEmail, codigo, 'Confirme seu e-mail no Pulyn', 'Bem-vindo ao Pulyn! Use o código abaixo para confirmar seu e-mail e ativar sua conta.');
+      } catch (erro) {
+        // Sem o código a conta não tem como ser ativada: desfaz o cadastro e avisa a pessoa.
+        console.error('❌ Falha ao enviar código de cadastro:', erro.message);
+        await query(`DELETE FROM "codigoEmail" WHERE "loginId" = @id`, { id: loginId });
+        await query('DELETE FROM login WHERE loginId = @id', { id: loginId });
+        await query('DELETE FROM empresa WHERE empresaId = @id', { id: empresaId });
+        return res.status(502).json({ error: 'Não conseguimos enviar o e-mail de confirmação agora. Tente de novo em alguns minutos.' });
+      }
+      console.log('✅ Cadastro criado, aguardando confirmação de e-mail:', loginId);
+      return res.status(201).json({
+        success: true,
+        precisaConfirmarEmail: true,
+        email: normalizedEmail,
+        message: 'Enviamos um código para o seu e-mail. Digite-o para ativar a conta.'
+      });
+    }
 
     console.log('✅ Login criado:', loginId);
 
@@ -433,25 +474,113 @@ router.post('/alterar-senha', verifyToken, async (req, res) => {
   }
 });
 
+// Confirma o cadastro com o código do e-mail: ativa a conta e já devolve a sessão (como o cadastro faria).
+// POST /auth/confirmar-cadastro  { email, codigo }
+router.post('/confirmar-cadastro', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const conta = await queryOne(
+      `SELECT l.loginId, l.email, l.nomeFamilia, l.empresaId, l.tokenVersao, e.nome AS empresa_nome
+       FROM login l JOIN empresa e ON e.empresaId = l.empresaId
+       WHERE LOWER(l.email) = @email AND l.status = 'aguardando_email'`,
+      { email }
+    );
+    if (!conta) return res.status(400).json({ error: 'Código inválido ou expirado. Peça um novo código.' });
+
+    const falha = await conferirCodigo(conta.loginId, 'email', req.body?.codigo);
+    if (falha) return res.status(falha.status).json({ error: falha.error });
+
+    await query(
+      "UPDATE login SET status = 'active', emailConfirmadoEm = now() WHERE loginId = @id",
+      { id: conta.loginId }
+    );
+    await query(`DELETE FROM "codigoEmail" WHERE "loginId" = @id AND tipo = 'email'`, { id: conta.loginId });
+
+    const nome = conta.nomeFamilia || conta.empresa_nome;
+    const token = jwt.sign(
+      {
+        id: conta.loginId,
+        email: conta.email,
+        empresaId: conta.empresaId,
+        empresa_nome: conta.empresa_nome,
+        role: 'family',
+        tv: Number(conta.tokenVersao || 0)
+      },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+    console.log('✅ Cadastro confirmado:', conta.loginId);
+    res.json({
+      success: true,
+      message: 'E-mail confirmado. Conta ativada.',
+      token,
+      user: {
+        id: conta.loginId,
+        email: conta.email,
+        name: nome,
+        nomeFamilia: nome,
+        role: 'family',
+        empresaId: conta.empresaId,
+        empresa_nome: conta.empresa_nome
+      }
+    });
+  } catch (err) {
+    console.error('❌ Erro ao confirmar cadastro:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Reenvia o código do cadastro (só para contas que ainda aguardam a confirmação). Resposta igual existindo ou não.
+// POST /auth/reenviar-cadastro  { email }
+router.post('/reenviar-cadastro', async (req, res) => {
+  const resposta = { success: true, message: 'Se o cadastro estiver pendente, enviamos um novo código.' };
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    const conta = await queryOne(
+      "SELECT loginId, email FROM login WHERE LOWER(email) = @email AND status = 'aguardando_email'",
+      { email }
+    );
+    if (conta) {
+      const codigo = await emitirCodigo(conta.loginId, 'email');
+      if (codigo) {
+        try {
+          await mandarCodigoPorEmail(conta.email, codigo, 'Confirme seu e-mail no Pulyn', 'Use o código abaixo para ativar sua conta.');
+        } catch (erro) {
+          console.error('❌ Falha ao reenviar código de cadastro:', erro.message);
+        }
+      }
+    }
+    res.json(resposta);
+  } catch (err) {
+    console.error('❌ Erro em reenviar-cadastro:', err);
+    res.json(resposta);
+  }
+});
+
 // Atualiza nome e e-mail da conta de família. O e-mail é o login, então trocar o e-mail exige a senha atual.
 // PATCH /auth/perfil  { nome, email, senhaAtual? }
 router.patch('/perfil', verifyToken, async (req, res) => {
   try {
     const { nome, email, senhaAtual } = req.body || {};
     const conta = await queryOne(
-      'SELECT loginId, email, senha, perfil, status FROM login WHERE loginId = @id',
+      'SELECT loginId, email, senha, perfil, status, emailConfirmadoEm FROM login WHERE loginId = @id',
       { id: req.user.id }
     );
     if (!conta || conta.status !== 'active') return res.status(401).json({ error: 'Sessão inválida. Entre de novo.' });
     if (conta.perfil !== 'family') return res.status(403).json({ error: 'Os dados desta conta são alterados pelo administrador do buffet' });
-
     const nomeNovo = String(nome ?? '').trim();
     if (nomeNovo.length < 2 || nomeNovo.length > 120) return res.status(400).json({ error: 'O nome precisa ter entre 2 e 120 caracteres' });
 
     const emailNovo = String(email ?? '').trim().toLowerCase();
     if (!/^\S+@\S+\.\S+$/.test(emailNovo) || emailNovo.length > 255) return res.status(400).json({ error: 'Email inválido' });
 
-    if (emailNovo !== String(conta.email).toLowerCase()) {
+    // Trocar o e-mail (canal de recuperação de senha) exige o e-mail atual confirmado e a senha atual.
+    // Nome e telefone podem ser alterados sem confirmação.
+    const mudouEmail = emailNovo !== String(conta.email).toLowerCase();
+    if (mudouEmail) {
+      if (!conta.emailConfirmadoEm) {
+        return res.status(403).json({ error: 'Confirme seu e-mail para poder alterar o e-mail', codigo: 'EMAIL_NAO_CONFIRMADO' });
+      }
       if (!senhaAtual || !verificarSenha(senhaAtual, conta.senha)) {
         return res.status(403).json({ error: 'Para trocar o e-mail, confirme a senha atual' });
       }
@@ -462,9 +591,19 @@ router.patch('/perfil', verifyToken, async (req, res) => {
       if (usado) return res.status(409).json({ error: 'Este e-mail já está em uso' });
     }
 
+    // Telefone é opcional na edição; se vier, precisa ter DDD.
+    let telefoneNovo;
+    if (req.body?.telefone !== undefined) {
+      telefoneNovo = String(req.body.telefone || '').replace(/\D/g, '');
+      if (!/^\d{10,11}$/.test(telefoneNovo)) return res.status(400).json({ error: 'Informe um telefone válido, com DDD' });
+    }
+
+    // O e-mail novo ainda não foi confirmado: a confirmação é refeita para ele.
     await query(
-      'UPDATE login SET nomeFamilia = @nome, email = @email WHERE loginId = @id',
-      { nome: nomeNovo, email: emailNovo, id: conta.loginId }
+      `UPDATE login SET nomeFamilia = @nome, email = @email, telefone = COALESCE(@telefone, telefone),
+              emailConfirmadoEm = CASE WHEN @mudouEmail THEN NULL ELSE emailConfirmadoEm END
+       WHERE loginId = @id`,
+      { nome: nomeNovo, email: emailNovo, telefone: telefoneNovo ?? null, mudouEmail, id: conta.loginId }
     );
     res.json({ success: true, user: { id: conta.loginId, nome: nomeNovo, name: nomeNovo, email: emailNovo } });
   } catch (err) {
@@ -603,6 +742,22 @@ router.post('/confirmacao-email/enviar', verifyToken, async (req, res) => {
     res.json({ success: true, message: 'Código enviado para o seu e-mail.' });
   } catch (err) {
     console.error('❌ Erro ao enviar código de confirmação:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Diz se o e-mail da conta logada já foi confirmado (usado no perfil).
+// GET /auth/confirmacao-email/status
+router.get('/confirmacao-email/status', verifyToken, async (req, res) => {
+  try {
+    const conta = await queryOne(
+      'SELECT emailConfirmadoEm FROM login WHERE loginId = @id',
+      { id: req.user.id }
+    );
+    if (!conta) return res.status(401).json({ error: 'Sessão inválida. Entre de novo.' });
+    res.json({ confirmado: Boolean(conta.emailConfirmadoEm) });
+  } catch (err) {
+    console.error('❌ Erro ao ler status do e-mail:', err);
     res.status(500).json({ error: err.message });
   }
 });
