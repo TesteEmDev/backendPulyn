@@ -537,6 +537,8 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
       await query(
         `UPDATE pontoVerificacao
          SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+             devolvidoEm = now(), devolvidoMotivo = 'devolvido',
+             devolvidoPorNome = (SELECT nome FROM empresa WHERE empresaId = @empresaId),
              numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
              territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
          WHERE LOWER(checkpointId) = LOWER(@checkpointId)

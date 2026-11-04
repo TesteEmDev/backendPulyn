@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const database = require('../database');
 const { queryOne, closeDB } = database;
+const { ensureCheckpointTransferSchema } = require('../migrations/checkpointTransferencia');
 const { apagarClienteDentroDaTransacao, resumoDoCliente, encerrarEventosEmAndamento } = require('../utils/apagarCliente');
 
 class Desfazer extends Error {}
@@ -13,6 +14,8 @@ class Desfazer extends Error {}
 async function main() {
   try {
     await database.withTransaction(async (q) => {
+      // as colunas do aviso de devolução ainda podem não existir no banco: a migração também roda dentro do ensaio (desfeita)
+      await ensureCheckpointTransferSchema(q);
       const colunas = await q.allQuery("SELECT column_name FROM information_schema.columns WHERE table_name = 'empresa' AND is_nullable = 'NO' AND column_default IS NULL");
       const modelo = await queryOne('SELECT * FROM empresa LIMIT 1');
       assert.ok(modelo, 'existe uma empresa para servir de modelo');
@@ -58,6 +61,9 @@ async function main() {
       assert.equal(volta.statusTransferencia, 'estoque');
       assert.equal(volta.empresaId, null);
       assert.equal(volta.eventoId, null);
+      assert.equal(volta.devolvidoMotivo, 'cliente_excluido');
+      assert.equal(volta.devolvidoPorNome, 'Ensaio com evento');
+      assert.ok(volta.devolvidoEm, 'guarda quando foi devolvido');
       console.log('  ✔ buffet com evento em andamento: evento encerrado e apagado, cliente apagado, checkpoint de volta ao estoque');
 
       // 2) buffet limpo: apaga e devolve

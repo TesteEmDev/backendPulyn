@@ -30,6 +30,10 @@ async function ensureCheckpointTransferSchema(db = { query, allQuery }) {
   await db.query("ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS statusTransferencia varchar(10) NOT NULL DEFAULT 'aceito'");
   await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS empresaDestinoId varchar(36)');
   await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS transferidoEm timestamptz');
+  // Aviso para o master: o buffet devolveu (ou recusou) o checkpoint. Some quando o master o transfere de novo.
+  await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS devolvidoEm timestamptz');
+  await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS devolvidoMotivo varchar(20)');
+  await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS devolvidoPorNome varchar(200)');
 
   // Em estoque o checkpoint ainda não tem evento.
   await db.query('ALTER TABLE pontoVerificacao ALTER COLUMN eventoId DROP NOT NULL');

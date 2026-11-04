@@ -58,6 +58,8 @@ async function devolverCheckpointsDoCliente(empresaId, q) {
   const devolvidos = await q.query(
     `UPDATE pontoVerificacao
      SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+         devolvidoEm = now(), devolvidoMotivo = 'cliente_excluido',
+         devolvidoPorNome = (SELECT nome FROM empresa WHERE empresaId = @empresaId),
          numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
          territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
      WHERE macAddress IS NOT NULL AND (LOWER(empresaId) = LOWER(@empresaId) OR LOWER(empresaDestinoId) = LOWER(@empresaId))`,

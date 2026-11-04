@@ -19,6 +19,7 @@ router.use(verifyToken, requireRole('master'));
 const COLUNAS = `
   p.id, p.numCheck, p.macAddress, p.nome, p.tipo, p.proposito, p.status, p.ultimoVisto,
   p.statusTransferencia, p.empresaId, p.empresaDestinoId, p.eventoId, p.transferidoEm, p.criadoEm,
+  p.devolvidoEm, p.devolvidoMotivo, p.devolvidoPorNome,
   e.nome AS empresaNome, d.nome AS empresaDestinoNome`;
 const JUNCOES = `
   FROM pontoVerificacao p
@@ -192,7 +193,8 @@ router.post('/:id/transferir', async (req, res) => {
     // A condição no WHERE evita transferir duas vezes se dois pedidos chegarem juntos.
     const atualizado = await queryOne(
       `UPDATE pontoVerificacao
-       SET statusTransferencia = @pendente, empresaDestinoId = @empresaId, transferidoEm = now(), atualizadoEm = now()
+       SET statusTransferencia = @pendente, empresaDestinoId = @empresaId, transferidoEm = now(), atualizadoEm = now(),
+           devolvidoEm = NULL, devolvidoMotivo = NULL, devolvidoPorNome = NULL
        WHERE id = @id AND statusTransferencia = @estoque
        RETURNING id`,
       { id, empresaId, pendente: STATUS.PENDENTE, estoque: STATUS.ESTOQUE }

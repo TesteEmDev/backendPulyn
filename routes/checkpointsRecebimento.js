@@ -129,7 +129,9 @@ router.post('/:checkpointId/recusar', async (req, res) => {
 
     const atualizado = await queryOne(
       `UPDATE pontoVerificacao
-       SET statusTransferencia = @estoque, empresaDestinoId = NULL, transferidoEm = NULL, atualizadoEm = now()
+       SET statusTransferencia = @estoque, empresaDestinoId = NULL, transferidoEm = NULL, atualizadoEm = now(),
+           devolvidoEm = now(), devolvidoMotivo = 'recusado',
+           devolvidoPorNome = (SELECT nome FROM empresa WHERE empresaId = @empresaId)
        WHERE checkpointId = @checkpointId AND statusTransferencia = @pendente AND empresaDestinoId = @empresaId
        RETURNING checkpointId`,
       { estoque: STATUS.ESTOQUE, pendente: STATUS.PENDENTE, empresaId, checkpointId: atual.checkpointId }
@@ -205,6 +207,8 @@ router.post('/:checkpointId/devolver', async (req, res) => {
     const atualizado = await queryOne(
       `UPDATE pontoVerificacao
        SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+           devolvidoEm = now(), devolvidoMotivo = 'devolvido',
+           devolvidoPorNome = (SELECT nome FROM empresa WHERE empresaId = @empresaId),
            numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
            territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
        WHERE checkpointId = @checkpointId AND statusTransferencia = @aceito AND empresaId = @empresaId AND eventoId IS NULL
