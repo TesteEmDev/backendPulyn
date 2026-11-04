@@ -230,6 +230,8 @@ async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
       if (action === 'start') await startEvent(row.eventoId, { source: 'auto' });
       else await finishEvent(row.eventoId, { source: 'auto', stopGame });
       actions.push({ eventoId: row.eventoId, action });
+      // As telas abertas veem o evento começar/terminar na hora
+      require('./feedDados').avisarMudanca(['eventos', 'checkpoints', 'jogos', 'criancas', 'times'], [row.empresaId]);
     } catch (err) {
       console.error(`❌ [EVENTO] Falha ao aplicar '${action}' automático em ${row.eventoId}:`, err.message);
     }
