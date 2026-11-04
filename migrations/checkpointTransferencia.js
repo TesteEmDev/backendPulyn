@@ -6,7 +6,7 @@
 //   id                   autoincremento, único (vira a chave primária na etapa da troca)
 //   numCheck             o número do checkpoint (o antigo checkpointId digitado); único por buffet
 //   macAddress           MAC do ESP32 (AA:BB:CC:DD:EE:FF), único no sistema; os antigos o aprendem depois
-//   statusTransferencia  estoque | pendente | aceito (ver utils/checkpointTransferencia.js)
+//   statusTransferencia  estoque | aceito (ver utils/checkpointTransferencia.js)
 //   empresaDestinoId     buffet para o qual foi transferido, enquanto pendente
 //   transferidoEm        quando foi transferido
 //
@@ -48,6 +48,12 @@ async function ensureCheckpointTransferSchema(db = { query, allQuery }) {
   // O número dos checkpoints que já existem é o ID que o recreacionista digitou (a coluna `codigo`). Só na primeira
   // vez: depois disso o número é do buffet e um checkpoint devolvido ao estoque fica sem número.
   if (!numCheckExistia) await db.query('UPDATE pontoVerificacao SET numCheck = codigo WHERE numCheck IS NULL AND codigo IS NOT NULL');
+
+  // Não há mais aceite: quem estava pendente para um buffet passa a ser dele direto (o número continua a ser definido
+  // pelo admin do buffet). Idempotente: depois da primeira vez não encontra mais nenhuma linha pendente.
+  await db.query(`UPDATE pontoVerificacao
+    SET statusTransferencia = 'aceito', empresaId = empresaDestinoId, empresaDestinoId = NULL
+    WHERE statusTransferencia = 'pendente' AND empresaDestinoId IS NOT NULL`);
 
   await db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_pontoverificacao_mac ON pontoVerificacao (macAddress) WHERE macAddress IS NOT NULL');
   try {

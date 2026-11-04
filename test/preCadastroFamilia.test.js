@@ -7,7 +7,7 @@ const valido = { eventoId: 'e1', nome: '  Ana  ', apelido: 'Aninha', idade: '6' 
 test('dados válidos saem limpos (nome sem espaços, idade como número)', () => {
   assert.deepEqual(validarPreCadastro(valido), {
     ok: true,
-    value: { eventoId: 'e1', nome: 'Ana', apelido: 'Aninha', idade: 6 },
+    value: { eventoId: 'e1', nome: 'Ana', apelido: 'Aninha', idade: 6, dataNascimento: null },
   });
 });
 
@@ -29,7 +29,7 @@ test('nome obrigatório e limitado a 100 caracteres', () => {
 test('idade obrigatória e válida', () => {
   assert.deepEqual(validarPreCadastro({ ...valido, idade: undefined, age: undefined }), {
     ok: false,
-    error: 'Idade é obrigatória',
+    error: 'Informe a data de nascimento da criança',
   });
   assert.equal(validarPreCadastro({ ...valido, idade: 'abc' }).ok, false);
 });
@@ -40,4 +40,17 @@ test('evento fechado não aceita pré-cadastro', () => {
   assert.equal(eventoAberto({ status: 'Finished' }), false);
   assert.equal(eventoAberto({ status: 'cancelled' }), false);
   assert.equal(eventoAberto(null), false);
+});
+
+test('com data de nascimento, a idade sai dela', () => {
+  const r = validarPreCadastro({ ...valido, idade: undefined, dataNascimento: '2016-01-01' });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.dataNascimento, '2016-01-01');
+  assert.ok(r.value.idade >= 9 && r.value.idade <= 11);
+});
+
+test('data de nascimento inválida, futura ou de criança acima de 17 anos é recusada', () => {
+  assert.equal(validarPreCadastro({ ...valido, dataNascimento: '2018-02-30' }).ok, false);
+  assert.equal(validarPreCadastro({ ...valido, dataNascimento: '2999-01-01' }).ok, false);
+  assert.equal(validarPreCadastro({ ...valido, dataNascimento: '1990-01-01' }).ok, false);
 });

@@ -2,7 +2,7 @@
 //
 // O cadastro nasce num evento aberto escolhido pelo pai; o buffet dele é o do evento, nunca o que o app manda.
 // Sem evento não há buffet, e sem buffet a recepção não enxerga o cadastro (isolamento entre empresas).
-const { idadeValida } = require('./perfilCrianca');
+const { idadeValida, idadeDeNascimento } = require('./perfilCrianca');
 
 const EVENTOS_FECHADOS = new Set(['completed', 'cancelled', 'canceled', 'finished']);
 
@@ -22,10 +22,19 @@ function validarPreCadastro(body = {}) {
   const apelido = String(body.apelido || '').trim();
   if (apelido.length > 100) return { ok: false, error: 'Apelido excede o limite de 100 caracteres' };
 
-  const idade = idadeValida(body.idade ?? body.age);
-  if (idade === null) return { ok: false, error: 'Idade é obrigatória' };
+  // Com data de nascimento, a idade sai dela. Sem data, a idade continua valendo (cadastros antigos do app).
+  const dataNascimento = String(body.dataNascimento || '').trim() || null;
+  let idade;
+  if (dataNascimento) {
+    idade = idadeDeNascimento(dataNascimento);
+    if (idade === null) return { ok: false, error: 'Data de nascimento inválida' };
+    if (idade > 17) return { ok: false, error: 'A criança precisa ter até 17 anos' };
+  } else {
+    idade = idadeValida(body.idade ?? body.age);
+    if (idade === null) return { ok: false, error: 'Informe a data de nascimento da criança' };
+  }
 
-  return { ok: true, value: { eventoId, nome, apelido: apelido || null, idade } };
+  return { ok: true, value: { eventoId, nome, apelido: apelido || null, idade, dataNascimento } };
 }
 
 module.exports = { eventoAberto, validarPreCadastro };

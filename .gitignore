@@ -1,6 +1,9 @@
 # Dependências
 node_modules/
 
+# Backups da nuvem (dados reais da produção)
+backups-nuvem/
+
 # Variáveis de ambiente e segredos
 .env
 .env.*
