@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   STATUS, normalizarMac, validarNumCheck,
-  podeTransferir, podeCancelarTransferencia, podeExcluir, semIdNovo,
+  podeTransferir, podeCancelarTransferencia, podeExcluir, semIdNovo, normalizarEpc,
 } = require('../utils/checkpointTransferencia');
 
 test('as respostas atuais não levam o id novo, para o apelido id -> checkpointId do frontend continuar valendo', () => {
@@ -79,3 +79,18 @@ test('só exclui o que nunca saiu do estoque', () => {
   assert.equal(podeExcluir(STATUS.ACEITO), false);
 });
 
+
+test('o EPC é só do master: sai das respostas que vão para o buffet', () => {
+  const linha = { id: 4, checkpointId: '15', nome: 'Entrada', epc: 'E2801160' };
+  assert.deepEqual(semIdNovo(linha), { checkpointId: '15', nome: 'Entrada' });
+  assert.equal('epc' in semIdNovo([linha])[0], false);
+});
+
+test('normalizarEpc: hexadecimal em maiúsculas, sem separadores; vazio vira null', () => {
+  assert.deepEqual(normalizarEpc(''), { ok: true, valor: null });
+  assert.deepEqual(normalizarEpc(undefined), { ok: true, valor: null });
+  assert.deepEqual(normalizarEpc(' e280 1160-6000:0205 '), { ok: true, valor: 'E28011606000 0205'.replace(' ', '') });
+  assert.equal(normalizarEpc('XYZ123').ok, false);
+  assert.equal(normalizarEpc('ABC').ok, false, 'curto demais');
+  assert.equal(normalizarEpc('A'.repeat(33)).ok, false, 'longo demais');
+});

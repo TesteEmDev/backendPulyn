@@ -35,15 +35,30 @@ const podeAceitar = (status) => status === STATUS.PENDENTE;
 const podeRecusar = (status) => status === STATUS.PENDENTE;
 const podeExcluir = (status) => status === STATUS.ESTOQUE;
 
+// EPC do checkpoint (tag UHF que o identifica): só hexadecimal, em maiúsculas, sem separadores (aceita espaço, dois-pontos
+// e hífen na digitação). Vazio = sem EPC (null). Devolve { ok, valor } ou { ok: false, erro }.
+const EPC_MIN = 4;
+const EPC_MAX = 32;
+function normalizarEpc(valor) {
+  const bruto = String(valor ?? '').trim();
+  if (!bruto) return { ok: true, valor: null };
+  const hex = bruto.replace(/[\s:-]/g, '').toUpperCase();
+  if (!/^[0-9A-F]+$/.test(hex) || hex.length < EPC_MIN || hex.length > EPC_MAX) {
+    return { ok: false, erro: `EPC inválido: use de ${EPC_MIN} a ${EPC_MAX} caracteres hexadecimais (0-9 e A-F)` };
+  }
+  return { ok: true, valor: hex };
+}
+
 // O ID do checkpoint é gerado pelo banco (migrations/checkpointIdNumerico.js): `id` é o inteiro autoincremento e
 // `checkpointId` é o mesmo número escrito como texto, que as rotas e as tabelas de jogos usam como chave.
 // As telas usam `id` como apelido de checkpointId (FrontEnd/src/services/api.ts só cria o apelido quando a linha não
 // tem `id`), e um `id` numérico quebraria as comparações com texto. Por isso ele sai das respostas com linhas cruas
 // (SELECT *) de pontoVerificacao; as rotas do master o expõem de propósito.
+// O `epc` também sai: é um dado só do master (o buffet nunca o vê), e essas respostas vão para o buffet.
 function semIdNovo(linhas) {
   const tirar = (linha) => {
     if (!linha || typeof linha !== 'object') return linha;
-    const { id, ...resto } = linha;
+    const { id, epc, ...resto } = linha;
     return resto;
   };
   return Array.isArray(linhas) ? linhas.map(tirar) : tirar(linhas);
@@ -54,6 +69,7 @@ module.exports = {
   semIdNovo,
   PROPOSITOS,
   normalizarMac,
+  normalizarEpc,
   validarNumCheck,
   podeTransferir,
   podeCancelarTransferencia,
