@@ -30,7 +30,7 @@ async function ensureCheckpointTransferSchema(db = { query, allQuery }) {
   await db.query("ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS statusTransferencia varchar(10) NOT NULL DEFAULT 'aceito'");
   await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS empresaDestinoId varchar(36)');
   await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS transferidoEm timestamptz');
-  // EPC da tag que identifica o checkpoint: só o master cadastra e vê (as rotas do buffet não devolvem esta coluna).
+  // Últimos 6 dígitos do EPC da tag que identifica o checkpoint: só o master cadastra e vê (as rotas do buffet não devolvem esta coluna).
   await db.query('ALTER TABLE pontoVerificacao ADD COLUMN IF NOT EXISTS epc varchar(32)');
   try {
     await db.query('CREATE UNIQUE INDEX IF NOT EXISTS uq_pontoverificacao_epc ON pontoVerificacao (epc) WHERE epc IS NOT NULL');

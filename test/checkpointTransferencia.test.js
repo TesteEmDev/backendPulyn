@@ -86,11 +86,12 @@ test('o EPC é só do master: sai das respostas que vão para o buffet', () => {
   assert.equal('epc' in semIdNovo([linha])[0], false);
 });
 
-test('normalizarEpc: hexadecimal em maiúsculas, sem separadores; vazio vira null', () => {
+test('normalizarEpc: guarda só os últimos 6 dígitos hexadecimais, em maiúsculas; vazio vira null', () => {
   assert.deepEqual(normalizarEpc(''), { ok: true, valor: null });
   assert.deepEqual(normalizarEpc(undefined), { ok: true, valor: null });
-  assert.deepEqual(normalizarEpc(' e280 1160-6000:0205 '), { ok: true, valor: 'E28011606000 0205'.replace(' ', '') });
+  assert.deepEqual(normalizarEpc('a1b2c3'), { ok: true, valor: 'A1B2C3' });
+  assert.deepEqual(normalizarEpc(' e280 1160-6000:0205 '), { ok: true, valor: '000205' });
+  assert.deepEqual(normalizarEpc('E2801160600002054A3B1C2D'), { ok: true, valor: '3B1C2D' });
   assert.equal(normalizarEpc('XYZ123').ok, false);
-  assert.equal(normalizarEpc('ABC').ok, false, 'curto demais');
-  assert.equal(normalizarEpc('A'.repeat(33)).ok, false, 'longo demais');
+  assert.equal(normalizarEpc('ABC12').ok, false, 'menos de 6 dígitos');
 });

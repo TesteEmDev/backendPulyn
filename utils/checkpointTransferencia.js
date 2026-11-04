@@ -35,18 +35,17 @@ const podeAceitar = (status) => status === STATUS.PENDENTE;
 const podeRecusar = (status) => status === STATUS.PENDENTE;
 const podeExcluir = (status) => status === STATUS.ESTOQUE;
 
-// EPC do checkpoint (tag UHF que o identifica): só hexadecimal, em maiúsculas, sem separadores (aceita espaço, dois-pontos
-// e hífen na digitação). Vazio = sem EPC (null). Devolve { ok, valor } ou { ok: false, erro }.
-const EPC_MIN = 4;
-const EPC_MAX = 32;
+// EPC do checkpoint (tag UHF que o identifica): só os ÚLTIMOS 6 dígitos hexadecimais, em maiúsculas. Aceita o EPC inteiro
+// (com espaço, dois-pontos ou hífen) e guarda só o final. Vazio = sem EPC (null). Devolve { ok, valor } ou { ok: false, erro }.
+const EPC_DIGITOS = 6;
 function normalizarEpc(valor) {
   const bruto = String(valor ?? '').trim();
   if (!bruto) return { ok: true, valor: null };
   const hex = bruto.replace(/[\s:-]/g, '').toUpperCase();
-  if (!/^[0-9A-F]+$/.test(hex) || hex.length < EPC_MIN || hex.length > EPC_MAX) {
-    return { ok: false, erro: `EPC inválido: use de ${EPC_MIN} a ${EPC_MAX} caracteres hexadecimais (0-9 e A-F)` };
+  if (!/^[0-9A-F]+$/.test(hex) || hex.length < EPC_DIGITOS) {
+    return { ok: false, erro: `EPC inválido: informe os últimos ${EPC_DIGITOS} dígitos hexadecimais (0-9 e A-F)` };
   }
-  return { ok: true, valor: hex };
+  return { ok: true, valor: hex.slice(-EPC_DIGITOS) };
 }
 
 // O ID do checkpoint é gerado pelo banco (migrations/checkpointIdNumerico.js): `id` é o inteiro autoincremento e
