@@ -192,6 +192,35 @@ router.patch('/:checkpointId/numero', async (req, res) => {
   }
 });
 
+// Devolve ao super admin um checkpoint aceito que ainda não está em evento nenhum (o que já está num evento é devolvido
+// pela exclusão do evento, que também limpa as leituras e pontos dele).
+router.post('/:checkpointId/devolver', async (req, res) => {
+  try {
+    const atual = await checkpointDoBuffet(req, res, { exigirMac: true });
+    if (!atual) return;
+    if (atual.eventoId) {
+      return res.status(409).json({ error: 'Este checkpoint está em um evento: devolva pela lista de checkpoints do evento' });
+    }
+
+    const atualizado = await queryOne(
+      `UPDATE pontoVerificacao
+       SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+           numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
+           territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
+       WHERE checkpointId = @checkpointId AND statusTransferencia = @aceito AND empresaId = @empresaId AND eventoId IS NULL
+       RETURNING checkpointId`,
+      { estoque: STATUS.ESTOQUE, aceito: STATUS.ACEITO, empresaId: req.user.empresaId, checkpointId: atual.checkpointId }
+    );
+    if (!atualizado) return res.status(409).json({ error: 'O checkpoint mudou de situação; atualize a lista e tente de novo' });
+
+    console.log(`↩️ [RECEBIMENTO] Buffet ${req.user.empresaId} devolveu o checkpoint ${atual.checkpointId}`);
+    res.json({ success: true, devolvido: true });
+  } catch (err) {
+    console.error('❌ [RECEBIMENTO] Erro ao devolver:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Coloca o checkpoint em um evento (ou tira, com eventoId null). Se ele já tem leituras ou pontos, o evento não muda:
 // o histórico pertence ao evento em que foi feito.
 router.patch('/:checkpointId/evento', async (req, res) => {
