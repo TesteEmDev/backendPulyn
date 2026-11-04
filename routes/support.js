@@ -3,11 +3,46 @@ const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const router = express.Router();
 const { query, queryOne, allQuery, DB_DRIVER } = require('../database');
-const { verifyToken, isMaster } = require('../utils/middleware');
+const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 
 const VALID_STATUSES = new Set(['aberto', 'em_andamento', 'resolvido']);
 const VALID_PRIORITIES = new Set(['alta', 'media', 'baixa']);
 let supportTableReady;
+
+// Tipos de checkpoint que o buffet pode pedir (mesmos do cadastro do master)
+const TIPOS_CHECKPOINT = { NFC: 'NFC/RFID', UHF: 'UHF longa distância' };
+const MAX_QUANTIDADE_POR_ITEM = 500;
+
+// Valida as linhas da solicitação: [{ tipo, quantidade }] → junta quantidades do mesmo tipo
+function normalizarItens(bruto) {
+  if (!Array.isArray(bruto) || bruto.length === 0) return { erro: 'Informe o tipo e a quantidade de checkpoints' };
+  const porTipo = new Map();
+  for (const item of bruto) {
+    const tipo = String(item?.tipo || '').trim().toUpperCase();
+    const quantidade = Number(item?.quantidade);
+    if (!TIPOS_CHECKPOINT[tipo]) return { erro: 'Tipo de checkpoint inválido' };
+    if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > MAX_QUANTIDADE_POR_ITEM) {
+      return { erro: `A quantidade deve ser um número inteiro de 1 a ${MAX_QUANTIDADE_POR_ITEM}` };
+    }
+    porTipo.set(tipo, (porTipo.get(tipo) || 0) + quantidade);
+  }
+  const itens = [...porTipo].map(([tipo, quantidade]) => ({ tipo, quantidade }));
+  if (itens.some((i) => i.quantidade > MAX_QUANTIDADE_POR_ITEM)) return { erro: `No máximo ${MAX_QUANTIDADE_POR_ITEM} por tipo` };
+  return { itens };
+}
+
+function resumoDosItens(itens) {
+  return itens.map((i) => `${i.quantidade} × ${TIPOS_CHECKPOINT[i.tipo]}`).join(', ');
+}
+
+function lerItens(texto) {
+  try {
+    const itens = JSON.parse(texto || '[]');
+    return Array.isArray(itens) ? itens : [];
+  } catch {
+    return [];
+  }
+}
 
 function requireMaster(req, res, next) {
   if (!isMaster(req)) {
@@ -53,6 +88,11 @@ async function ensureSupportTable() {
         END
       `);
     }
+    // Solicitações de checkpoint feitas pelo admin do buffet usam a mesma fila: `tipoChamado` separa das demais
+    if (DB_DRIVER === 'postgres' || DB_DRIVER === 'postgresql') {
+      await query("ALTER TABLE chamadoSuport ADD COLUMN IF NOT EXISTS tipoChamado varchar(20) NOT NULL DEFAULT 'chamado'");
+      await query('ALTER TABLE chamadoSuport ADD COLUMN IF NOT EXISTS itens text');
+    }
   })().catch(err => {
     supportTableReady = null;
     throw err;
@@ -71,6 +111,8 @@ function serializeTicket(ticket) {
     priority: ticket.prioridade,
     description: ticket.descricao || '',
     atribuidoPara: ticket.atribuidoPara || 'Atribuir',
+    tipoChamado: ticket.tipoChamado || 'chamado',
+    itens: lerItens(ticket.itens),
     date: ticket.criadoEm,
     createdAt: ticket.criadoEm,
     updatedAt: ticket.atualizadoEm,
@@ -118,7 +160,7 @@ router.get('/', verifyToken, requireMaster, async (req, res) => {
     const tickets = await allQuery(`
       SELECT TOP (@limit)
         ticketId, empresaId, cliente, assunto, status, prioridade, descricao,
-        atribuidoPara, criadoEm, atualizadoEm
+        atribuidoPara, tipoChamado, itens, criadoEm, atualizadoEm
       FROM chamadoSuport
       ORDER BY criadoEm DESC
     `, { limit: parseLimit(req.query.limit) });
@@ -166,6 +208,40 @@ router.post('/', verifyToken, requireMaster, async (req, res) => {
   }
 });
 
+// Admin do buffet pede checkpoints ao master: aparece na central de suporte como um chamado do tipo 'checkpoint'
+router.post('/solicitar-checkpoints', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    await ensureSupportTable();
+    const { empresaId } = req.user;
+    if (!empresaId) return res.status(400).json({ error: 'Usuário sem empresa vinculada' });
+    const lidos = normalizarItens(req.body?.itens);
+    if (lidos.erro) return res.status(400).json({ error: lidos.erro });
+    const observacao = String(req.body?.observacao || '').trim().slice(0, 1000);
+
+    const empresa = await queryOne('SELECT nome FROM empresa WHERE empresaId = @empresaId', { empresaId });
+    const resumo = resumoDosItens(lidos.itens);
+    const id = uuidv4();
+    await query(`
+      INSERT INTO chamadoSuport
+        (ticketId, empresaId, cliente, assunto, status, prioridade, descricao, atribuidoPara, tipoChamado, itens)
+      VALUES
+        (@id, @empresaId, @cliente, @subject, 'aberto', 'media', @description, 'Atribuir', 'checkpoint', @itens)
+    `, {
+      id,
+      empresaId,
+      cliente: empresa?.nome || req.user.email || 'Cliente',
+      subject: `Solicitação de checkpoints: ${resumo}`,
+      description: observacao || null,
+      itens: JSON.stringify(lidos.itens),
+    });
+    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE ticketId = @id', { id });
+    return res.status(201).json(serializeTicket(ticket));
+  } catch (err) {
+    console.error('❌ Erro ao solicitar checkpoints:', err);
+    return res.status(500).json({ error: 'Não foi possível enviar a solicitação' });
+  }
+});
+
 router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
   try {
     await ensureSupportTable();
@@ -191,3 +267,5 @@ router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.normalizarItens = normalizarItens;
+module.exports.resumoDosItens = resumoDosItens;
