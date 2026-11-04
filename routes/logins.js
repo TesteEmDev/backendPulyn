@@ -34,6 +34,7 @@ router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, re
       FROM login
       WHERE empresaId = @empresaId
         AND NOT (perfil = 'family' AND (nomeFamilia IS NOT NULL OR telefone IS NOT NULL))
+        AND status <> 'inactive'
       ORDER BY dataCriacao DESC
     `, { empresaId });
 
@@ -79,11 +80,14 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
     // Verificar se email já existe (o login ignora maiúsculas/minúsculas)
     const existing = await queryOne(
-      'SELECT loginId FROM login WHERE LOWER(email) = LOWER(@email)',
+      'SELECT loginId, perfil, status, empresaId FROM login WHERE LOWER(email) = LOWER(@email)',
       { email }
     );
 
-    if (existing) {
+    // Conta da equipe que foi removida antes (ficou inativa): libera o e-mail para a conta nova
+    if (existing && existing.status === 'inactive' && existing.perfil !== 'family' && String(existing.empresaId) === String(empresaId)) {
+      await query('DELETE FROM login WHERE loginId = @id', { id: existing.loginId });
+    } else if (existing) {
       return res.status(400).json({ error: 'Email já cadastrado' });
     }
 
@@ -207,16 +211,28 @@ router.delete('/:id', requireRole('admin', 'master'), async (req, res) => {
       }
     }
 
-    // Deletar usuário (soft delete)
-    await query(
-      `UPDATE login 
-       SET status = @status, dataAtualizacao = GETDATE() 
-       WHERE loginId = @id 
-       AND empresaId = @empresaId`,
-      { id, status: 'inactive', empresaId: user.empresaId }
-    );
+    // Conta da equipe/telas: apagada de verdade (some da lista e o e-mail pode ser usado de novo). Conta de família só é
+    // desativada, porque tem vínculos com eventos e crianças. Se o banco recusar apagar, também cai para desativar.
+    let apagada = false;
+    if (user.perfil !== 'family') {
+      try {
+        await query('DELETE FROM login WHERE loginId = @id AND empresaId = @empresaId', { id, empresaId: user.empresaId });
+        apagada = true;
+      } catch (erro) {
+        console.warn(`⚠️ Conta ${id} tem vínculos e foi só desativada: ${erro.message}`);
+      }
+    }
+    if (!apagada) {
+      await query(
+        `UPDATE login 
+         SET status = @status, dataAtualizacao = GETDATE() 
+         WHERE loginId = @id 
+         AND empresaId = @empresaId`,
+        { id, status: 'inactive', empresaId: user.empresaId }
+      );
+    }
 
-    console.log(`✅ Usuário deletado: ${id}`);
+    console.log(`✅ Usuário ${apagada ? 'apagado' : 'desativado'}: ${id}`);
 
     res.json({ success: true });
 
