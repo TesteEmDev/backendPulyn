@@ -11,28 +11,35 @@ let supportTableReady;
 
 // Tipos de checkpoint que o buffet pode pedir (mesmos do cadastro do master)
 const TIPOS_CHECKPOINT = { NFC: 'NFC/RFID', UHF: 'UHF longa distância' };
+// Para que o buffet quer o checkpoint (informação para o master; não muda o cadastro do checkpoint)
+const FINALIDADES = { jogo: 'Jogo', pontuacao: 'Pontuação', recepcao: 'Recepção' };
 const MAX_QUANTIDADE_POR_ITEM = 500;
+const MAX_LINHAS = 12;
 
-// Valida as linhas da solicitação: [{ tipo, quantidade }] → junta quantidades do mesmo tipo
+// Valida as linhas da solicitação: [{ tipo, finalidade, quantidade }] → junta quantidades do mesmo tipo e finalidade
 function normalizarItens(bruto) {
   if (!Array.isArray(bruto) || bruto.length === 0) return { erro: 'Informe o tipo e a quantidade de checkpoints' };
+  if (bruto.length > MAX_LINHAS) return { erro: `No máximo ${MAX_LINHAS} linhas por solicitação` };
   const porTipo = new Map();
   for (const item of bruto) {
     const tipo = String(item?.tipo || '').trim().toUpperCase();
+    const finalidade = String(item?.finalidade || '').trim().toLowerCase();
     const quantidade = Number(item?.quantidade);
     if (!TIPOS_CHECKPOINT[tipo]) return { erro: 'Tipo de checkpoint inválido' };
+    if (!FINALIDADES[finalidade]) return { erro: 'Informe se o checkpoint é para jogo, pontuação ou recepção' };
     if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > MAX_QUANTIDADE_POR_ITEM) {
       return { erro: `A quantidade deve ser um número inteiro de 1 a ${MAX_QUANTIDADE_POR_ITEM}` };
     }
-    porTipo.set(tipo, (porTipo.get(tipo) || 0) + quantidade);
+    const chave = `${tipo}|${finalidade}`;
+    porTipo.set(chave, { tipo, finalidade, quantidade: (porTipo.get(chave)?.quantidade || 0) + quantidade });
   }
-  const itens = [...porTipo].map(([tipo, quantidade]) => ({ tipo, quantidade }));
-  if (itens.some((i) => i.quantidade > MAX_QUANTIDADE_POR_ITEM)) return { erro: `No máximo ${MAX_QUANTIDADE_POR_ITEM} por tipo` };
+  const itens = [...porTipo.values()];
+  if (itens.some((i) => i.quantidade > MAX_QUANTIDADE_POR_ITEM)) return { erro: `No máximo ${MAX_QUANTIDADE_POR_ITEM} por tipo e finalidade` };
   return { itens };
 }
 
 function resumoDosItens(itens) {
-  return itens.map((i) => `${i.quantidade} × ${TIPOS_CHECKPOINT[i.tipo]}`).join(', ');
+  return itens.map((i) => `${i.quantidade} × ${TIPOS_CHECKPOINT[i.tipo]} (${FINALIDADES[i.finalidade].toLowerCase()})`).join(', ');
 }
 
 function lerItens(texto) {
