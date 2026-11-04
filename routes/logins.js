@@ -26,10 +26,14 @@ router.get('/empresa/:empresaId', requireRole('admin', 'master'), async (req, re
       return res.status(403).json({ error: 'Acesso negado' });
     }
 
+    // Só as contas criadas pelo buffet (equipe e telas). Os pais que se cadastraram pelo app com o convite do evento
+    // entram no buffet como contas de família (perfil "family" com o nome da família e o telefone preenchidos) e não
+    // aparecem aqui: elas são geridas pelas telas de famílias, não pela lista de usuários.
     const users = await allQuery(`
       SELECT loginId, email, perfil, perfisExtras, status, dataCriacao as criadoEm
       FROM login
       WHERE empresaId = @empresaId
+        AND NOT (perfil = 'family' AND (nomeFamilia IS NOT NULL OR telefone IS NOT NULL))
       ORDER BY dataCriacao DESC
     `, { empresaId });
 
