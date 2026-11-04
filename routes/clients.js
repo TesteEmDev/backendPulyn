@@ -2,7 +2,8 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { query, queryOne, allQuery } = require('../database');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { apagarClienteDentroDaTransacao } = require('../utils/apagarCliente');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
 const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
@@ -418,27 +419,25 @@ router.delete('/:id', verifyToken, async (req, res) => {
       // cliente reapareceria na lista logo depois de excluído.
       const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
 
-      // 1. Deletar LOGIN
-      await query(
-        'DELETE FROM login WHERE empresaId = @id',
-        { id: req.params.id }
-      );
-      console.log(`✅ Login deletado`);
-
-      // 2. Deletar EMPRESA
-      await query(
-        'DELETE FROM empresa WHERE empresaId = @id',
-        { id: req.params.id }
-      );
-      console.log(`✅ Empresa deletada`);
-
-      // 3. Deletar CLIENTE (compatibilidade)
-      for (const legacyId of legacyIds) {
-        await query('DELETE FROM cliente WHERE clienteId = @id', { id: legacyId });
+      // Confere o que ainda é do buffet, devolve os checkpoints ao estoque do master e apaga, tudo ou nada.
+      const resultado = await withTransaction((q) => apagarClienteDentroDaTransacao(req.params.id, legacyIds, q));
+      if (resultado.bloqueios.length) {
+        const itens = resultado.bloqueios.map((b) => `${b.quantidade} ${b.rotulo}`).join(', ');
+        return res.status(409).json({
+          error: `Este cliente ainda tem ${itens}. Apague isso antes de excluir o cliente.`,
+          bloqueios: resultado.bloqueios,
+        });
       }
-      console.log(`✅ Cliente deletado`);
 
-      res.json({ deleted: true, message: 'Cliente removido com sucesso!' });
+      const { devolvidos, apagados } = resultado.checkpoints;
+      console.log(`✅ Cliente ${req.params.id} excluído (${devolvidos} checkpoint(s) devolvido(s) ao estoque, ${apagados} apagado(s))`);
+      res.json({
+        deleted: true,
+        checkpointsDevolvidos: devolvidos,
+        message: devolvidos
+          ? `Cliente removido. ${devolvidos} checkpoint(s) voltaram para o estoque do master.`
+          : 'Cliente removido com sucesso!',
+      });
     } catch (error) {
       console.error('❌ Erro ao deletar:', error.message);
       throw error;
