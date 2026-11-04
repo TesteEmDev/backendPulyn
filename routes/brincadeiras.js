@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const { checkGameStartRequirements } = require('../utils/gameRequirements');
+const { validarDuracao } = require('../utils/jogosDoPlano');
 const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { buildCheckpointConfigs, parseConfigItems, idOf } = require('../utils/liveCheckpoints');
 const { refreshTreasureTargetAfterListChange } = require('../utils/treasure');
@@ -158,9 +159,12 @@ router.get('/tipos', verifyToken, async (req, res) => {
   }
 });
 
-// Criar brincadeira
+const MENSAGEM_JOGOS_DO_PLANO = 'Os jogos já vêm cadastrados pelo seu plano. Você só pode alterar a duração e configurar os checkpoints e pontos.';
+
+// Criar brincadeira: só o master. O cliente recebe os jogos do plano já cadastrados (utils/jogosDoPlano.js).
 router.post('/', verifyToken, async (req, res) => {
   try {
+    if (!isMaster(req)) return res.status(403).json({ error: MENSAGEM_JOGOS_DO_PLANO });
     const { nome, description, rules, tipo, duration, pontosPadrao, eventoId, checkpoints } = req.body;
     const empresaId = req.user.empresaId;
     if (!Object.keys(TIPOS_DE_JOGO).includes(tipo)) {
@@ -202,7 +206,7 @@ router.post('/', verifyToken, async (req, res) => {
     }
     const id = uuidv4();
     const checkpointsJson = normalizedCheckpoints ? JSON.stringify(normalizedCheckpoints) : null;
-    
+
     await query(
       'INSERT INTO brincadeira (brincadeiraId, nome, descricao, regras, tipo, duracao, pontosPadrao, empresaId, status, eventoId, checkpoints) VALUES (@id, @nome, @description, @rules, @tipo, @duration, @pontosPadrao, @empresaId, @status, @eventoId, @checkpoints)',
       { 
@@ -219,7 +223,7 @@ router.post('/', verifyToken, async (req, res) => {
         checkpoints: checkpointsJson
       }
     );
-    
+
     console.log(`✅ Jogo criado: ${nome}`);
     res.json({ id, nome, description, rules, tipo, duration, pontosPadrao, empresaId: evento.empresaId, status: 'active', eventoId, checkpoints: normalizedCheckpoints });
   } catch (err) {
@@ -231,27 +235,38 @@ router.post('/', verifyToken, async (req, res) => {
 // Atualizar brincadeira
 router.put('/:id', verifyToken, async (req, res) => {
   try {
-    const { nome, description, rules, tipo, duration, pontosPadrao, status, eventoId, checkpoints } = req.body;
+    let { nome, description, rules, tipo } = req.body;
+    const { duration, pontosPadrao, status, eventoId, checkpoints } = req.body;
     const empresaId = req.user.empresaId;
-    if (!Object.keys(TIPOS_DE_JOGO).includes(tipo)) {
-      return res.status(400).json({ error: 'Tipo de jogo inválido' });
-    }
-    
+
     // ✅ Verificar que o jogo pertence à empresa
     const brincadeira = await queryOne(
-      `SELECT brincadeiraId, empresaId, eventoId, status, tipo
+      `SELECT brincadeiraId, empresaId, eventoId, status, tipo, nome, descricao, regras
        FROM brincadeira
        WHERE brincadeiraId = @id`,
       { id: req.params.id }
     );
-    
+
+    // O jogo é do plano: quem não é master só muda a duração (e os checkpoints e pontos); o resto fica como está.
+    if (brincadeira && !isMaster(req)) {
+      nome = brincadeira.nome;
+      description = brincadeira.descricao;
+      rules = brincadeira.regras;
+      tipo = brincadeira.tipo;
+    }
+    if (!Object.keys(TIPOS_DE_JOGO).includes(tipo)) {
+      return res.status(400).json({ error: 'Tipo de jogo inválido' });
+    }
+    const duracaoValida = validarDuracao(duration);
+    if (!duracaoValida.ok) return res.status(400).json({ error: duracaoValida.erro });
+
     if (!brincadeira) {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
     if (String(brincadeira.status || '').trim().toLowerCase() === 'archived') {
       return res.status(404).json({ error: 'Jogo não encontrado' });
     }
-    
+
     if (!isMaster(req) && brincadeira.empresaId !== empresaId) {
       return res.status(403).json({ error: 'Acesso negado: jogo não pertence a esta empresa' });
     }
@@ -274,7 +289,7 @@ router.put('/:id', verifyToken, async (req, res) => {
     if (evento.empresaId !== brincadeira.empresaId) {
       return res.status(403).json({ error: 'O jogo e o evento devem pertencer à mesma empresa' });
     }
-    
+
     const normalizedCheckpoints = normalizeCheckpointConfigs(tipo, checkpoints);
     const selectedCheckpointIds = Array.isArray(normalizedCheckpoints)
       ? normalizedCheckpoints.map(cp => idOf(cp) || String(cp?.checkpointId || '')).filter(Boolean)
@@ -303,7 +318,7 @@ router.put('/:id', verifyToken, async (req, res) => {
         description,
         rules,
         tipo,
-        duration: parseInt(duration),
+        duration: duracaoValida.valor,
         pontosPadrao,
         status,
         eventoId: targetEventoId,
@@ -311,7 +326,7 @@ router.put('/:id', verifyToken, async (req, res) => {
         id: req.params.id
       }
     );
-    
+
     console.log(`✅ Jogo atualizado: ${req.params.id}`);
 
     // Se este jogo está rodando, a partida passa a usar a lista nova (alvo/especial corrigidos).
@@ -440,6 +455,7 @@ router.patch('/:id/status', verifyToken, requireRole('admin', 'master'), async (
 // Arquivar brincadeira sem apagar o histórico
 router.delete('/:id', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
+    if (!isMaster(req)) return res.status(403).json({ error: 'Os jogos do plano não podem ser arquivados.' });
     const gameId = req.params.id;
     const empresaId = req.user.empresaId;
 

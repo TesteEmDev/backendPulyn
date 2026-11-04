@@ -2,8 +2,8 @@
 // Usado pela visão de planos (routes/planos.js) e pelos detalhes do cliente (routes/clients.js).
 // Tipos de jogo que existem e o nome mostrado ao criar um jogo.
 const TIPOS_DE_JOGO = {
-  team: 'Equipe',
-  individual: 'Individual',
+  team: 'Zona - Equipe',
+  individual: 'Zona - Individual',
   cooperative: 'Cooperativo',
   treasure_hunt: 'Caça ao Tesouro',
   monster_hunt: 'Caça ao Monstro',
@@ -12,8 +12,10 @@ const TIPOS_DE_JOGO = {
   hostage_rescue: 'Resgate do Refém (PulynBall)',
 };
 
-// Tipos que cada plano pode CRIAR. O plano PulynBall trabalha só com os jogos de paintball; os demais, com os jogos comuns.
-const TIPOS_COMUNS = ['team', 'individual', 'cooperative', 'treasure_hunt', 'monster_hunt'];
+// Jogos que cada plano entrega já cadastrados (utils/jogosDoPlano.js). O plano PulynBall trabalha só com os jogos de
+// paintball; os demais, com os 4 jogos comuns: Zona Equipe, Zona Individual, Caça ao Tesouro e Caça ao Monstro.
+// ('cooperative' continua existindo em TIPOS_DE_JOGO só para os jogos antigos que já foram criados.)
+const TIPOS_COMUNS = ['team', 'individual', 'treasure_hunt', 'monster_hunt'];
 const TIPOS_PULYNBALL = ['bomb_defusal', 'zone_domination', 'hostage_rescue'];
 
 function tiposDeJogoDoPlano(planId) {

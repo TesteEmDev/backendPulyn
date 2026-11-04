@@ -72,6 +72,7 @@ const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
 const { ensureCheckpointTransferSchema } = require('./migrations/checkpointTransferencia');
+const { garantirJogosDeTodasAsEmpresas } = require('./utils/jogosDoPlano');
 const { ensureCheckpointIdNumericoSchema } = require('./migrations/checkpointIdNumerico');
 const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
 const { ensureUhfSchema } = require('./migrations/uhf');
@@ -2063,6 +2064,13 @@ async function startServer() {
     await ensureZoneConquestIndividualSchema();
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
+    // Cada cliente recebe os jogos do plano dele (só cria o que falta)
+    try {
+      const criados = await garantirJogosDeTodasAsEmpresas();
+      if (criados) console.log(`🎮 ${criados} jogo(s) do plano entregue(s) aos clientes`);
+    } catch (err) {
+      console.warn(`⚠️ Não foi possível entregar os jogos do plano: ${err.message}`);
+    }
     // Início e encerramento automáticos dos eventos (autoInicio/autoFim): varredura a cada 15 s
     eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');

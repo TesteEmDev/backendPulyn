@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { garantirJogosDaEmpresa } = require('../utils/jogosDoPlano');
 const { apagarClienteDentroDaTransacao, encerrarEventosEmAndamento, resumoDoCliente } = require('../utils/apagarCliente');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
@@ -209,7 +210,7 @@ router.post('/', verifyToken, async (req, res) => {
     if (planoInvalido(plan)) {
       return res.status(400).json({ error: `Plano inválido. Use: ${Object.keys(PLAN_DEFINITIONS).join(', ')}` });
     }
-    
+
     if (!email || !senha) {
       return res.status(400).json({ error: 'Email e senha são obrigatórios' });
     }
@@ -221,10 +222,10 @@ router.post('/', verifyToken, async (req, res) => {
     const clienteId = uuidv4();
     const empresaId = uuidv4();
     const loginId = uuidv4();
-    
+
     // Hash simples da senha (em produção, usar bcrypt)
     const hashedPassword = Buffer.from(senha).toString('base64');
-    
+
     try {
       // 1️⃣ Criar EMPRESA
       await query(
@@ -241,6 +242,8 @@ router.post('/', verifyToken, async (req, res) => {
         }
       );
       console.log(`✅ Empresa criada: ${nome} (ID: ${empresaId})`);
+      // O cliente já nasce com os jogos do plano dele cadastrados
+      await garantirJogosDaEmpresa(empresaId);
 
       // 2️⃣ Criar LOGIN
       await query(
@@ -347,6 +350,8 @@ router.put('/:id', verifyToken, async (req, res) => {
           }
         );
       }
+      // Trocou de plano: recebe os jogos do plano novo que ainda não tem (os que já tem ficam)
+      if (plan) await garantirJogosDaEmpresa(req.params.id);
 
       for (const legacyId of legacyIds) {
         await query(
