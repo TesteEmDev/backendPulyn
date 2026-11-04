@@ -1,14 +1,12 @@
 // Ensaio da exclusão de cliente: roda no banco de dev DENTRO de uma transação e a DESFAZ (ROLLBACK).
-// Cria um buffet com um checkpoint com MAC (aceito), um sem MAC e um pendente, e confere:
-//  1. buffet com evento é recusado com a lista do que impede, sem alterar nada;
-//  2. buffet sem pendências é apagado, os checkpoints com MAC (aceito e pendente) voltam ao estoque e o sem MAC é apagado.
+// Confere: 1. buffet com evento em andamento tem o evento encerrado e apagado junto; 2. buffet sem eventos é apagado, os checkpoints com MAC (aceito e pendente) voltam ao estoque e o sem MAC é apagado.
 // Uso: node debug/ensaio-apagar-cliente.js
 require('dotenv').config();
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const database = require('../database');
 const { queryOne, closeDB } = database;
-const { apagarClienteDentroDaTransacao } = require('../utils/apagarCliente');
+const { apagarClienteDentroDaTransacao, resumoDoCliente, encerrarEventosEmAndamento } = require('../utils/apagarCliente');
 
 class Desfazer extends Error {}
 
@@ -38,16 +36,29 @@ async function main() {
       const linha = (id) => queryOne('SELECT * FROM pontoVerificacao WHERE checkpointId = @id', { id });
       void colunas;
 
-      // 1) buffet com evento: recusa
+      // 1) buffet com evento em andamento, participante e pulseira: encerra, apaga tudo e devolve o checkpoint
       const comEvento = await nova('Ensaio com evento');
-      await q.query(`INSERT INTO evento (eventoId, empresaId, nome, data, hora, duracao, status) VALUES (@id, @e, 'Ensaio', '2030-01-01', '10:00', 60, 'scheduled')`, { id: crypto.randomUUID(), e: comEvento });
+      const eventoId = crypto.randomUUID();
+      await q.query(`INSERT INTO evento (eventoId, empresaId, nome, data, hora, duracao, status) VALUES (@id, @e, 'Ensaio', '2030-01-01', '10:00', 60, 'active')`, { id: eventoId, e: comEvento });
+      await q.query(`INSERT INTO evento (eventoId, empresaId, nome, data, hora, duracao, status) VALUES (@id, @e, 'Ensaio 2', '2030-01-02', '10:00', 60, 'scheduled')`, { id: crypto.randomUUID(), e: comEvento });
       const preso = await cp(comEvento, { mac: 'AA:00:00:00:00:01', status: 'aceito' });
+      await q.query(`UPDATE pontoVerificacao SET eventoId = @ev WHERE checkpointId = @id`, { ev: eventoId, id: preso });
+      const resumo = await resumoDoCliente(comEvento, q);
+      assert.equal(resumo.eventos, 2);
+      assert.equal(resumo.eventosEmAndamento, 1);
+      assert.equal(resumo.checkpointsParaEstoque, 1);
+      const encerrados = await encerrarEventosEmAndamento(comEvento, q, {});
+      assert.equal(encerrados, 1);
+      assert.equal((await queryOne('SELECT status FROM evento WHERE eventoId = @id', { id: eventoId })).status, 'finished');
       const r1 = await apagarClienteDentroDaTransacao(comEvento, [], q);
-      assert.equal(r1.bloqueios.length, 1);
-      assert.equal(r1.bloqueios[0].rotulo, 'evento(s)');
-      assert.equal((await linha(preso)).empresaId, comEvento, 'nada foi alterado');
-      assert.ok(await queryOne('SELECT 1 AS x FROM empresa WHERE empresaId = @e', { e: comEvento }), 'empresa continua');
-      console.log('  ✔ buffet com evento: exclusão recusada, lista o que impede e não mexe em nada');
+      assert.equal(r1.eventosApagados, 2);
+      assert.ok(!(await queryOne('SELECT 1 AS x FROM evento WHERE eventoId = @id', { id: eventoId })), 'evento apagado');
+      assert.ok(!(await queryOne('SELECT 1 AS x FROM empresa WHERE empresaId = @e', { e: comEvento })), 'empresa apagada');
+      const volta = await linha(preso);
+      assert.equal(volta.statusTransferencia, 'estoque');
+      assert.equal(volta.empresaId, null);
+      assert.equal(volta.eventoId, null);
+      console.log('  ✔ buffet com evento em andamento: evento encerrado e apagado, cliente apagado, checkpoint de volta ao estoque');
 
       // 2) buffet limpo: apaga e devolve
       const limpo = await nova('Ensaio limpo');
@@ -55,8 +66,7 @@ async function main() {
       const pendente = await cp(limpo, { mac: 'AA:00:00:00:00:03', status: 'pendente' });
       const semMac = await cp(limpo, { mac: null, status: 'aceito' });
       const r2 = await apagarClienteDentroDaTransacao(limpo, [], q);
-      assert.equal(r2.bloqueios.length, 0);
-      assert.equal(r2.checkpoints.devolvidos, 2);
+            assert.equal(r2.checkpoints.devolvidos, 2);
       assert.equal(r2.checkpoints.apagados, 1);
       assert.ok(!(await queryOne('SELECT 1 AS x FROM empresa WHERE empresaId = @e', { e: limpo })), 'empresa apagada');
       for (const id of [comMac, pendente]) {

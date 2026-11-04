@@ -3,7 +3,7 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
-const { apagarClienteDentroDaTransacao } = require('../utils/apagarCliente');
+const { apagarClienteDentroDaTransacao, encerrarEventosEmAndamento, resumoDoCliente } = require('../utils/apagarCliente');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
 const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
@@ -406,6 +406,18 @@ router.put('/:id/status', verifyToken, async (req, res) => {
   }
 });
 
+// O que será apagado junto com o cliente (aviso na tela antes de confirmar)
+router.get('/:id/resumo-exclusao', verifyToken, async (req, res) => {
+  try {
+    if (!isMaster(req)) return res.status(403).json({ error: 'Acesso negado: apenas master' });
+    const empresa = await queryOne('SELECT empresaId FROM empresa WHERE LOWER(empresaId) = LOWER(@id)', { id: req.params.id });
+    if (!empresa) return res.status(404).json({ error: 'Cliente não encontrado' });
+    res.json(await resumoDoCliente(req.params.id, { queryOne }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ✅ APENAS MASTER pode deletar cliente
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
@@ -419,24 +431,18 @@ router.delete('/:id', verifyToken, async (req, res) => {
       // cliente reapareceria na lista logo depois de excluído.
       const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
 
-      // Confere o que ainda é do buffet, devolve os checkpoints ao estoque do master e apaga, tudo ou nada.
+      // Encerra os eventos em andamento e apaga tudo do buffet (eventos, participantes...), devolvendo os checkpoints ao
+      // estoque do master; a exclusão é tudo ou nada.
+      const encerrados = await encerrarEventosEmAndamento(req.params.id, { allQuery }, { stopGame: global.stopGameForEvento });
       const resultado = await withTransaction((q) => apagarClienteDentroDaTransacao(req.params.id, legacyIds, q));
-      if (resultado.bloqueios.length) {
-        const itens = resultado.bloqueios.map((b) => `${b.quantidade} ${b.rotulo}`).join(', ');
-        return res.status(409).json({
-          error: `Este cliente ainda tem ${itens}. Apague isso antes de excluir o cliente.`,
-          bloqueios: resultado.bloqueios,
-        });
-      }
 
       const { devolvidos, apagados } = resultado.checkpoints;
-      console.log(`✅ Cliente ${req.params.id} excluído (${devolvidos} checkpoint(s) devolvido(s) ao estoque, ${apagados} apagado(s))`);
+      console.log(`✅ Cliente ${req.params.id} excluído por ${req.user.email || req.user.role}: ${resultado.eventosApagados} evento(s) (${encerrados} encerrado(s) antes), ${devolvidos} checkpoint(s) devolvido(s), ${apagados} apagado(s)`);
       res.json({
         deleted: true,
+        eventosApagados: resultado.eventosApagados,
         checkpointsDevolvidos: devolvidos,
-        message: devolvidos
-          ? `Cliente removido. ${devolvidos} checkpoint(s) voltaram para o estoque do master.`
-          : 'Cliente removido com sucesso!',
+        message: `Cliente removido. ${resultado.eventosApagados} evento(s) apagado(s) e ${devolvidos} checkpoint(s) devolvido(s) ao estoque do master.`,
       });
     } catch (error) {
       console.error('❌ Erro ao deletar:', error.message);
