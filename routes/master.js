@@ -30,22 +30,22 @@ router.get('/dashboard', verifyToken, async (req, res) => {
     `);
     
     // Checkpoints: o `status` gravado só vira 'offline' quando alguém avisa, então "online" é calculado pelo último sinal
-    // da placa (statusEfetivo). Contam todos os aparelhos do master: em estoque, com o buffet e aguardando aceite.
+    // da placa (statusEfetivo). Contam todos os aparelhos do master: em estoque e com o buffet (semNumero: ainda sem o número do buffet).
     const aparelhos = await allQuery(`
-      SELECT c.status, c.ultimoVisto, c.statusTransferencia, c.proposito
+      SELECT c.status, c.ultimoVisto, c.statusTransferencia, c.proposito, c.numCheck
       FROM pontoVerificacao c
       LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
       WHERE emp.nome IS NULL OR emp.nome != 'Master Admin'
     `);
     const agora = Date.now();
-    const checkpoints = { total: aparelhos.length, online: 0, offline: 0, emEstoque: 0, aguardandoAceite: 0, comBuffets: 0, offlineComBuffets: 0 };
+    const checkpoints = { total: aparelhos.length, online: 0, offline: 0, emEstoque: 0, semNumero: 0, comBuffets: 0, offlineComBuffets: 0 };
     for (const ap of aparelhos) {
       const online = statusEfetivo(ap.status, ap.ultimoVisto, agora) === 'online';
       if (online) checkpoints.online += 1; else checkpoints.offline += 1;
       if (ap.statusTransferencia === STATUS.ESTOQUE) checkpoints.emEstoque += 1;
-      else if (ap.statusTransferencia === STATUS.PENDENTE) checkpoints.aguardandoAceite += 1;
       else {
         checkpoints.comBuffets += 1;
+        if (!ap.numCheck) checkpoints.semNumero += 1;
         if (!online) checkpoints.offlineComBuffets += 1;
       }
     }

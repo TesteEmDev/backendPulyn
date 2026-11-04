@@ -115,7 +115,7 @@ router.get('/', verifyToken, async (req, res) => {
       const ident = [cp.macAddress ? `MAC: ${cp.macAddress}` : null, cp.zona ? `Zona: ${cp.zona}` : null,
         String(cp.proposito || 'game').toLowerCase() === 'reception' ? 'Recepção' : null].filter(Boolean).join('\n');
       if (master) add(`cp-cadastro-${cp.checkpointId}`, cp.criadoEm, 'Super admin', 'checkpoint', 'info', `Checkpoint cadastrado: ${nome}`, ident);
-      if (cp.transferidoEm && (cp.statusTransferencia === STATUS.PENDENTE || cp.statusTransferencia === STATUS.ACEITO)) {
+      if (cp.transferidoEm && cp.statusTransferencia === STATUS.ACEITO) {
         const aceito = cp.statusTransferencia === STATUS.ACEITO;
         add(`cp-envio-${cp.checkpointId}`, cp.transferidoEm, cp.destino_nome || cp.empresa_nome, 'checkpoint', 'sync',
           `Checkpoint ${nome} enviado ao buffet`, `${aceito ? 'Já aceito pelo buffet' : 'Aguardando aceite do buffet'}\n${ident}`);
