@@ -523,8 +523,9 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     );
     await query(
       `DELETE FROM leitura
-       WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
-      { checkpointId: checkpoint.checkpointId }
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+         AND (criancaId IS NULL OR criancaId IN (SELECT criancaId FROM crianca WHERE LOWER(eventoId) = LOWER(@eventoId)))`,
+      { checkpointId: checkpoint.checkpointId, eventoId }
     );
     await query(
       `DELETE FROM "etiquetaCheckpoint"

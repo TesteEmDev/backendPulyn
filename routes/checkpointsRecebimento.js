@@ -147,8 +147,10 @@ router.post('/:checkpointId/devolver', async (req, res) => {
   }
 });
 
-// Coloca o checkpoint em um evento (ou tira, com eventoId null). Se ele já tem leituras ou pontos, o evento não muda:
-// o histórico pertence ao evento em que foi feito.
+// Coloca o checkpoint em um evento, troca de evento ou tira (eventoId null). O mesmo aparelho serve a vários eventos, um
+// de cada vez. O histórico não anda junto: as leituras pertencem ao evento pelas crianças (crianca.eventoId) e os pontos
+// têm o próprio eventoId, então o evento antigo continua com o que aconteceu nele. O que é só do evento em andamento
+// (território conquistado) é zerado ao trocar.
 router.patch('/:checkpointId/evento', async (req, res) => {
   try {
     const atual = await checkpointDoBuffet(req, res, { exigirMac: true });
@@ -164,19 +166,12 @@ router.patch('/:checkpointId/evento', async (req, res) => {
       eventoId = evento.eventoId;
     }
 
-    if (atual.eventoId) {
-      const historico = await queryOne(
-        `SELECT (SELECT COUNT(*) FROM leitura WHERE checkpointId = @checkpointId) AS leituras,
-                (SELECT COUNT(*) FROM pontuacao WHERE checkpointId = @checkpointId) AS pontos`,
-        { checkpointId: atual.checkpointId }
-      );
-      if (Number(historico.leituras) > 0 || Number(historico.pontos) > 0) {
-        return res.status(409).json({ error: 'Este checkpoint já tem leituras ou pontos no evento atual, então não pode mudar de evento' });
-      }
-    }
-
     await query(
-      'UPDATE pontoVerificacao SET eventoId = @eventoId, atualizadoEm = now() WHERE checkpointId = @checkpointId',
+      `UPDATE pontoVerificacao
+       SET eventoId = @eventoId, atualizadoEm = now(),
+           territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
+           territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL
+       WHERE checkpointId = @checkpointId`,
       { eventoId, checkpointId: atual.checkpointId }
     );
     console.log(`📅 [RECEBIMENTO] Checkpoint ${atual.checkpointId}: evento ${atual.eventoId || '-'} -> ${eventoId || '-'}`);

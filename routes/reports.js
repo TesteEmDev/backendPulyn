@@ -110,6 +110,7 @@ router.get('/evento/:eventoId/zonas', async (req, res) => {
         COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
       FROM pontoVerificacao cp
       LEFT JOIN leitura l ON l.checkpointId = cp.checkpointId AND l.criancaId IS NOT NULL
+        AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = cp.eventoId)
       WHERE cp.eventoId = @eventoId
         AND cp.empresaId = @empresaId
         AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
@@ -151,6 +152,7 @@ router.get('/evento/:eventoId/checkpoints', async (req, res) => {
         COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
       FROM pontoVerificacao cp
       LEFT JOIN leitura l ON l.checkpointId = cp.checkpointId AND l.criancaId IS NOT NULL
+        AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = cp.eventoId)
       WHERE cp.eventoId = @eventoId
         AND cp.empresaId = @empresaId
         AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
