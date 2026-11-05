@@ -23,7 +23,10 @@ async function verifyToken(req, res, next) {
 
   // Token com versão (claim `tv`): a conta precisa existir, não ter sido excluída e a versão precisa ser a atual.
   // Trocar a senha ou excluir a conta derruba as sessões abertas.
-  if (decoded.tv !== undefined) {
+  // A sessão do telão (/auth/telao) não é uma conta: o id é o do buffet. Os tokens antigos dela saíam com tv: 0 e eram
+  // recusados aqui por não haver conta; o telão não tem conta para conferir, então fica de fora.
+  const sessaoDeTelao = decoded.role === 'display' && decoded.email === 'telao';
+  if (decoded.tv !== undefined && !sessaoDeTelao) {
     try {
       const conta = await queryOne('SELECT status, tokenVersao FROM login WHERE loginId = @id', { id: decoded.id });
       if (!conta || conta.status === 'excluida' || Number(conta.tokenVersao) !== Number(decoded.tv)) {

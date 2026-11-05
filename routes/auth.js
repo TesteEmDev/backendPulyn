@@ -20,7 +20,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-202
 const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk', 'score_kiosk']);
 
 // Token da conta na área `role`. `papeis` é a lista de áreas que a conta pode usar (vai junto para o front).
-function assinarToken(login, role, papeis, expiresIn = '24h') {
+// `semConta`: sessão que não é uma conta (telão: o id é o do buffet). Ela não leva `tv`, porque a verificação do token
+// com `tv` procura essa conta no login e recusaria a sessão (401 "Sessão encerrada").
+function assinarToken(login, role, papeis, expiresIn = '24h', { semConta = false } = {}) {
   return jwt.sign(
     {
       id: login.loginId,
@@ -30,7 +32,7 @@ function assinarToken(login, role, papeis, expiresIn = '24h') {
       role,
       papeis,
       plan: login.plano,   // o painel usa para mostrar os jogos do plano (o backend confere no banco)
-      tv: Number(login.tokenVersao || 0)   // versão da sessão: trocar a senha ou excluir a conta derruba este token
+      ...(semConta ? {} : { tv: Number(login.tokenVersao || 0) })   // versão da sessão: trocar a senha ou excluir a conta derruba este token
     },
     JWT_SECRET,
     { expiresIn }
@@ -143,7 +145,7 @@ const tentativasDeTelao = criarLimitador({ max: 15, janelaMs: 10 * 60 * 1000 });
 function sessaoDeTelao(empresa) {
   const token = assinarToken(
     { loginId: empresa.empresaId, email: 'telao', empresaId: empresa.empresaId, empresa_nome: empresa.nome, plano: empresa.plano },
-    'display', ['display'], TELAO_TOKEN_VALIDADE
+    'display', ['display'], TELAO_TOKEN_VALIDADE, { semConta: true }
   );
   return {
     success: true,
@@ -817,3 +819,4 @@ router.delete('/conta', verifyToken, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.assinarToken = assinarToken;   // para os testes
