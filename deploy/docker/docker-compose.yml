@@ -1,0 +1,57 @@
+# Instalação do Pulyn em Docker: banco, backend e site (com HTTPS na rede local).
+# Use pelos scripts (iniciar.ps1), que passam o arquivo ../../.env.docker.
+name: pulyn
+
+services:
+  db:
+    image: postgres:17
+    container_name: pulyn-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: pulyn
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: AdvPulyn
+    volumes:
+      - pulyn_db:/var/lib/postgresql/data
+      # Esquema inicial: roda só quando o banco é criado pela primeira vez.
+      - ../../docker/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pulyn -d AdvPulyn"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: pulyn-backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file:
+      - ../../.env.docker
+    environment:
+      DB_DRIVER: postgres
+      DB_SSL: "false"
+      DATABASE_URL: postgresql://pulyn:${POSTGRES_PASSWORD}@db:5432/AdvPulyn
+      PORT: "3001"
+      HOST: 0.0.0.0
+
+  web:
+    image: nginx:alpine
+    container_name: pulyn-web
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+
+volumes:
+  pulyn_db:
