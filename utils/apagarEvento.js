@@ -13,7 +13,7 @@ const { recalcularUltimoEvento } = require('./perfilCrianca');
 
 // Tabelas de jogos cujo eventoId não é chave estrangeira: toda linha do evento é apagada, nesta ordem.
 const TABELAS_DE_JOGO = [
-  '"bonusVencedorJogo"', '"vencedorBrincadeiraParalela"', '"brincadeiraParalela"',
+  '"eventoCheckpoint"', '"bonusVencedorJogo"', '"vencedorBrincadeiraParalela"', '"brincadeiraParalela"',
   '"cacaTesourScan"', '"cacaTesourTempo"', '"cacaTesourPartida"',
   '"monsterCacaLeitura"', '"monsterCacaEstadoTime"', '"monsterCacaPartida"',
   '"zonaConquistaLeituraIndividual"', '"zonaConquistaLeituraTime"', '"zonaConquistaEstadoParticipanteIndividual"',

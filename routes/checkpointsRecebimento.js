@@ -166,6 +166,16 @@ router.patch('/:checkpointId/evento', async (req, res) => {
       eventoId = evento.eventoId;
     }
 
+    // O evento de onde ele sai guarda que usou este checkpoint
+    if (atual.eventoId) {
+      await query(
+        `INSERT INTO eventoCheckpoint (id, empresaId, eventoId, checkpointId, numCheck, nome)
+         VALUES (@id, @empresaId, @eventoId, @checkpointId, @numCheck, @nome)
+         ON CONFLICT (eventoId, checkpointId) DO UPDATE SET numCheck = EXCLUDED.numCheck, nome = EXCLUDED.nome`,
+        { id: require('uuid').v4(), empresaId: atual.empresaId || null, eventoId: atual.eventoId, checkpointId: atual.checkpointId, numCheck: atual.numCheck ?? null, nome: atual.nome ?? null }
+      );
+    }
+
     await query(
       `UPDATE pontoVerificacao
        SET eventoId = @eventoId, atualizadoEm = now(),

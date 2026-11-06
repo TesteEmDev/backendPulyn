@@ -96,6 +96,7 @@ const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpos
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureGameWinnerBonusesSchema } = require('./migrations/gameWinnerBonuses');
+const { ensureEventCheckpointHistorySchema } = require('./migrations/eventCheckpointHistory');
 const { ensureAvatarSchema } = require('./migrations/avatar');
 const { ensureCompanyMapSchema, migrateExistingEventMapDataToCompanies } = require('./migrations/companyMap');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
@@ -2087,6 +2088,7 @@ async function startServer() {
     await ensureCheckpointMapPositionSchema();
     await ensureMonsterHuntSchema();
     await ensureGameWinnerBonusesSchema();
+    await ensureEventCheckpointHistorySchema();
     await ensureAvatarSchema();
     await ensureCompanyMapSchema();
     await migrateExistingEventMapDataToCompanies();

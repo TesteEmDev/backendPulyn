@@ -110,8 +110,8 @@ router.get('/evento/:eventoId/zonas', async (req, res) => {
         COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
       FROM pontoVerificacao cp
       LEFT JOIN leitura l ON l.checkpointId = cp.checkpointId AND l.criancaId IS NOT NULL
-        AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = cp.eventoId)
-      WHERE cp.eventoId = @eventoId
+        AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = @eventoId)
+      WHERE (cp.eventoId = @eventoId OR cp.checkpointId IN (SELECT checkpointId FROM eventoCheckpoint WHERE eventoId = @eventoId))
         AND cp.empresaId = @empresaId
         AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
       GROUP BY COALESCE(NULLIF(TRIM(cp.zona), ''), 'Sem zona')
@@ -152,8 +152,8 @@ router.get('/evento/:eventoId/checkpoints', async (req, res) => {
         COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
       FROM pontoVerificacao cp
       LEFT JOIN leitura l ON l.checkpointId = cp.checkpointId AND l.criancaId IS NOT NULL
-        AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = cp.eventoId)
-      WHERE cp.eventoId = @eventoId
+        AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = @eventoId)
+      WHERE (cp.eventoId = @eventoId OR cp.checkpointId IN (SELECT checkpointId FROM eventoCheckpoint WHERE eventoId = @eventoId))
         AND cp.empresaId = @empresaId
         AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
       GROUP BY cp.checkpointId, cp.nome, NULLIF(TRIM(cp.zona), '')

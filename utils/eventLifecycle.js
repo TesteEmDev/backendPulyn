@@ -5,6 +5,7 @@
 // o evento para 'active' e "parar jogo" voltava para 'scheduled').
 const { query, queryOne, allQuery } = require('../database');
 const { releaseBraceletsForEvent } = require('./braceletRelease');
+const { liberarCheckpointsParaEvento, restaurarCheckpointsDoEvento } = require('./checkpointsDoEvento');
 
 // Data e hora do evento são digitadas pelo buffet no relógio local dele, sem fuso.
 // O servidor (Render) roda em UTC, então o "agora" é convertido para esse fuso.
@@ -173,7 +174,19 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
   } catch (err) {
     console.error(`❌ [EVENTO] Não foi possível liberar as pulseiras de ${evento.eventoId}: ${err.message}`);
   }
-  return { changed: true, ...pulseiras };
+
+  // Os checkpoints também são do buffet e passam por vários eventos: saem deste ao encerrar, ficando registrado
+  // quais ele usou (eventoCheckpoint). Uma falha aqui não desfaz o encerramento.
+  let checkpoints = { checkpointsLiberados: 0 };
+  try {
+    checkpoints = await liberarCheckpointsParaEvento(evento.eventoId);
+    if (checkpoints.checkpointsLiberados > 0) {
+      console.log(`🔓 [EVENTO] ${evento.eventoId}: ${checkpoints.checkpointsLiberados} checkpoint(s) liberado(s) ao encerrar`);
+    }
+  } catch (err) {
+    console.error(`❌ [EVENTO] Não foi possível liberar os checkpoints de ${evento.eventoId}: ${err.message}`);
+  }
+  return { changed: true, ...pulseiras, ...checkpoints };
 }
 
 // Reabre um evento encerrado: volta para "agendado" na nova data/horário (e duração, se informada),
@@ -202,6 +215,14 @@ async function reopenEvent(eventoId, { date, time, duration } = {}) {
     { eventoId: evento.eventoId, date, time, duration: duration ?? null }
   );
   if (!(Number(result?.rowsAffected?.[0] || 0) > 0)) return { changed: false, reason: 'not_finished' };
+
+  // Os checkpoints que o evento usou voltam para ele, se ainda estiverem livres
+  try {
+    const devolvidos = await restaurarCheckpointsDoEvento(evento.eventoId);
+    if (devolvidos > 0) console.log(`🔓 [EVENTO] ${evento.eventoId}: ${devolvidos} checkpoint(s) devolvido(s) ao reabrir`);
+  } catch (err) {
+    console.error(`❌ [EVENTO] Não foi possível devolver os checkpoints de ${evento.eventoId}: ${err.message}`);
+  }
 
   console.log(`🔓 [EVENTO] ${evento.eventoId} reaberto para ${date} ${time}`);
   broadcastCompany(evento.empresaId, {
