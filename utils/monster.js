@@ -240,6 +240,19 @@ async function getMonsterWinnerTeamId(session) {
   return first?.timeId || session.timeVencedorId || null;
 }
 
+// Equipes que não venceram, da melhor para a pior: as que derrotaram o monstro (a mais rápida primeiro), depois
+// as outras pelo dano causado ao monstro dela.
+async function getMonsterLoserTeamIds(session, vencedoraId) {
+  const estados = await allQuery(`
+    SELECT timeId, vida, vidaMaxima, derrotadoEm FROM monsterCacaEstadoTime
+    WHERE LOWER(partidaId) = LOWER(@partidaId)`, { partidaId: session.id });
+  const outras = estados.filter((estado) => String(estado.timeId).toLowerCase() !== String(vencedoraId).toLowerCase());
+  const derrotaram = outras.filter((e) => e.derrotadoEm).sort((a, b) => new Date(a.derrotadoEm) - new Date(b.derrotadoEm));
+  const dano = (e) => Number(e.vidaMaxima || 0) - Number(e.vida || 0);
+  const restantes = outras.filter((e) => !e.derrotadoEm).sort((a, b) => dano(b) - dano(a));
+  return [...derrotaram, ...restantes].map((estado) => estado.timeId);
+}
+
 async function awardMonsterWinnerBonus(session) {
   const teamId = await getMonsterWinnerTeamId(session);
   if (!teamId) return null;
@@ -248,6 +261,7 @@ async function awardMonsterWinnerBonus(session) {
     partidaId: session.id,
     gameType: MONSTER_GAME_TYPE,
     teamId,
+    perdedores: await getMonsterLoserTeamIds(session, teamId),
   });
 }
 
@@ -274,6 +288,7 @@ async function awardMonsterBonusOnStop(eventoId) {
     partidaId: session.id,
     gameType: MONSTER_GAME_TYPE,
     teamId,
+    perdedores: await getMonsterLoserTeamIds(session, teamId),
   });
 }
 

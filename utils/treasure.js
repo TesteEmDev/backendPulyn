@@ -211,6 +211,11 @@ function chooseRandom(values) {
 // Quem está na frente pelo progresso: a equipe com mais checkpoints da partida acesos (dominados) agora.
 // Só a equipe da vez tem checkpoints acesos (ao trocar de equipe o mapa zera), então é ela, se já acendeu algum.
 async function getTeamWithMostProgress(eventoId, session) {
+  return escolherLider(await progressoPorEquipe(eventoId, session));
+}
+
+// Checkpoints da partida acesos agora por equipe: [{ teamId, valor }]
+async function progressoPorEquipe(eventoId, session) {
   const ids = await getTreasureCheckpointIds(eventoId, session.brincadeiraId, session);
   const dominados = new Map();
   for (const checkpoint of await getEventCheckpoints(eventoId)) {
@@ -218,7 +223,18 @@ async function getTeamWithMostProgress(eventoId, session) {
     const dono = String(checkpoint.territorioDonoTimeId);
     dominados.set(dono, (dominados.get(dono) || 0) + 1);
   }
-  return escolherLider([...dominados].map(([teamId, valor]) => ({ teamId, valor })));
+  return [...dominados].map(([teamId, valor]) => ({ teamId, valor }));
+}
+
+// Equipes que não venceram, da melhor para a pior: as que concluíram a corrida (pelo tempo), depois as que não
+// concluíram (pelos checkpoints acesos). Dá os pontos de consolação (100, 50, 25...).
+function ordenarPerdedores(raceTimes, vencedoraId, progresso = []) {
+  const acesos = new Map(progresso.map((item) => [String(item.teamId).toLowerCase(), Number(item.valor) || 0]));
+  const outras = raceTimes.filter((equipe) => !sameId(equipe.teamId, vencedoraId));
+  const concluidas = outras.filter((e) => e.completed && e.elapsedMs !== null).sort((a, b) => a.elapsedMs - b.elapsedMs);
+  const restantes = outras.filter((e) => !concluidas.includes(e))
+    .sort((a, b) => (acesos.get(String(b.teamId).toLowerCase()) || 0) - (acesos.get(String(a.teamId).toLowerCase()) || 0));
+  return [...concluidas, ...restantes].map((equipe) => equipe.teamId);
 }
 
 // Parada manual (ou por tempo) com a partida em andamento: a equipe que concluiu a corrida mais rápido ganha o bônus.
@@ -228,13 +244,15 @@ async function awardTreasureBonusOnStop(eventoId) {
   const session = await getActiveSession(eventoId);
   if (!session) return null;
   const winner = getFastestCompletedTeam(await getTeamRaceTimes(eventoId, session));
-  const teamId = winner?.teamId || await getTeamWithMostProgress(eventoId, session);
+  const progresso = await progressoPorEquipe(eventoId, session);
+  const teamId = winner?.teamId || escolherLider(progresso);
   if (!teamId) return null;
   return awardWinnerBonus({
     eventoId,
     partidaId: session.partidaId,
     gameType: TREASURE_GAME_TYPE,
     teamId,
+    perdedores: ordenarPerdedores(await getTeamRaceTimes(eventoId, session), teamId, progresso),
   });
 }
 
@@ -902,6 +920,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
       partidaId: session.partidaId,
       gameType: TREASURE_GAME_TYPE,
       teamId: winningTeam.teamId,
+      perdedores: ordenarPerdedores(raceTimes, winningTeam.teamId),
     });
   }
 
