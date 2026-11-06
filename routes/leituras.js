@@ -233,6 +233,14 @@ router.post('/reception', async (req, res) => {
       return res.json({ ok: true, registered: false, braceletCode: normalizedUid, message: 'Pulseira lida para o estoque do master' });
     }
 
+    // O admin do buffet confere as pulseiras recebidas do master passando-as no leitor, mesmo sem evento aberto
+    if (typeof global.broadcastToCompany === 'function') {
+      global.broadcastToCompany(checkpoint.empresaId, {
+        type: 'RECEPTION_BRACELET_READ',
+        payload: { braceletCode: normalizedUid, checkpointId: checkpoint.checkpointId, timestamp: now.toISOString() },
+      });
+    }
+
     const pulseira = checkpoint.pulseira_code
       ? { codigo: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
       : null;
