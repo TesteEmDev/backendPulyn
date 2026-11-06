@@ -1253,6 +1253,78 @@ router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
 
 // Histórico de conquista do evento usado pelos telões. A consulta é sempre
 // limitada ao tenant do usuário e ao evento selecionado pela recepção.
+// Partida em andamento do evento; sem ela, a última que terminou. '' quando o evento nunca teve partida.
+async function partidaAtualDoEvento(eventoId) {
+  const sessao = await queryOne(
+    `SELECT id FROM "sessaoJogo"
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
+     ORDER BY (status = 'active') DESC, iniciadoEm DESC
+     LIMIT 1`,
+    { eventoId }
+  );
+  return sessao?.id || '';
+}
+
+// Pontos ganhos na partida (não o total do evento): por equipe e por participante.
+// ?sessionId=<id> ou atual (a em andamento, ou a última que terminou). Usado pela pontuação do telão.
+router.get('/evento/:eventoId/pontos-da-partida', verifyToken, async (req, res) => {
+  try {
+    const eventoId = String(req.params.eventoId || '').trim();
+    const empresaId = await empresaParaEvento(req.user, eventoId);
+    const master = isMaster(req) ? 1 : 0;
+    const evento = await queryOne(
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+      { eventoId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!master && String(evento.empresaId).toLowerCase() !== String(empresaId).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    let sessionId = String(req.query.sessionId || 'atual').trim();
+    if (sessionId.toLowerCase() === 'atual') sessionId = await partidaAtualDoEvento(evento.eventoId);
+    if (!sessionId) return res.json({ sessionId: null, equipes: [], participantes: [] });
+
+    const linhas = await allQuery(`
+      SELECT c.criancaId AS "criancaId",
+             COALESCE(NULLIF(c.apelido, ''), c.nome) AS nome,
+             c.avatar AS avatar,
+             t.timeId AS "timeId",
+             t.nome AS "timeNome",
+             t.cor AS "timeCor",
+             COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
+      FROM leitura l
+      JOIN crianca c ON c.criancaId = l.criancaId
+      LEFT JOIN "time" t ON t.timeId = c.timeId
+      WHERE l.sessaoId = @sessionId
+        AND l.autorizado = 1
+        AND LOWER(c.eventoId) = LOWER(@eventoId)
+        AND (l.empresaId = @empresaId OR @master = 1)
+      GROUP BY c.criancaId, c.apelido, c.nome, c.avatar, t.timeId, t.nome, t.cor
+    `, { sessionId, eventoId: evento.eventoId, empresaId, master });
+
+    const porEquipe = new Map();
+    const participantes = linhas.map((linha) => {
+      const pontos = Number(linha.pontos) || 0;
+      if (linha.timeId) {
+        const atual = porEquipe.get(linha.timeId) || { id: linha.timeId, nome: linha.timeNome, cor: linha.timeCor, pontos: 0 };
+        atual.pontos += pontos;
+        porEquipe.set(linha.timeId, atual);
+      }
+      return { id: linha.criancaId, nome: linha.nome, cor: linha.timeCor || null, avatar: linha.avatar || null, pontos };
+    }).sort((a, b) => b.pontos - a.pontos);
+
+    res.json({
+      sessionId,
+      equipes: [...porEquipe.values()].sort((a, b) => b.pontos - a.pontos),
+      participantes,
+    });
+  } catch (error) {
+    console.error('❌ Erro ao somar os pontos da partida:', error);
+    res.status(500).json({ error: 'Não foi possível somar os pontos da partida' });
+  }
+});
+
 router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
   try {
     const eventoId = String(req.params.eventoId || '').trim();
@@ -1261,7 +1333,8 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
     const empresaId = await empresaParaEvento(req.user, eventoId);
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
     const master = isMaster(req) ? 1 : 0;
-    const sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
+    let sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
+    const pedidoAtual = sessionId.toLowerCase() === 'atual';
 
     const evento = await queryOne(
       'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
@@ -1272,10 +1345,15 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
+    // sessionId=atual: a partida em andamento do evento (ou a última que terminou), para o telão que abriu no meio do jogo
+    if (sessionId.toLowerCase() === 'atual') sessionId = await partidaAtualDoEvento(evento.eventoId);
+
     // 🆕 Se sessionId foi fornecido, buscar de leitura com filtro de session_id
     // Caso contrário, buscar de pontuacao (compatibilidade com dados antigos)
     let history;
-    if (sessionId) {
+    if (pedidoAtual && !sessionId) {
+      history = [];
+    } else if (sessionId) {
       console.log(`   🔍 [HISTORICO] Filtrando por session_id=${sessionId}`);
       history = await allQuery(`
         SELECT TOP (@limit)

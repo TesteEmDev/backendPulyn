@@ -805,6 +805,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // 🆕 Atualizar variável global de sessão atual
     currentSessionId = sessionId;
     currentSessionGameType = gameType;
+    // As rotas de leitura gravam a partida em leitura.sessaoId lendo global.currentSessionId
+    global.currentSessionId = sessionId;
     console.log(`   🔐 [SESSÃO] Variável global setada: currentSessionId=${currentSessionId}, gameType=${currentSessionGameType}`);
 
     // Cada novo início começa sem domínio visual da partida anterior.
@@ -1141,6 +1143,7 @@ async function stopGameForEvento(eventoId) {
     // 🆕 Limpar variável global de sessão
     currentSessionId = null;
     currentSessionGameType = null;
+    global.currentSessionId = null;
     
     // ✨ NOVO: Para Zone Conquest, limpar os states da partida
     if (gameStatus.gameType === 'zone_conquest') {
