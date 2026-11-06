@@ -4,6 +4,10 @@ const { queryOne } = require('../database');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-2026';
 
+// Únicas rotas que uma conta com senha temporária pode usar
+const ROTAS_COM_SENHA_TEMPORARIA = ['/auth/alterar-senha', '/auth/logout'];
+const rotaLiberadaComSenhaTemporaria = (url) => ROTAS_COM_SENHA_TEMPORARIA.some((rota) => String(url || '').split('?')[0].endsWith(rota));
+
 async function verifyToken(req, res, next) {
   const token = req.headers.authorization?.split(' ')[1];
 
@@ -28,9 +32,13 @@ async function verifyToken(req, res, next) {
   const sessaoDeTelao = decoded.role === 'display' && decoded.email === 'telao';
   if (decoded.tv !== undefined && !sessaoDeTelao) {
     try {
-      const conta = await queryOne('SELECT status, tokenVersao FROM login WHERE loginId = @id', { id: decoded.id });
+      const conta = await queryOne('SELECT status, tokenVersao, senhaTemporaria FROM login WHERE loginId = @id', { id: decoded.id });
       if (!conta || conta.status === 'excluida' || Number(conta.tokenVersao) !== Number(decoded.tv)) {
         return res.status(401).json({ error: 'Sessão encerrada. Entre de novo.', codigo: 'SESSAO_ENCERRADA' });
+      }
+      // Senha temporária (definida pelo master): até trocá-la a conta só pode trocar a senha ou sair
+      if (conta.senhaTemporaria && !rotaLiberadaComSenhaTemporaria(req.originalUrl)) {
+        return res.status(403).json({ error: 'Troque a senha provisória para continuar.', codigo: 'TROCAR_SENHA' });
       }
     } catch (err) {
       console.error('❌ Erro ao conferir sessão:', err.message);
@@ -72,4 +80,5 @@ module.exports = {
   requireRole,
   isMaster,
   broadcast,
+  rotaLiberadaComSenhaTemporaria,
 };

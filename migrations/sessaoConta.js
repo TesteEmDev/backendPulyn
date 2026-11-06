@@ -10,6 +10,8 @@ async function ensureSessaoContaSchema() {
 
   if (isPostgres) {
     await query('ALTER TABLE login ADD COLUMN IF NOT EXISTS tokenVersao integer NOT NULL DEFAULT 0');
+    // Senha definida por outra pessoa (o master, ao cadastrar o buffet): a conta precisa trocá-la no primeiro acesso
+    await query('ALTER TABLE login ADD COLUMN IF NOT EXISTS senhaTemporaria boolean NOT NULL DEFAULT false');
   } else {
     await query(`
       IF COL_LENGTH('login', 'tokenVersao') IS NULL

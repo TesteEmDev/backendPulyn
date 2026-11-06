@@ -254,8 +254,8 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO login (loginId, empresaId, email, senha, status) 
-         VALUES (@id, @empresaId, @email, @senha, @status)`,
+        `INSERT INTO login (loginId, empresaId, email, senha, status, senhaTemporaria)
+         VALUES (@id, @empresaId, @email, @senha, @status, true)`,
         {
           id: loginId,
           empresaId: empresaId,
