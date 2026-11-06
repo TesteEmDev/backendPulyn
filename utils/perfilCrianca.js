@@ -150,7 +150,7 @@ async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, limite = 8 })
   if (busca.length < 2) return [];
   const rows = await allQuery(
     `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento,
-            part.criancaId AS participacaoId, part.avatar AS avatarNoEvento, part.apelido AS apelidoNoEvento
+            part.criancaId AS participacaoId, part.avatar AS avatarNoEvento, part.apelido AS apelidoNoEvento, part.cor AS corNoEvento
      FROM perfilCrianca p
      LEFT JOIN crianca part ON part.perfilCriancaId = p.perfilCriancaId AND part.eventoId = @eventoId
      WHERE p.empresaId = @empresaId
@@ -167,6 +167,8 @@ async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, limite = 8 })
     idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
     avatar: row.avatarNoEvento || row.avatar,
     jaNoEvento: Boolean(row.participacaoId),
+    // Cor que a criança já tem neste evento (o Kiosk a mantém, a menos que ela escolha outra)
+    cor: row.corNoEvento || null,
   }));
 }
 
