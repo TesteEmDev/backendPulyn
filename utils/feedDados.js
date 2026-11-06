@@ -12,6 +12,7 @@ const { queryOne } = require('../database');
 // Assunto de cada parte da API. O primeiro que casar vale.
 const ROTAS = [
   [/^\/master\/checkpoints/, ['checkpoints']],
+  [/^\/master\/pulseiras/, ['pulseiras']],
   [/^\/pontoVerificacao/, ['checkpoints']],
   [/^\/clientes/, ['clientes']],
   [/^\/eventos/, ['eventos']],

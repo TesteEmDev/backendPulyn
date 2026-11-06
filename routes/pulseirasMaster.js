@@ -103,6 +103,8 @@ router.post('/enviar', async (req, res) => {
     });
 
     const ignoradas = lidos.codigos.filter((codigo) => !enviadas.includes(codigo));
+    // O buffet de destino vê as pulseiras novas esperando o aceite
+    if (enviadas.length > 0 && typeof global.avisarDados === 'function') global.avisarDados(['pulseiras'], [destino]);
     console.log(`📤 [MASTER-PULSEIRAS] ${enviadas.length} pulseira(s) enviada(s) para "${empresa.nome}"`);
     res.json({ enviadas, ignoradas, empresaNome: empresa.nome });
   } catch (err) {
@@ -117,12 +119,17 @@ router.post('/cancelar-envio', async (req, res) => {
     const lidos = lerCodigos(req.body?.codigos);
     if (lidos.erro || lidos.codigos.length === 0) return res.status(400).json({ error: lidos.erro || 'Escolha ao menos uma pulseira' });
     const { marcadores, params } = listaDeParametros(lidos.codigos);
+    const destinos = (await allQuery(
+      `SELECT DISTINCT empresaDestinoId FROM pulseira WHERE empresaId = @master AND statusTransferencia = @pendente AND codigo IN (${marcadores})`,
+      { master: req.user.empresaId, pendente: STATUS.PENDENTE, ...params }
+    )).map((linha) => linha.empresaDestinoId).filter(Boolean);
     const r = await query(
       `UPDATE pulseira SET statusTransferencia = @estoque, empresaDestinoId = NULL, enviadoEm = NULL
        WHERE empresaId = @master AND statusTransferencia = @pendente AND codigo IN (${marcadores})
        RETURNING codigo`,
       { master: req.user.empresaId, estoque: STATUS.ESTOQUE, pendente: STATUS.PENDENTE, ...params }
     );
+    if (destinos.length > 0 && typeof global.avisarDados === 'function') global.avisarDados(['pulseiras'], destinos);
     res.json({ canceladas: (r.recordset || []).map((linha) => linha.codigo) });
   } catch (err) {
     console.error('❌ [MASTER-PULSEIRAS] Erro ao cancelar envio:', err);
