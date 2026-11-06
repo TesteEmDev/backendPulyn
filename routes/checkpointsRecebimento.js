@@ -6,6 +6,10 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { STATUS, validarNumCheck } = require('../utils/checkpointTransferencia');
+const { statusEfetivo } = require('../utils/statusCheckpoint');
+
+// O banco guarda 'online' e nada o volta para 'offline': o status que a tela vê é calculado pelo último sinal da placa.
+const comStatusReal = (linha) => (linha ? { ...linha, status: statusEfetivo(linha.status, linha.ultimoVisto) } : linha);
 
 router.use(verifyToken, requireRole('admin'));
 
@@ -45,7 +49,7 @@ router.get('/sem-numero', async (req, res) => {
        ORDER BY p.transferidoEm, p.checkpointId`,
       { empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
     );
-    res.json(linhas);
+    res.json(linhas.map(comStatusReal));
   } catch (err) {
     console.error('❌ [RECEBIMENTO] Erro ao listar checkpoints sem número:', err);
     res.status(500).json({ error: err.message });
@@ -63,7 +67,7 @@ router.get('/sem-evento', async (req, res) => {
        ORDER BY p.nome, p.checkpointId`,
       { empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
     );
-    res.json(linhas);
+    res.json(linhas.map(comStatusReal));
   } catch (err) {
     console.error('❌ [RECEBIMENTO] Erro ao listar checkpoints sem evento:', err);
     res.status(500).json({ error: err.message });
@@ -110,7 +114,7 @@ router.patch('/:checkpointId/numero', async (req, res) => {
       { numCheck: numero.valor, checkpointId: atual.checkpointId }
     );
     console.log(`🔢 [RECEBIMENTO] Checkpoint ${atual.checkpointId}: número ${atual.numCheck} -> ${numero.valor}`);
-    res.json(await buscar(atual.checkpointId));
+    res.json(comStatusReal(await buscar(atual.checkpointId)));
   } catch (err) {
     if (violouUnicidade(err)) return res.status(409).json({ error: 'Já existe um checkpoint com esse número no seu buffet' });
     console.error('❌ [RECEBIMENTO] Erro ao trocar o número:', err);
@@ -159,7 +163,7 @@ router.patch('/:checkpointId/evento', async (req, res) => {
     if (!atual) return;
 
     const pedido = req.body.eventoId ? String(req.body.eventoId) : null;
-    if (pedido === atual.eventoId) return res.json(atual);
+    if (pedido === atual.eventoId) return res.json(comStatusReal(atual));
 
     let eventoId = null;
     if (pedido) {
@@ -187,7 +191,7 @@ router.patch('/:checkpointId/evento', async (req, res) => {
       { eventoId, checkpointId: atual.checkpointId }
     );
     console.log(`📅 [RECEBIMENTO] Checkpoint ${atual.checkpointId}: evento ${atual.eventoId || '-'} -> ${eventoId || '-'}`);
-    res.json(await buscar(atual.checkpointId));
+    res.json(comStatusReal(await buscar(atual.checkpointId)));
   } catch (err) {
     console.error('❌ [RECEBIMENTO] Erro ao atribuir evento:', err);
     res.status(500).json({ error: err.message });
