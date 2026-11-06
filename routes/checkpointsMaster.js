@@ -235,6 +235,40 @@ router.post('/:id/transferir', async (req, res) => {
   }
 });
 
+// Transfere vários checkpoints do estoque para o mesmo buffet de uma vez. Os que já não estão em estoque são ignorados.
+router.post('/transferir-lote', async (req, res) => {
+  try {
+    const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(Number))];
+    if (ids.length === 0 || ids.some((id) => !Number.isInteger(id) || id < 1)) {
+      return res.status(400).json({ error: 'Escolha ao menos um checkpoint' });
+    }
+    if (ids.length > 500) return res.status(400).json({ error: 'Envie no máximo 500 checkpoints por vez' });
+
+    const empresaId = String(req.body.empresaId || '').trim();
+    if (!empresaId) return res.status(400).json({ error: 'Informe o buffet (empresaId) de destino' });
+    const empresa = await queryOne('SELECT empresaId, nome FROM empresa WHERE empresaId = @empresaId', { empresaId });
+    if (!empresa) return res.status(404).json({ error: 'Buffet de destino não encontrado' });
+
+    const params = { empresaId, aceito: STATUS.ACEITO, estoque: STATUS.ESTOQUE };
+    const marcadores = ids.map((id, i) => { params[`i${i}`] = id; return `@i${i}::int`; }).join(', ');
+    // A condição no WHERE evita transferir duas vezes se dois pedidos chegarem juntos
+    const r = await query(
+      `UPDATE pontoVerificacao
+       SET statusTransferencia = @aceito, empresaId = @empresaId, empresaDestinoId = NULL, transferidoEm = now(), atualizadoEm = now(),
+           devolvidoEm = NULL, devolvidoMotivo = NULL, devolvidoPorNome = NULL
+       WHERE statusTransferencia = @estoque AND id IN (${marcadores})
+       RETURNING id`,
+      params
+    );
+    const transferidos = (r.recordset || []).map((linha) => Number(linha.id));
+    console.log(`📤 [MASTER-CHECKPOINTS] ${transferidos.length} checkpoint(s) transferido(s) para "${empresa.nome}"`);
+    res.json({ transferidos, ignorados: ids.filter((id) => !transferidos.includes(id)), empresaNome: empresa.nome });
+  } catch (err) {
+    console.error('❌ [MASTER-CHECKPOINTS] Erro ao transferir em lote:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Exclui um checkpoint que ainda está no estoque (nunca foi para um buffet, então não tem histórico).
 router.delete('/:id', async (req, res) => {
   try {

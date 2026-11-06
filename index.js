@@ -33,6 +33,8 @@ const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
 const checkpointsMasterRoutes = require('./routes/checkpointsMaster');
 const checkpointsRecebimentoRoutes = require('./routes/checkpointsRecebimento');
+const pulseirasMasterRoutes = require('./routes/pulseirasMaster');
+const pulseirasRecebimentoRoutes = require('./routes/pulseirasRecebimento');
 const { identificarPorMac } = require('./utils/dispositivoMac');
 const comandosCheckpoint = require('./utils/comandosCheckpoint');
 const leiturasRoutes = require('./routes/leituras');
@@ -97,6 +99,7 @@ const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMa
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureGameWinnerBonusesSchema } = require('./migrations/gameWinnerBonuses');
 const { ensureEventCheckpointHistorySchema } = require('./migrations/eventCheckpointHistory');
+const { ensurePulseiraTransferenciaSchema } = require('./migrations/pulseiraTransferencia');
 const { ensureAvatarSchema } = require('./migrations/avatar');
 const { ensureCompanyMapSchema, migrateExistingEventMapDataToCompanies } = require('./migrations/companyMap');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
@@ -1961,6 +1964,7 @@ app.use('/api/times', timesRoutes);
 app.use('/api/criancas', criancasRoutes);
 
 // Pulseiras
+app.use('/api/pulseiras/recebimento', pulseirasRecebimentoRoutes);   // antes das rotas /:codigo de pulseiras
 app.use('/api/pulseiras', pulseiraRoutes);
 
 // Checkpoints
@@ -1976,6 +1980,7 @@ app.use('/api/reports', reportsRoutes);
 
 // Checkpoints cadastrados pelo super admin e transferidos aos buffets (antes de /api/master para não ser engolida por ele)
 app.use('/api/master/checkpoints', checkpointsMasterRoutes);
+app.use('/api/master/pulseiras', pulseirasMasterRoutes);
 
 // Master Dashboard
 app.use('/api/master', masterRoutes);
@@ -2089,6 +2094,7 @@ async function startServer() {
     await ensureMonsterHuntSchema();
     await ensureGameWinnerBonusesSchema();
     await ensureEventCheckpointHistorySchema();
+    await ensurePulseiraTransferenciaSchema();
     await ensureAvatarSchema();
     await ensureCompanyMapSchema();
     await migrateExistingEventMapDataToCompanies();
