@@ -1,5 +1,6 @@
 // routes/clients.js - Clientes/Empresas
 const express = require('express');
+const { validarCadastroCliente } = require('../utils/cadastroCliente');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
@@ -205,18 +206,23 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode criar cliente' });
     }
 
-    const { nome, cidade, estado, email, senha, telefone, plan } = req.body;
+    const { plan } = req.body;
 
     if (planoInvalido(plan)) {
       return res.status(400).json({ error: `Plano inválido. Use: ${Object.keys(PLAN_DEFINITIONS).join(', ')}` });
     }
-
-    if (!email || !senha) {
-      return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+    if (!plan) {
+      return res.status(400).json({ error: 'Informe o plano' });
     }
 
-    if (senha.length < 6) {
-      return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
+    // Todos os dados do cadastro são obrigatórios: são eles que o admin do buffet vê (fixos) em Configurações
+    const cadastro = validarCadastroCliente(req.body);
+    if (cadastro.erro) return res.status(400).json({ error: cadastro.erro });
+    const { nome, cnpj, endereco, cidade, estado, email, senha, telefone } = cadastro.valores;
+
+    const cnpjRepetido = await queryOne('SELECT empresaId FROM empresa WHERE cnpj = @cnpj', { cnpj });
+    if (cnpjRepetido) {
+      return res.status(409).json({ error: 'Este CNPJ já está cadastrado em outro buffet.' });
     }
 
     const clienteId = uuidv4();
@@ -229,11 +235,12 @@ router.post('/', verifyToken, async (req, res) => {
     try {
       // 1️⃣ Criar EMPRESA
       await query(
-        `INSERT INTO empresa (empresaId, nome, cidade, estado, telefone, plano, status) 
-         VALUES (@id, @nome, @cidade, @estado, @telefone, @plano, @status)`,
+        `INSERT INTO empresa (empresaId, nome, cnpj, cidade, estado, telefone, plano, status) 
+         VALUES (@id, @nome, @cnpj, @cidade, @estado, @telefone, @plano, @status)`,
         {
           id: empresaId,
           nome: nome,
+          cnpj: cnpj,
           cidade: cidade,
           estado: estado,
           telefone: telefone,
@@ -261,11 +268,12 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId) 
-         VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId)`,
+        `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId, endereco) 
+         VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId, @endereco)`,
         {
           id: clienteId,
           empresaId: empresaId,
+          endereco: endereco,
           nome: nome,
           cidade: cidade,
           estado: estado,
