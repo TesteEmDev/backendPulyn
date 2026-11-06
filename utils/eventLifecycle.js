@@ -5,7 +5,7 @@
 // o evento para 'active' e "parar jogo" voltava para 'scheduled').
 const { query, queryOne, allQuery } = require('../database');
 const { releaseBraceletsForEvent } = require('./braceletRelease');
-const { liberarCheckpointsParaEvento, restaurarCheckpointsDoEvento } = require('./checkpointsDoEvento');
+const { liberarCheckpointsParaEvento, restaurarCheckpointsDoEvento, trazerCheckpointsParaEvento } = require('./checkpointsDoEvento');
 
 // Data e hora do evento são digitadas pelo buffet no relógio local dele, sem fuso.
 // O servidor (Render) roda em UTC, então o "agora" é convertido para esse fuso.
@@ -94,6 +94,13 @@ async function startEvent(eventoId, { source = 'manual' } = {}) {
 
   const evento = await queryOne('SELECT "eventoId", empresaId, iniciadoEm FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)', { eventoId });
   console.log(`▶️ [EVENTO] ${eventoId} iniciado (${source})`);
+  // Os checkpoints ligados do buffet passam a ser deste evento (os desligados não entram)
+  try {
+    const trazidos = await trazerCheckpointsParaEvento(eventoId, evento?.empresaId);
+    if (trazidos > 0) console.log(`📍 [EVENTO] ${eventoId}: ${trazidos} checkpoint(s) ligado(s) entraram no evento`);
+  } catch (err) {
+    console.error(`❌ [EVENTO] Não foi possível trazer os checkpoints para ${eventoId}: ${err.message}`);
+  }
   broadcastCompany(evento?.empresaId, {
     type: 'EVENT_STATUS_CHANGED',
     payload: { eventoId, status: 'active', startedAt: evento?.iniciadoEm || null, source },

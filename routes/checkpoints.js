@@ -5,6 +5,7 @@ const { query, queryOne, allQuery } = require('../database');
 const { semIdNovo, STATUS } = require('../utils/checkpointTransferencia');
 const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 const comandos = require('../utils/comandosCheckpoint');
+const { entrarNoEventoAtivo } = require('../utils/checkpointsDoEvento');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
 const { ONLINE_ATE_MS, statusEfetivo } = require('../utils/statusCheckpoint');
@@ -68,7 +69,7 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
     const extra = ip ? { ip } : {};
 
     const checkpoint = await queryOne(
-      'SELECT checkpointId, numCheck, statusTransferencia FROM pontoVerificacao WHERE checkpointId = @id',
+      'SELECT checkpointId, numCheck, statusTransferencia, eventoId, empresaId, macAddress FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (!checkpoint) {
@@ -94,6 +95,15 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
       }
     }
     
+    // Ligou com um evento em andamento e ainda sem evento: entra nele
+    if (!checkpoint.eventoId && checkpoint.statusTransferencia === STATUS.ACEITO) {
+      try {
+        await entrarNoEventoAtivo(checkpoint);
+      } catch (err) {
+        console.warn(`⚠️ [CHECKPOINT] ${checkpointId} não entrou no evento ativo: ${err.message}`);
+      }
+    }
+
     // numCheck e statusTransferencia deixam o aparelho (identificado pelo MAC) saber o número que o buffet deu a ele
     // e se já foi aceito.
     // comando = teste de LED/som pedido pelo admin (utils/comandosCheckpoint.js); a recepção só o recebe por aqui.

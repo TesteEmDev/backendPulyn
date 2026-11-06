@@ -10,7 +10,9 @@ const { STATUS, validarNumCheck } = require('../utils/checkpointTransferencia');
 router.use(verifyToken, requireRole('admin'));
 
 const COLUNAS = `p.checkpointId, p.numCheck, p.macAddress, p.nome, p.tipo, p.proposito, p.status, p.ultimoVisto,
-  p.statusTransferencia, p.eventoId, p.transferidoEm, p.zona, p.pontos, e.nome AS eventoNome`;
+  p.statusTransferencia, p.eventoId, p.transferidoEm, p.zona, p.pontos, e.nome AS eventoNome,
+  (SELECT ev.nome FROM eventoCheckpoint h JOIN evento ev ON ev.eventoId = h.eventoId
+   WHERE h.checkpointId = p.checkpointId ORDER BY h.usadoEm DESC LIMIT 1) AS ultimoEventoNome`;
 
 const buscar = (checkpointId) => queryOne(
   `SELECT ${COLUNAS}, p.empresaId, p.empresaDestinoId
@@ -171,7 +173,7 @@ router.patch('/:checkpointId/evento', async (req, res) => {
       await query(
         `INSERT INTO eventoCheckpoint (id, empresaId, eventoId, checkpointId, numCheck, nome)
          VALUES (@id, @empresaId, @eventoId, @checkpointId, @numCheck, @nome)
-         ON CONFLICT (eventoId, checkpointId) DO UPDATE SET numCheck = EXCLUDED.numCheck, nome = EXCLUDED.nome`,
+         ON CONFLICT (eventoId, checkpointId) DO UPDATE SET numCheck = EXCLUDED.numCheck, nome = EXCLUDED.nome, usadoEm = CURRENT_TIMESTAMP`,
         { id: require('uuid').v4(), empresaId: atual.empresaId || null, eventoId: atual.eventoId, checkpointId: atual.checkpointId, numCheck: atual.numCheck ?? null, nome: atual.nome ?? null }
       );
     }
