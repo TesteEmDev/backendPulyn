@@ -214,7 +214,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
        VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @dataNascimento, @avatar, @cor, @braceletCode, @perfilId)`,
       { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), dataNascimento, avatar: avatarValue, cor: corValue, braceletCode: normalizedBraceletCode, perfilId }
     );
-    await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: id, empresaId });
+    // O pai NÃO é vinculado automaticamente: o vínculo nasce quando ele lê a pulseira no app (POST /family/bracelet/validate).
     
     if (normalizedBraceletCode) {
       await query(

@@ -321,7 +321,7 @@ router.post('/participants', async (req, res) => {
           perfilId,
         }
       );
-      await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: childId, empresaId: event.empresaId });
+      // O pai NÃO é vinculado automaticamente: o vínculo nasce quando ele lê a pulseira no app (POST /family/bracelet/validate).
 
       const braceletUpdate = await tx.query(
         `UPDATE pulseira
