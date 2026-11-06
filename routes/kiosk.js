@@ -174,6 +174,109 @@ router.get('/events/:eventId/avatars-in-use', async (req, res) => {
   }
 });
 
+// A pulseira lida precisa estar livre; se o buffet ainda não a tinha, ela é cadastrada agora.
+async function garantirPulseiraLivre(tx, codigo, empresaId) {
+  let bracelet = await tx.queryOne(
+    `SELECT codigo, status, criancaId, empresaId
+     FROM pulseira
+     WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
+    { codigo, empresaId }
+  );
+  if (!bracelet) {
+    await tx.query(
+      `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
+       VALUES (@codigo, 'disponivel', @empresaId, GETDATE())`,
+      { codigo, empresaId }
+    );
+    bracelet = { codigo, status: 'disponivel', criancaId: null, empresaId };
+  }
+  if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.criancaId) {
+    throw httpError('Esta pulseira não está disponível para vínculo', 409);
+  }
+  return bracelet;
+}
+
+// Criança que a recepção cadastrou no check-in sem pulseira e agora se identifica no Kiosk: a participação continua a
+// mesma (pontos, time, vínculos da família) e só ganha a pulseira. Avatar, cor, apelido e time podem ser trocados agora.
+async function vincularPulseiraAoCadastroDoCheckin(tx, { event, participacao, perfilCriancaId, codigo, avatarPedido, corPedida, apelido, timeId }) {
+  await garantirPulseiraLivre(tx, codigo, event.empresaId);
+
+  let team = null;
+  if (timeId) {
+    team = await tx.queryOne(
+      `SELECT timeId, nome FROM "time" WHERE timeId = @timeId AND eventoId = @eventId AND empresaId = @empresaId`,
+      { timeId, eventId: event.eventoId, empresaId: event.empresaId }
+    );
+    if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
+  }
+
+  // Os outros participantes é que contam como "em uso": o avatar e a cor da própria criança continuam dela
+  const escolhaAvatar = escolherAvatar({
+    pedido: avatarPedido,
+    preferido: participacao.avatar,
+    emUso: await avataresEmUso(tx, event.eventoId, participacao.criancaId),
+  });
+  if (escolhaAvatar.conflito) {
+    const erro = httpError(MENSAGEM_AVATAR_EM_USO, 409);
+    erro.avataresLivres = escolhaAvatar.livres;
+    throw erro;
+  }
+  const escolhaCor = escolherCor({
+    pedido: corPedida || participacao.cor || null,
+    emUso: await coresEmUso(tx, event.eventoId, participacao.criancaId),
+  });
+  if (escolhaCor.conflito) {
+    const erro = httpError(MENSAGEM_COR_EM_USO, 409);
+    erro.coresLivres = escolhaCor.livres;
+    throw erro;
+  }
+
+  const apelidoFinal = String(apelido || '').trim() || participacao.apelido || String(participacao.nome).split(/\s+/)[0];
+  await tx.query(
+    `UPDATE crianca
+     SET codigoPulseira = @codigo, avatar = @avatar, cor = @cor, apelido = @apelido, timeId = COALESCE(@timeId, timeId)
+     WHERE criancaId = @id`,
+    { codigo, avatar: escolhaAvatar.avatar, cor: escolhaCor.cor, apelido: apelidoFinal, timeId: team ? team.timeId : null, id: participacao.criancaId }
+  );
+  const vinculo = await tx.query(
+    `UPDATE pulseira
+     SET status = 'em_uso', criancaId = @childId
+     WHERE ${uidSqlExpression('codigo')} = @codigo
+       AND empresaId = @empresaId
+       AND status = 'disponivel'
+       AND criancaId IS NULL`,
+    { codigo, childId: participacao.criancaId, empresaId: event.empresaId }
+  );
+  if ((vinculo.rowsAffected?.[0] || 0) === 0) {
+    throw httpError('Esta pulseira acabou de ser vinculada. Aproxime outra pulseira', 409);
+  }
+  await registrarVolta({ perfilCriancaId, eventoId: event.eventoId, apelido: apelidoFinal, idade: participacao.idade, avatar: escolhaAvatar.avatar });
+
+  const total = await tx.queryOne(
+    'SELECT COALESCE(SUM(pontos), 0) AS pontosTotais FROM crianca WHERE perfilCriancaId = @perfilId',
+    { perfilId: perfilCriancaId }
+  );
+  const timeAtual = team ?? (participacao.timeId
+    ? await tx.queryOne('SELECT timeId, nome FROM "time" WHERE timeId = @timeId', { timeId: participacao.timeId })
+    : null);
+  return {
+    id: participacao.criancaId,
+    perfilCriancaId,
+    retornando: true,
+    pontosTotais: Number(total?.pontosTotais) || 0,
+    name: participacao.nome,
+    nickname: apelidoFinal,
+    age: participacao.idade,
+    birthDate: null,
+    avatar: escolhaAvatar.avatar,
+    color: escolhaCor.cor,
+    braceletCode: codigo,
+    timeId: timeAtual ? timeAtual.timeId : null,
+    teamName: timeAtual ? timeAtual.nome : null,
+    scores: Number(participacao.pontos) || 0,
+  };
+}
+
 // Cadastro atômico: cria (se necessário) e vincula a pulseira junto com a criança.
 // Criança nova: cria o cadastro permanente (perfilCrianca) e a participação no evento.
 // Criança que volta (perfilCriancaId): reaproveita o cadastro e só cria a participação no evento.
@@ -228,10 +331,15 @@ router.post('/participants', async (req, res) => {
         perfilExistente = await buscarPerfil(perfilCriancaId, event.empresaId);
         if (!perfilExistente) throw httpError('Cadastro não encontrado', 404);
         const jaNoEvento = await tx.queryOne(
-          'SELECT criancaId FROM crianca WHERE perfilCriancaId = @perfilCriancaId AND eventoId = @eventId',
+          `SELECT criancaId, nome, apelido, idade, avatar, cor, timeId, pontos, codigoPulseira
+           FROM crianca WHERE perfilCriancaId = @perfilCriancaId AND eventoId = @eventId`,
           { perfilCriancaId, eventId: event.eventoId }
         );
-        if (jaNoEvento) throw httpError('Esta criança já está cadastrada neste evento', 409);
+        if (jaNoEvento && jaNoEvento.codigoPulseira) throw httpError('Esta criança já está cadastrada neste evento', 409);
+        // Cadastrada na recepção (check-in) sem pulseira: não cria outra participação, só vincula a pulseira a ela
+        if (jaNoEvento) return vincularPulseiraAoCadastroDoCheckin(tx, {
+          event, participacao: jaNoEvento, perfilCriancaId, codigo, avatarPedido, corPedida, apelido, timeId,
+        });
         cleanName = perfilExistente.nome;
       }
 
@@ -245,24 +353,7 @@ router.post('/participants', async (req, res) => {
         if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
       }
 
-      let bracelet = await tx.queryOne(
-        `SELECT codigo, status, criancaId, empresaId
-         FROM pulseira
-         WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
-        { codigo, empresaId: event.empresaId }
-      );
-      if (!bracelet) {
-        await tx.query(
-          `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
-           VALUES (@codigo, 'disponivel', @empresaId, GETDATE())`,
-          { codigo, empresaId: event.empresaId }
-        );
-        bracelet = { codigo, status: 'disponivel', criancaId: null, empresaId: event.empresaId };
-      }
-
-      if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.criancaId) {
-        throw httpError('Esta pulseira não está disponível para vínculo', 409);
-      }
+      await garantirPulseiraLivre(tx, codigo, event.empresaId);
 
       // Avatar sem repetir no evento: quem volta tenta manter o do cadastro (se outro já o usa, entra um livre)
       const escolhaAvatar = escolherAvatar({

@@ -143,27 +143,30 @@ async function recalcularUltimoEvento(perfilCriancaId) {
 }
 
 // Busca para o Kiosk: só devolve o necessário para a criança se reconhecer (nome abreviado, apelido, idade, avatar).
+// Entram os cadastros que ainda não estão neste evento e também os que a recepção cadastrou no check-in e ainda estão
+// sem pulseira (`jaNoEvento`): o Kiosk só vincula a pulseira a essa participação. Quem já tem pulseira no evento não aparece.
 async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, limite = 8 }) {
   const busca = normalizarBusca(termo);
   if (busca.length < 2) return [];
   const rows = await allQuery(
-    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento
+    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento,
+            part.criancaId AS participacaoId, part.avatar AS avatarNoEvento, part.apelido AS apelidoNoEvento
      FROM perfilCrianca p
+     LEFT JOIN crianca part ON part.perfilCriancaId = p.perfilCriancaId AND part.eventoId = @eventoId
      WHERE p.empresaId = @empresaId
        AND (${semAcentosSql('p.apelido')} LIKE @padrao OR ${semAcentosSql('p.nome')} LIKE @padrao)
-       AND NOT EXISTS (
-         SELECT 1 FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId AND c.eventoId = @eventoId
-       )
+       AND (part.criancaId IS NULL OR part.codigoPulseira IS NULL)
      ORDER BY p.atualizadoEm DESC`,
     { empresaId, eventoId, padrao: `%${busca}%`, limite }
   );
   return rows.map((row) => ({
     perfilCriancaId: row.perfilCriancaId,
     nomeExibicao: nomeParaExibir(row.nome),
-    apelido: row.apelido || '',
+    apelido: row.apelidoNoEvento || row.apelido || '',
     // Com a data de nascimento a idade é a de hoje (a idade gravada é a do último cadastro)
     idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
-    avatar: row.avatar,
+    avatar: row.avatarNoEvento || row.avatar,
+    jaNoEvento: Boolean(row.participacaoId),
   }));
 }
 
