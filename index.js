@@ -231,6 +231,14 @@ global.broadcastToEvent = (eventoId, message) => {
   });
 };
 
+// Sessões do master: recebem as pulseiras lidas pelo leitor de estoque dele (routes/leituras.js, /reception)
+global.broadcastToMasters = (message) => {
+  const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
+  wss.clients.forEach((cliente) => {
+    if (cliente.readyState === 1 && cliente.user?.role === 'master') cliente.send(msgStr);
+  });
+};
+
 // Controle operacional do evento, isolado por empresa.
 global.broadcastToCompany = (empresaId, message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);

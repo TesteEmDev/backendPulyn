@@ -222,6 +222,17 @@ router.post('/reception', async (req, res) => {
       return res.status(404).json({ error: 'Checkpoint de recepção não encontrado' });
     }
 
+    // Leitor de recepção ainda em estoque (sem buffet): é o leitor do master, que monta a lista de pulseiras a enviar
+    if (!checkpoint.empresaId) {
+      if (typeof global.broadcastToMasters === 'function') {
+        global.broadcastToMasters({
+          type: 'MASTER_BRACELET_READ',
+          payload: { braceletCode: normalizedUid, checkpointId: checkpoint.checkpointId, timestamp: now.toISOString() },
+        });
+      }
+      return res.json({ ok: true, registered: false, braceletCode: normalizedUid, message: 'Pulseira lida para o estoque do master' });
+    }
+
     const pulseira = checkpoint.pulseira_code
       ? { codigo: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
       : null;
