@@ -9,8 +9,13 @@ const PAPEIS_VALIDOS = new Set(['admin', 'reception', 'game_master', 'display', 
 // Só a equipe pode acumular papéis. Telão, autoatendimento, família e master são contas próprias.
 const PAPEIS_ACUMULAVEIS = new Set(['admin', 'reception', 'game_master']);
 
+// O admin do buffet tem acesso a todas as áreas do buffet (recepção, recreacionista, telão e totens), sem precisar
+// que cada uma seja liberada na conta. Família e master não entram: são de fora da equipe do buffet.
+const PAPEIS_DO_ADMIN = ['admin', 'reception', 'game_master', 'display', 'kiosk', 'score_kiosk'];
+
 // Lista de papéis que a conta pode usar: o principal e os adicionais válidos, sem repetição.
 function papeisDaConta(login) {
+  if (login.perfil === 'admin') return [...PAPEIS_DO_ADMIN];
   const extras = String(login.perfisExtras || '')
     .split(',')
     .map((p) => p.trim())
@@ -26,4 +31,4 @@ function perfisExtrasParaSalvar(perfil, papeis) {
   return [...new Set(extras)].join(',') || null;
 }
 
-module.exports = { PAPEIS_VALIDOS, PAPEIS_ACUMULAVEIS, papeisDaConta, perfisExtrasParaSalvar };
+module.exports = { PAPEIS_VALIDOS, PAPEIS_ACUMULAVEIS, PAPEIS_DO_ADMIN, papeisDaConta, perfisExtrasParaSalvar };

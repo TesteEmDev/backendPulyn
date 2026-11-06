@@ -4,14 +4,22 @@ const assert = require('node:assert/strict');
 const { papeisDaConta, perfisExtrasParaSalvar } = require('../utils/papeis');
 
 test('conta sem papéis extras usa só o perfil principal', () => {
-  assert.deepEqual(papeisDaConta({ perfil: 'admin', perfisExtras: null }), ['admin']);
+  assert.deepEqual(papeisDaConta({ perfil: 'reception', perfisExtras: null }), ['reception']);
 });
 
 test('lista o perfil principal e os extras, sem repetir', () => {
   assert.deepEqual(
-    papeisDaConta({ perfil: 'admin', perfisExtras: 'reception,game_master,admin' }),
-    ['admin', 'reception', 'game_master']
+    papeisDaConta({ perfil: 'reception', perfisExtras: 'game_master,reception' }),
+    ['reception', 'game_master']
   );
+});
+
+test('o admin tem todas as áreas do buffet, com ou sem papéis extras', () => {
+  const todas = ['admin', 'reception', 'game_master', 'display', 'kiosk', 'score_kiosk'];
+  assert.deepEqual(papeisDaConta({ perfil: 'admin', perfisExtras: null }), todas);
+  assert.deepEqual(papeisDaConta({ perfil: 'admin', perfisExtras: 'reception' }), todas);
+  assert.ok(!papeisDaConta({ perfil: 'admin' }).includes('master'));
+  assert.ok(!papeisDaConta({ perfil: 'admin' }).includes('family'));
 });
 
 test('ignora papéis que não podem ser acumulados (telão, kiosk, família)', () => {
