@@ -227,14 +227,18 @@ async function progressoPorEquipe(eventoId, session) {
 }
 
 // Equipes que não venceram, da melhor para a pior: as que concluíram a corrida (pelo tempo), depois as que não
-// concluíram (pelos checkpoints acesos). Dá os pontos de consolação (100, 50, 25...).
+// concluíram (pelos checkpoints acesos). Dá os pontos de consolação (100, 50, 25...). Devolve { teamId, chave }:
+// a mesma chave (mesmo tempo, ou mesma quantidade de checkpoints acesos) é empate.
 function ordenarPerdedores(raceTimes, vencedoraId, progresso = []) {
   const acesos = new Map(progresso.map((item) => [String(item.teamId).toLowerCase(), Number(item.valor) || 0]));
   const outras = raceTimes.filter((equipe) => !sameId(equipe.teamId, vencedoraId));
   const concluidas = outras.filter((e) => e.completed && e.elapsedMs !== null).sort((a, b) => a.elapsedMs - b.elapsedMs);
   const restantes = outras.filter((e) => !concluidas.includes(e))
     .sort((a, b) => (acesos.get(String(b.teamId).toLowerCase()) || 0) - (acesos.get(String(a.teamId).toLowerCase()) || 0));
-  return [...concluidas, ...restantes].map((equipe) => equipe.teamId);
+  return [
+    ...concluidas.map((equipe) => ({ teamId: equipe.teamId, chave: `t${equipe.elapsedMs}` })),
+    ...restantes.map((equipe) => ({ teamId: equipe.teamId, chave: `p${acesos.get(String(equipe.teamId).toLowerCase()) || 0}` })),
+  ];
 }
 
 // Parada manual (ou por tempo) com a partida em andamento: a equipe que concluiu a corrida mais rápido ganha o bônus.

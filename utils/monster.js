@@ -250,7 +250,11 @@ async function getMonsterLoserTeamIds(session, vencedoraId) {
   const derrotaram = outras.filter((e) => e.derrotadoEm).sort((a, b) => new Date(a.derrotadoEm) - new Date(b.derrotadoEm));
   const dano = (e) => Number(e.vidaMaxima || 0) - Number(e.vida || 0);
   const restantes = outras.filter((e) => !e.derrotadoEm).sort((a, b) => dano(b) - dano(a));
-  return [...derrotaram, ...restantes].map((estado) => estado.timeId);
+  // Mesma chave = empate (derrotaram o monstro no mesmo instante, ou causaram o mesmo dano)
+  return [
+    ...derrotaram.map((estado) => ({ teamId: estado.timeId, chave: `d${new Date(estado.derrotadoEm).getTime()}` })),
+    ...restantes.map((estado) => ({ teamId: estado.timeId, chave: `h${dano(estado)}` })),
+  ];
 }
 
 async function awardMonsterWinnerBonus(session) {

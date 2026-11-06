@@ -13,6 +13,17 @@ function pontosDoPerdedor(colocacao, base = LOSER_BONUS_POINTS) {
   return Math.floor(base / (2 ** Number(colocacao)));
 }
 
+// Posição (0 = melhor) de cada item de uma lista já ordenada. Itens seguidos com a mesma chave (definida) estão
+// empatados e dividem a posição; o próximo item não empatado ocupa a posição real (chaves a, a, b -> 0, 0, 2).
+function posicoesComEmpate(chaves) {
+  const posicoes = [];
+  chaves.forEach((chave, indice) => {
+    const empatado = indice > 0 && chave !== undefined && chave === chaves[indice - 1];
+    posicoes.push(empatado ? posicoes[indice - 1] : indice);
+  });
+  return posicoes;
+}
+
 // Quem lidera quando o jogo é parado à força e ninguém terminou: o maior valor (> 0), sem empate no topo.
 // itens: [{ teamId, valor }]. Devolve o teamId do líder ou null (ninguém avançou ou há empate).
 function escolherLider(itens) {
@@ -41,8 +52,10 @@ async function somarPontosDaEquipe(eventoId, teamId, points) {
  * e recalcula os pontos da equipe (soma dos pontos dos membros, como no resto do
  * sistema). É idempotente por (partida, jogo): chamar de novo não paga duas vezes.
  *
- * `perdedores`: ids das outras equipes, da melhor para a pior colocada; cada uma recebe pontosDoPerdedor(colocacao)
- * por membro (100, 50, 25...). Entram na mesma trava de idempotência da vencedora.
+ * `perdedores`: as outras equipes, da melhor para a pior colocada, como ids ou { teamId, chave }. Equipes seguidas
+ * com a mesma `chave` estão empatadas e recebem a mesma pontuação; a próxima não empatada ocupa a posição real
+ * (duas empatadas em 1º entre as perdedoras: 100 e 100, e a seguinte leva 25). Cada uma recebe
+ * pontosDoPerdedor(colocacao) por membro. Entram na mesma trava de idempotência da vencedora.
  *
  * Deve rodar na mesma transação que encerrou a partida quando houver uma.
  */
@@ -86,19 +99,20 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
 
   const consolacao = [];
   const vistos = new Set([String(team.timeId).toLowerCase()]);
-  let colocacao = 0;
-  for (const perdedorId of perdedores) {
-    const chave = String(perdedorId || '').toLowerCase();
-    if (!chave || vistos.has(chave)) continue;
-    vistos.add(chave);
-    const pontosPorMembro = pontosDoPerdedor(colocacao);
-    if (pontosPorMembro <= 0) break;
+  const posicoes = posicoesComEmpate(perdedores.map((item) => (typeof item === 'object' && item !== null ? item.chave : undefined)));
+  for (const [indice, item] of perdedores.entries()) {
+    const perdedorId = typeof item === 'object' && item !== null ? item.teamId : item;
+    const idMinusculo = String(perdedorId || '').toLowerCase();
+    if (!idMinusculo || vistos.has(idMinusculo)) continue;
+    vistos.add(idMinusculo);
     const perdedora = await queryOne(
       'SELECT timeId, nome, cor FROM "time" WHERE LOWER(timeId) = LOWER(@teamId) AND LOWER(eventoId) = LOWER(@eventoId)',
       { teamId: perdedorId, eventoId }
     );
     if (!perdedora) continue;
-    colocacao += 1;
+    const colocacao = posicoes[indice];
+    const pontosPorMembro = pontosDoPerdedor(colocacao);
+    if (pontosPorMembro <= 0) continue;
     const membrosDaPerdedora = await allQuery(
       'SELECT criancaId FROM "crianca" WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(timeId) = LOWER(@teamId)',
       { eventoId, teamId: perdedora.timeId }
@@ -140,4 +154,4 @@ async function awardWinnerBonus({ eventoId, partidaId, gameType, teamId, points 
   };
 }
 
-module.exports = { WINNER_BONUS_POINTS, LOSER_BONUS_POINTS, pontosDoPerdedor, awardWinnerBonus, escolherLider };
+module.exports = { WINNER_BONUS_POINTS, LOSER_BONUS_POINTS, pontosDoPerdedor, posicoesComEmpate, awardWinnerBonus, escolherLider };
