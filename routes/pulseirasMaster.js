@@ -191,6 +191,73 @@ router.get('/resumo', async (req, res) => {
   }
 });
 
+const STATUS_DA_PULSEIRA = ['disponivel', 'em_uso', 'perdida', 'bloqueada'];
+
+// Todas as pulseiras que já são dos buffets (as enviadas por aqui e as que o buffet cadastrou), para o master acompanhar.
+// ?empresaId= ?q= (parte do código) ?status= ?limit= ?offset=
+router.get('/nos-buffets', async (req, res) => {
+  try {
+    const params = { master: req.user.empresaId, aceito: STATUS.ACEITO };
+    let onde = 'p.empresaId <> @master AND p.statusTransferencia = @aceito';
+    if (req.query.empresaId) { onde += ' AND p.empresaId = @empresaId'; params.empresaId = String(req.query.empresaId); }
+    if (req.query.status) {
+      const status = String(req.query.status);
+      if (!STATUS_DA_PULSEIRA.includes(status)) return res.status(400).json({ error: 'Situação inválida' });
+      onde += ' AND p.status = @status';
+      params.status = status;
+    }
+    const busca = String(req.query.q || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+    if (busca) { onde += ' AND p.codigo LIKE @busca'; params.busca = `%${busca}%`; }
+
+    const limite = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 500);
+    const inicio = Math.max(Number.parseInt(req.query.offset, 10) || 0, 0);
+
+    const total = await queryOne(`SELECT COUNT(*) AS total FROM pulseira p WHERE ${onde}`, params);
+    const itens = await allQuery(
+      `SELECT p.codigo, p.status, p.empresaId, e.nome AS buffetNome, c.nome AS criancaNome, p.criadoEm,
+              (p.recebidoDoMasterEm IS NOT NULL) AS "doMaster"
+       FROM pulseira p
+       JOIN empresa e ON e.empresaId = p.empresaId
+       LEFT JOIN crianca c ON c.criancaId = p.criancaId
+       WHERE ${onde}
+       ORDER BY e.nome, p.codigo
+       LIMIT ${limite} OFFSET ${inicio}`,
+      params
+    );
+    res.json({ total: Number(total?.total || 0), itens });
+  } catch (err) {
+    console.error('❌ [MASTER-PULSEIRAS] Erro ao listar as pulseiras dos buffets:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Quantas pulseiras cada buffet tem e em que situação
+router.get('/por-buffet', async (req, res) => {
+  try {
+    const linhas = await allQuery(
+      `SELECT e.empresaId, e.nome,
+              COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE p.status = 'disponivel') AS disponiveis,
+              COUNT(*) FILTER (WHERE p.status = 'em_uso') AS "emUso",
+              COUNT(*) FILTER (WHERE p.status = 'perdida') AS perdidas,
+              COUNT(*) FILTER (WHERE p.status = 'bloqueada') AS bloqueadas,
+              COUNT(*) FILTER (WHERE p.recebidoDoMasterEm IS NOT NULL) AS "daPulyn"
+       FROM pulseira p
+       JOIN empresa e ON e.empresaId = p.empresaId
+       WHERE p.empresaId <> @master AND p.statusTransferencia = @aceito
+       GROUP BY e.empresaId, e.nome
+       ORDER BY e.nome`,
+      { master: req.user.empresaId, aceito: STATUS.ACEITO }
+    );
+    res.json(linhas.map((linha) => Object.fromEntries(
+      Object.entries(linha).map(([chave, valor]) => [chave, typeof valor === 'string' && /^\d+$/.test(valor) ? Number(valor) : valor])
+    )));
+  } catch (err) {
+    console.error('❌ [MASTER-PULSEIRAS] Erro ao somar por buffet:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Últimos passos (envios, aceites, recusas, devoluções)
 router.get('/historico', async (req, res) => {
   try {
