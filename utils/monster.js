@@ -1,5 +1,6 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { sortearMonstros } = require('./sorteioMonstros');
 const { awardWinnerBonus, escolherLider } = require('./winnerBonus');
 
 const MONSTER_GAME_TYPE = 'monster_hunt';
@@ -88,6 +89,8 @@ async function getMonsterProgress(eventoId, partidaId) {
       COALESCE(ms.vidaMaxima, p.vidaMaxima) AS monster_max_hp,
       COALESCE(ms.status, CASE WHEN p.status = 'completed' THEN 'defeated' ELSE p.status END) AS monster_status,
       COALESCE(ms.versao, p.versao) AS monster_version,
+      ms.monstroTipo AS monster_type,
+      ms.monstroCor AS monster_color,
       (SELECT COUNT(*) FROM "crianca" c
        WHERE LOWER(c.eventoId) = LOWER(@eventoId) AND LOWER(c.timeId) = LOWER(t.timeId)) AS total,
       (SELECT COUNT(DISTINCT s.criancaId) FROM monsterCacaLeitura s
@@ -113,6 +116,9 @@ async function getMonsterProgress(eventoId, partidaId) {
     monsterDefeated: String(team.monster_status || '').toLowerCase() === 'defeated',
     victory: String(team.monster_status || '').toLowerCase() === 'defeated',
     monsterStatus: team.monster_status || 'active',
+    // Monstro sorteado para a equipe (null em partidas antigas: o telão escolhe um)
+    monsterType: team.monster_type || null,
+    monsterColor: team.monster_color || null,
     version: Number(team.monster_version || 0),
     scanned: Number(team.scanned || 0),
     total: Number(team.total || 0),
@@ -156,6 +162,8 @@ async function startMonsterGame(eventoId, brincadeiraId) {
   }
   const now = new Date();
   const partidaId = uuidv4();
+  // Sorteio dos monstros: um por equipe, sem repetir neste jogo
+  const monstrosSorteados = sortearMonstros(participatingTeams.map((team) => ({ timeId: team.timeId, cor: team.cor })));
 
   // O update do evento funciona como lock de linha nos dois bancos. Assim,
   // dois Game Masters não conseguem criar partidas ativas simultaneamente e
@@ -200,14 +208,16 @@ async function startMonsterGame(eventoId, brincadeiraId) {
     for (const team of participatingTeams) {
       await tx.query(`
         INSERT INTO monsterCacaEstadoTime
-          (id, partidaId, empresaId, eventoId, timeId, vida, vidaMaxima, status, versao)
-        VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, @maxHp, @maxHp, 'active', 0)`, {
+          (id, partidaId, empresaId, eventoId, timeId, vida, vidaMaxima, status, versao, monstroTipo, monstroCor)
+        VALUES (@id, @partidaId, @empresaId, @eventoId, @timeId, @maxHp, @maxHp, 'active', 0, @monstroTipo, @monstroCor)`, {
         id: uuidv4(),
         partidaId,
         empresaId: game.empresaId,
         eventoId,
         timeId: team.timeId,
         maxHp: MONSTER_DEFAULTS.maxHp,
+        monstroTipo: monstrosSorteados.get(team.timeId)?.tipo ?? null,
+        monstroCor: monstrosSorteados.get(team.timeId)?.cor ?? null,
       });
     }
   });
