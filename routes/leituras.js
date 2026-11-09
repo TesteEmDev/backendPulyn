@@ -207,7 +207,7 @@ router.post('/reception', async (req, res) => {
     // Checkpoint e pulseira vêm em UMA consulta (antes eram duas, em sequência):
     // cada ida ao banco remoto soma na demora entre passar a pulseira e a luz acender.
     const checkpoint = await queryOne(
-      `SELECT c.checkpointId, c.empresaId, c.eventoId, c.proposito,
+      `SELECT c.checkpointId, c.numCheck, c.empresaId, c.eventoId, c.proposito,
               p.codigo AS pulseira_code, p.status AS pulseira_status
        FROM pontoVerificacao c
        LEFT JOIN pulseira p
@@ -267,6 +267,8 @@ router.post('/reception', async (req, res) => {
         timestamp: now.toISOString(),
         receivedAt: now.getTime(),
         checkpointId: checkpoint.checkpointId,
+        // R1, R2...: cada tela de autoatendimento só atende ao leitor de recepção do número dela
+        numCheck: checkpoint.numCheck || null,
         eventoId: targetEventId,
         source: 'reception',
       };

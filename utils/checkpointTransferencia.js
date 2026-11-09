@@ -29,6 +29,23 @@ function validarNumCheck(valor) {
   return { ok: true, valor: texto };
 }
 
+// Número dos checkpoints de recepção: R1, R2, R3... O número depois do R diz qual tela de autoatendimento recebe as leituras
+// daquele leitor (/reception/kiosk/1 ouve o R1). Os checkpoints de jogo e de pontuação não podem usar esse formato.
+const NUMERO_DE_RECEPCAO = /^R\d{1,3}$/i;
+const numeroDeRecepcao = (numero) => NUMERO_DE_RECEPCAO.test(String(numero ?? '').trim());
+
+// Confere o número escolhido para um checkpoint conforme a finalidade dele. Devolve { ok, valor } (já normalizado) ou { ok: false, erro }.
+function validarNumeroPorFinalidade(proposito, numero) {
+  const texto = String(numero ?? '').trim();
+  const recepcao = String(proposito || 'game').toLowerCase() === 'reception';
+  if (recepcao) {
+    if (!numeroDeRecepcao(texto)) return { ok: false, erro: 'O número de um checkpoint de recepção é R1, R2, R3 e assim por diante (a letra R e o número da tela de autoatendimento)' };
+    return { ok: true, valor: texto.toUpperCase() };
+  }
+  if (numeroDeRecepcao(texto)) return { ok: false, erro: 'Números como R1, R2... são só dos checkpoints de recepção. Use outro número para este checkpoint' };
+  return { ok: true, valor: texto };
+}
+
 const podeTransferir = (status) => status === STATUS.ESTOQUE;
 const podeExcluir = (status) => status === STATUS.ESTOQUE;
 
@@ -67,6 +84,8 @@ module.exports = {
   normalizarMac,
   normalizarEpc,
   validarNumCheck,
+  validarNumeroPorFinalidade,
+  numeroDeRecepcao,
   podeTransferir,
   podeExcluir,
 };

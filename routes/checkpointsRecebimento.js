@@ -5,7 +5,7 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
-const { STATUS, validarNumCheck } = require('../utils/checkpointTransferencia');
+const { STATUS, validarNumCheck, validarNumeroPorFinalidade } = require('../utils/checkpointTransferencia');
 const { statusEfetivo } = require('../utils/statusCheckpoint');
 
 // O banco guarda 'online' e nada o volta para 'offline': o status que a tela vê é calculado pelo último sinal da placa.
@@ -103,6 +103,10 @@ router.patch('/:checkpointId/numero', async (req, res) => {
     const numero = validarNumCheck(req.body.numCheck);
     if (!numero.ok) return res.status(400).json({ error: numero.erro });
     if (!numero.valor) return res.status(400).json({ error: 'Informe o número do checkpoint' });
+    // Recepção: R1, R2...; os demais não usam esse formato
+    const porFinalidade = validarNumeroPorFinalidade(atual.proposito, numero.valor);
+    if (!porFinalidade.ok) return res.status(400).json({ error: porFinalidade.erro });
+    numero.valor = porFinalidade.valor;
 
     const repetido = await numeroEmUso(req.user.empresaId, numero.valor, atual.checkpointId);
     if (repetido) {

@@ -37,6 +37,33 @@ router.use(verifyToken, (req, res, next) => (
     : requireRole('kiosk')(req, res, next)
 ));
 
+// Leitores de recepção cadastrados no buffet (R1, R2...): um para cada tela de autoatendimento (/reception/kiosk/<número>).
+router.get('/receptions', async (req, res) => {
+  try {
+    const { allQuery } = require('../database');
+    const { statusEfetivo } = require('../utils/statusCheckpoint');
+    const { numeroDeRecepcao } = require('../utils/checkpointTransferencia');
+    const linhas = await allQuery(
+      `SELECT numCheck, nome, status, ultimoVisto FROM pontoVerificacao
+       WHERE empresaId = @empresaId AND LOWER(COALESCE(proposito, 'game')) = 'reception' AND numCheck IS NOT NULL`,
+      { empresaId: req.user.empresaId }
+    );
+    const telas = linhas
+      .filter((linha) => numeroDeRecepcao(linha.numCheck))
+      .map((linha) => ({
+        numero: Number(String(linha.numCheck).slice(1)),
+        numCheck: String(linha.numCheck).toUpperCase(),
+        nome: linha.nome,
+        online: statusEfetivo(linha.status, linha.ultimoVisto) === 'online',
+      }))
+      .sort((a, b) => a.numero - b.numero);
+    res.json(telas);
+  } catch (error) {
+    console.error('❌ Kiosk: erro ao listar os leitores de recepção:', error.message);
+    res.status(500).json({ error: 'Não foi possível listar as telas de autoatendimento' });
+  }
+});
+
 // Eventos abertos da própria empresa, com somente os campos necessários ao visor.
 router.get('/events', async (req, res) => {
   try {
