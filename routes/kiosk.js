@@ -37,7 +37,7 @@ router.use(verifyToken, (req, res, next) => (
     : requireRole('kiosk')(req, res, next)
 ));
 
-// Leitores de recepção cadastrados no buffet (R1, R2...): um para cada tela de autoatendimento (/reception/kiosk/<número>).
+// Leitores de recepção das telas de autoatendimento (R2, R3...): um para cada tela (/reception/kiosk/<número>). O R1 é do balcão.
 router.get('/receptions', async (req, res) => {
   try {
     const { allQuery } = require('../database');
@@ -49,7 +49,8 @@ router.get('/receptions', async (req, res) => {
       { empresaId: req.user.empresaId }
     );
     const telas = linhas
-      .filter((linha) => numeroDeRecepcao(linha.numCheck))
+      // O R1 é do balcão (check-in); as telas de autoatendimento são do R2 em diante
+      .filter((linha) => numeroDeRecepcao(linha.numCheck) && String(linha.numCheck).toUpperCase() !== 'R1')
       .map((linha) => ({
         numero: Number(String(linha.numCheck).slice(1)),
         numCheck: String(linha.numCheck).toUpperCase(),
