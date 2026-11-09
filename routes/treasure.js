@@ -19,7 +19,7 @@ router.get('/pontoVerificacao/:checkpointId/status', async (req, res) => {
   }
 });
 
-// Status completo para o Game Master.
+// Status completo para o recreacionista.
 router.get('/evento/:eventoId/status', verifyToken, async (req, res) => {
   try {
     const evento = await queryOne(

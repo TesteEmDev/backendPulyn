@@ -166,7 +166,7 @@ async function startMonsterGame(eventoId, brincadeiraId) {
   const monstrosSorteados = sortearMonstros(participatingTeams.map((team) => ({ timeId: team.timeId, cor: team.cor })));
 
   // O update do evento funciona como lock de linha nos dois bancos. Assim,
-  // dois Game Masters não conseguem criar partidas ativas simultaneamente e
+  // dois recreacionistas não conseguem criar partidas ativas simultaneamente e
   // a partida só fica visível depois que todos os monstros foram criados.
   await withTransaction(async (tx) => {
     await tx.query(
