@@ -92,7 +92,8 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
     }
 
     // Validar role
-    const validRoles = ['admin', 'reception', 'game_master', 'display', 'family', 'kiosk', 'score_kiosk'];
+    // Telão (abre por link, sem conta) e família (cadastro próprio) não são criados por aqui
+    const validRoles = ['admin', 'reception', 'game_master', 'kiosk', 'score_kiosk'];
     if (!validRoles.includes(role)) {
       return res.status(400).json({ error: 'Role inválido' });
     }
