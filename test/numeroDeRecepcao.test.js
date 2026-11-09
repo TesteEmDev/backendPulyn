@@ -10,7 +10,14 @@ test('recepção só aceita R1, R2, R3... e guarda em maiúscula', () => {
   }
 });
 
-test('jogo e pontuação não usam o formato R1, R2...', () => {
+test('pontuação só aceita P1, P2, P3... e guarda em maiúscula', () => {
+  assert.deepEqual(validarNumeroPorFinalidade('score', 'p1'), { ok: true, valor: 'P1' });
+  for (const ruim of ['1', 'P', 'R1', 'PX', 'P1234', '']) assert.equal(validarNumeroPorFinalidade('score', ruim).ok, false, ruim);
+  assert.equal(validarNumeroPorFinalidade('reception', 'P1').ok, false);
+  assert.equal(validarNumeroPorFinalidade('game', 'P2').ok, false);
+});
+
+test('jogo não usa o formato R1, R2... nem os tipos usam o formato um do outro', () => {
   assert.equal(validarNumeroPorFinalidade('game', 'R1').ok, false);
   assert.equal(validarNumeroPorFinalidade('score', 'r3').ok, false);
   assert.deepEqual(validarNumeroPorFinalidade('game', '15'), { ok: true, valor: '15' });

@@ -29,20 +29,29 @@ function validarNumCheck(valor) {
   return { ok: true, valor: texto };
 }
 
-// Número dos checkpoints de recepção: R1, R2, R3... O número depois do R diz qual tela de autoatendimento recebe as leituras
-// daquele leitor (/reception/kiosk/1 ouve o R1). Os checkpoints de jogo e de pontuação não podem usar esse formato.
+// Número dos checkpoints de recepção (R1, R2, R3...) e de pontuação (P1, P2, P3...). O número depois da letra diz qual tela
+// recebe as leituras daquele leitor: o R1 é o balcão; /reception/kiosk/2 ouve o R2; /score-kiosk/1 ouve o P1.
+// Os checkpoints de jogo não podem usar nenhum desses formatos, nem um tipo usar o formato do outro.
 const NUMERO_DE_RECEPCAO = /^R\d{1,3}$/i;
+const NUMERO_DE_PONTUACAO = /^P\d{1,3}$/i;
 const numeroDeRecepcao = (numero) => NUMERO_DE_RECEPCAO.test(String(numero ?? '').trim());
+const numeroDePontuacao = (numero) => NUMERO_DE_PONTUACAO.test(String(numero ?? '').trim());
 
 // Confere o número escolhido para um checkpoint conforme a finalidade dele. Devolve { ok, valor } (já normalizado) ou { ok: false, erro }.
 function validarNumeroPorFinalidade(proposito, numero) {
   const texto = String(numero ?? '').trim();
-  const recepcao = String(proposito || 'game').toLowerCase() === 'reception';
-  if (recepcao) {
-    if (!numeroDeRecepcao(texto)) return { ok: false, erro: 'O número de um checkpoint de recepção é R1, R2, R3 e assim por diante (a letra R e o número da tela de autoatendimento)' };
+  const finalidade = String(proposito || 'game').toLowerCase();
+  if (finalidade === 'reception') {
+    if (!numeroDeRecepcao(texto)) return { ok: false, erro: 'O número de um checkpoint de recepção é R1, R2, R3 e assim por diante (a letra R e o número do leitor)' };
     return { ok: true, valor: texto.toUpperCase() };
   }
-  if (numeroDeRecepcao(texto)) return { ok: false, erro: 'Números como R1, R2... são só dos checkpoints de recepção. Use outro número para este checkpoint' };
+  if (finalidade === 'score') {
+    if (!numeroDePontuacao(texto)) return { ok: false, erro: 'O número de um checkpoint de pontuação é P1, P2, P3 e assim por diante (a letra P e o número da tela de pontuação)' };
+    return { ok: true, valor: texto.toUpperCase() };
+  }
+  if (numeroDeRecepcao(texto) || numeroDePontuacao(texto)) {
+    return { ok: false, erro: 'Números como R1, R2... (recepção) e P1, P2... (pontuação) são reservados a esses leitores. Use outro número para este checkpoint' };
+  }
   return { ok: true, valor: texto };
 }
 
@@ -86,6 +95,7 @@ module.exports = {
   validarNumCheck,
   validarNumeroPorFinalidade,
   numeroDeRecepcao,
+  numeroDePontuacao,
   podeTransferir,
   podeExcluir,
 };

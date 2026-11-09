@@ -190,6 +190,66 @@ function rememberReceptionReading(reading) {
   global.receptionReadingQueues.set(eventKey, queue.slice(-50));
 }
 
+// Leitura de um checkpoint de PONTUAÇÃO (P1, P2...): vai para as telas de consulta de pontuação do número dele. Como a de
+// recepção, o leitor se identifica pelo checkpoint e nenhuma regra de jogo é executada.
+function lembrarLeituraDePontuacao(leitura) {
+  if (!global.scoreKioskReadingQueues) global.scoreKioskReadingQueues = new Map();
+  const chave = String(leitura.eventoId || '').trim().toLowerCase();
+  if (!chave) return;
+  const fila = global.scoreKioskReadingQueues.get(chave) || [];
+  fila.push(leitura);
+  global.scoreKioskReadingQueues.set(chave, fila.slice(-50));
+}
+
+router.post('/score', async (req, res) => {
+  try {
+    const { checkpointId, uid } = req.body;
+    const normalizedUid = normalizeUid(uid);
+    const now = new Date();
+    if (!checkpointId || !normalizedUid) {
+      return res.status(400).json({ error: 'checkpointId e uid são obrigatórios' });
+    }
+
+    const checkpoint = await queryOne(
+      `SELECT checkpointId, numCheck, empresaId, eventoId FROM pontoVerificacao
+       WHERE checkpointId = @id AND LOWER(COALESCE(proposito, 'game')) = 'score'`,
+      { id: checkpointId }
+    );
+    if (!checkpoint || !checkpoint.empresaId) {
+      return res.status(404).json({ error: 'Checkpoint de pontuação não encontrado' });
+    }
+
+    const eventosAbertos = await allQuery(
+      `SELECT eventoId FROM evento
+       WHERE LOWER(empresaId) = LOWER(@empresaId)
+         AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
+      { empresaId: checkpoint.empresaId }
+    );
+    const eventos = eventosAbertos.length ? eventosAbertos.map((e) => e.eventoId) : [checkpoint.eventoId].filter(Boolean);
+
+    const readingId = uuidv4();
+    for (const eventoId of eventos) {
+      const leitura = {
+        readingId,
+        braceletCode: normalizedUid,
+        timestamp: now.toISOString(),
+        receivedAt: now.getTime(),
+        checkpointId: checkpoint.checkpointId,
+        // P1, P2...: cada tela de pontuação só atende ao leitor de pontuação do número dela
+        numCheck: checkpoint.numCheck || null,
+        eventoId,
+        source: 'score-kiosk',
+      };
+      lembrarLeituraDePontuacao(leitura);
+      broadcast({ type: 'NFC_READING_DETECTED', payload: leitura });
+    }
+    return res.json({ ok: true, braceletCode: normalizedUid, message: 'Leitura enviada para a tela de pontuação' });
+  } catch (err) {
+    console.error('❌ Erro na leitura de pontuação:', err);
+    return res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 router.post('/reception', async (req, res) => {
   try {
     const { checkpointId, uid } = req.body;
