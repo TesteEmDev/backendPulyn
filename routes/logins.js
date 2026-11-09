@@ -120,8 +120,11 @@ router.post('/', requireRole('admin', 'master'), async (req, res) => {
 
     res.json({
       id,
+      loginId: id,
       email,
       role,
+      perfil: role,
+      papeis: papeisDaConta({ perfil: role, perfisExtras: perfisExtrasParaSalvar(role, papeis) }),
       status: 'active',
       criadoEm: new Date().toISOString()
     });
