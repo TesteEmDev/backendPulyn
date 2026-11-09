@@ -1084,6 +1084,12 @@ async function stopGameForEvento(eventoId) {
       throw error;
     }
 
+    // Avisa o telão JÁ, antes do trabalho demorado abaixo (bônus, partidas, domínios, sessões). Sem isso ele ficava vendo o jogo
+    // se desmontar aos poucos (o mapa aparecia) e só trocava para o resultado no fim de tudo.
+    if (typeof global.broadcastToEvent === 'function') {
+      global.broadcastToEvent(eventoId, { type: 'GAME_STOPPING', payload: { eventoId } });
+    }
+
     // Parar com Caça ao Tesouro/Monstro em andamento: se já existe uma equipe
     // vencedora (a mais rápida / a primeira a derrotar o monstro), ela leva o
     // bônus antes de a partida ser encerrada. Uma falha aqui não impede a parada.
