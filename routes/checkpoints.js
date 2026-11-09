@@ -228,13 +228,14 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // Por padrão só os checkpoints de jogo; ?proposito=reception lista os de recepção.
-    const operador = String(req.query.proposito || '').toLowerCase() === 'reception' ? '=' : '<>';
+    // Por padrão só os checkpoints de jogo; ?proposito=reception lista os de recepção e ?proposito=todos os dois.
+    const pedido = String(req.query.proposito || '').toLowerCase();
+    const filtroFinalidade = pedido === 'todos' ? '' : `AND LOWER(COALESCE(proposito, 'game')) ${pedido === 'reception' ? '=' : '<>'} 'reception'`;
     const pontoVerificacao = await allQuery(
       `SELECT * FROM pontoVerificacao
        WHERE eventoId = @eventoId
          AND empresaId = @empresaId
-         AND LOWER(COALESCE(proposito, 'game')) ${operador} 'reception'
+         ${filtroFinalidade}
        ORDER BY nome`,
       { eventoId, empresaId: evento.empresaId }
     );
