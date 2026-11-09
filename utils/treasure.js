@@ -64,7 +64,7 @@ async function getEventCheckpoints(eventoId) {
      FROM "pontoVerificacao"
      WHERE LOWER(eventoId) = LOWER(@eventoId)
        AND LOWER(status) = 'online'
-       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+       AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
     { eventoId }
   );
 }
@@ -801,7 +801,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
        territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = @now
      WHERE LOWER(checkpointId) = LOWER(@checkpointId)
        AND LOWER(eventoId) = LOWER(@eventoId)
-       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+       AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
     { timeId: crianca.timeId, now, checkpointId, eventoId }
   );
 
@@ -854,7 +854,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
          territorioTravadoAte = NULL,
          territorioCooldownAte = NULL
        WHERE LOWER(eventoId) = LOWER(@eventoId)
-         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+         AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
       { eventoId }
     );
 

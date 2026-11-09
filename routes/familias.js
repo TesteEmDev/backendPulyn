@@ -933,7 +933,7 @@ router.get('/active-event', verifyToken, async (req, res) => {
       LEFT JOIN brincadeira b ON b.brincadeiraId = e.brincadeiraAtivaId
       LEFT JOIN crianca c ON c.eventoId = e.eventoId
       LEFT JOIN "time" t ON t.eventoId = e.eventoId
-      LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.eventoId AND cp.proposito != 'reception'
+      LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.eventoId AND LOWER(COALESCE(cp.proposito, 'game')) = 'game'
       WHERE e.eventoId = @eventoId
       GROUP BY e.eventoId, e.nome, e.data, e.status, e.empresaId,
                e.tipoJogoAtivo, e.brincadeiraAtivaId,

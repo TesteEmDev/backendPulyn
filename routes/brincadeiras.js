@@ -201,7 +201,7 @@ router.post('/', verifyToken, async (req, res) => {
       `SELECT checkpointId FROM pontoVerificacao
        WHERE eventoId = @eventoId
          AND empresaId = @empresaId
-         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+         AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
       { eventoId, empresaId: evento.empresaId }
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.checkpointId)));
@@ -306,7 +306,7 @@ router.put('/:id', verifyToken, async (req, res) => {
       `SELECT checkpointId FROM pontoVerificacao
        WHERE eventoId = @eventoId
          AND empresaId = @empresaId
-         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+         AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
       { eventoId: targetEventoId, empresaId: evento.empresaId }
     );
     const validCheckpointIds = new Set(validCheckpoints.map(cp => String(cp.checkpointId)));
@@ -385,7 +385,7 @@ router.put('/:id/checkpoints', verifyToken, requireRole('admin', 'game_master', 
       `SELECT checkpointId FROM pontoVerificacao
        WHERE (LOWER(eventoId) = LOWER(@eventoId)
               OR LOWER(eventoId) IN (SELECT LOWER(eventoId) FROM eventoBrincadeira WHERE LOWER(brincadeiraId) = LOWER(@gameId)))
-         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+         AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
       { eventoId: game.eventoId, gameId: game.brincadeiraId }
     );
     const validIds = new Set(valid.map(row => String(row.checkpointId).toLowerCase()));

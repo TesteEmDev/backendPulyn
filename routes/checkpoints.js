@@ -139,7 +139,8 @@ router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (r
     }
     comandos.agendar(checkpoint.checkpointId, tipo);
     // A placa de jogo busca o comando a cada ~10 s (checkpoint-mode); a de recepção só no heartbeat, a cada 60 s.
-    const recepcao = String(checkpoint.proposito || 'game').toLowerCase() === 'reception';
+    // Leitores de recepção e de pontuação só falam no heartbeat (a cada 60 s); a placa de jogo busca o comando a cada ~10 s
+    const recepcao = String(checkpoint.proposito || 'game').toLowerCase() !== 'game';
     res.json({ ok: true, tipo, esperaSegundos: recepcao ? 60 : 10 });
   } catch (err) {
     console.error('❌ Erro ao agendar teste do checkpoint:', err);
@@ -179,7 +180,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       FROM pontoVerificacao c
       INNER JOIN evento e ON e.eventoId = c.eventoId
       WHERE e.empresaId = @empresaId
-        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(c.proposito, 'game')) = 'game'
       GROUP BY c.eventoId, e.nome, e.status, e.data
       ORDER BY e.data DESC
     `, { empresaId: req.user.empresaId, limite: new Date(Date.now() - ONLINE_ATE_MS) });
@@ -228,9 +229,10 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // Por padrão só os checkpoints de jogo; ?proposito=reception lista os de recepção e ?proposito=todos os dois.
+    // Por padrão só os checkpoints de jogo; ?proposito=reception ou score lista os dessa finalidade e ?proposito=todos todos.
     const pedido = String(req.query.proposito || '').toLowerCase();
-    const filtroFinalidade = pedido === 'todos' ? '' : `AND LOWER(COALESCE(proposito, 'game')) ${pedido === 'reception' ? '=' : '<>'} 'reception'`;
+    const finalidade = ['reception', 'score'].includes(pedido) ? pedido : 'game';
+    const filtroFinalidade = pedido === 'todos' ? '' : `AND LOWER(COALESCE(proposito, 'game')) = '${finalidade}'`;
     const pontoVerificacao = await allQuery(
       `SELECT * FROM pontoVerificacao
        WHERE eventoId = @eventoId

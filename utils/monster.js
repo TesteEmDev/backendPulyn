@@ -78,7 +78,7 @@ async function getMonsterCheckpoints(eventoId) {
   return allQuery(`
     SELECT checkpointId, empresaId, status FROM "pontoVerificacao"
     WHERE LOWER(eventoId) = LOWER(@eventoId)
-      AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`, { eventoId });
+      AND LOWER(COALESCE(proposito, 'game')) = 'game'`, { eventoId });
 }
 
 async function getMonsterProgress(eventoId, partidaId) {

@@ -94,7 +94,7 @@ async function listarCheckpointsDoEvento(eventoId, empresaId) {
     `SELECT checkpointId, numCheck, nome, zona, status, ultimoVisto
      FROM pontoVerificacao
      WHERE LOWER(eventoId) = LOWER(@eventoId) AND empresaId = @empresaId
-       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+       AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
     { eventoId, empresaId }
   );
   const historico = await allQuery(
@@ -103,7 +103,7 @@ async function listarCheckpointsDoEvento(eventoId, empresaId) {
      FROM eventoCheckpoint h
      LEFT JOIN pontoVerificacao p ON p.checkpointId = h.checkpointId
      WHERE LOWER(h.eventoId) = LOWER(@eventoId) AND h.empresaId = @empresaId
-       AND LOWER(COALESCE(p.proposito, 'game')) <> 'reception'`,
+       AND LOWER(COALESCE(p.proposito, 'game')) = 'game'`,
     { eventoId, empresaId }
   );
   const vistos = new Set(atuais.map((cp) => String(cp.checkpointId).toLowerCase()));

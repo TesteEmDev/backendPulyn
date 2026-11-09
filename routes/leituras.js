@@ -315,6 +315,9 @@ router.post('/', async (req, res) => {
     if (String(checkpoint.proposito || 'game').trim().toLowerCase() === 'reception') {
       return res.status(409).json({ ok: false, error: 'Use a rota de recepção para este checkpoint' });
     }
+    if (String(checkpoint.proposito || 'game').trim().toLowerCase() === 'score') {
+      return res.status(409).json({ ok: false, error: 'Este checkpoint é de pontuação: ele não participa dos jogos' });
+    }
 
     const processedReading = await findProcessedReading(readingId, checkpoint);
     if (processedReading) {

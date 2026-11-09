@@ -129,7 +129,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
                   (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS children_count,
                   (SELECT COUNT(*) FROM pontoVerificacao k
                     WHERE k.eventoId = e.eventoId
-                      AND LOWER(COALESCE(k.proposito, 'game')) <> 'reception') AS totalCheckpoints
+                      AND LOWER(COALESCE(k.proposito, 'game')) = 'game') AS totalCheckpoints
            FROM evento e
            WHERE e.empresaId = @id
            ORDER BY e.data DESC, e.hora DESC`,

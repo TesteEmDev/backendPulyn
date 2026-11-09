@@ -192,7 +192,7 @@ const interval = setInterval(() => {
 //       `UPDATE pontoVerificacao 
 //        SET status = 'offline' 
 //        WHERE status = 'online'
-//        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+//        AND LOWER(COALESCE(proposito, 'game')) = 'game'
 //        AND (last_seen IS NULL OR last_seen < @fiveMinutesAgo)`,
 //       { fiveMinutesAgo }
 //     );
@@ -830,7 +830,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         territorioCooldownAte = NULL,
         ultimoConquistadoEm = NULL
       WHERE LOWER(eventoId) = LOWER(@eventoId)
-        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(proposito, 'game')) = 'game'
     `, { eventoId });
     console.log(`   ✓ Territórios do evento limpos para uma nova partida`);
     
@@ -1110,7 +1110,7 @@ async function stopGameForEvento(eventoId) {
         territorioCooldownAte = NULL,
         ultimoConquistadoEm = NULL
       WHERE eventoId = @eventoId
-        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(proposito, 'game')) = 'game'
     `, { eventoId });
     console.log(`   ✓ Domínios dos checkpoints encerrados`);
     
@@ -1410,8 +1410,8 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
 app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const territoryScope = isMaster(req)
-      ? " WHERE LOWER(COALESCE(proposito, 'game')) <> 'reception'"
-      : " WHERE empresaId = @empresaId AND LOWER(COALESCE(proposito, 'game')) <> 'reception'";
+      ? " WHERE LOWER(COALESCE(proposito, 'game')) = 'game'"
+      : " WHERE empresaId = @empresaId AND LOWER(COALESCE(proposito, 'game')) = 'game'";
     await query(
       `UPDATE pontoVerificacao SET
         territorioTravadoAte = NULL,
@@ -1464,7 +1464,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
        WHERE checkpointId IN (
          SELECT checkpointId FROM pontoVerificacao
          WHERE eventoId = @eventoId
-           AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+           AND LOWER(COALESCE(proposito, 'game')) = 'game'
        )`,
       { eventoId }
     );
@@ -1522,7 +1522,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
         territorioCooldownAte = NULL,
         territorioDonoTimeId = NULL
        WHERE eventoId = @eventoId
-         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+         AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
       { eventoId }
     );
     console.log(`   ✓ Territories resetados`);

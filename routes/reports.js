@@ -113,7 +113,7 @@ router.get('/evento/:eventoId/zonas', async (req, res) => {
         AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = @eventoId)
       WHERE (cp.eventoId = @eventoId OR cp.checkpointId IN (SELECT checkpointId FROM eventoCheckpoint WHERE eventoId = @eventoId))
         AND cp.empresaId = @empresaId
-        AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(cp.proposito, 'game')) = 'game'
       GROUP BY COALESCE(NULLIF(TRIM(cp.zona), ''), 'Sem zona')
       ORDER BY leituras DESC, zona
     `, { eventoId: evento.eventoId, empresaId });
@@ -155,7 +155,7 @@ router.get('/evento/:eventoId/checkpoints', async (req, res) => {
         AND l.criancaId IN (SELECT criancaId FROM crianca WHERE eventoId = @eventoId)
       WHERE (cp.eventoId = @eventoId OR cp.checkpointId IN (SELECT checkpointId FROM eventoCheckpoint WHERE eventoId = @eventoId))
         AND cp.empresaId = @empresaId
-        AND LOWER(COALESCE(cp.proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(cp.proposito, 'game')) = 'game'
       GROUP BY cp.checkpointId, cp.nome, NULLIF(TRIM(cp.zona), '')
       ORDER BY leituras DESC, cp.nome
     `, { eventoId: evento.eventoId, empresaId });

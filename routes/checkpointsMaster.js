@@ -98,7 +98,7 @@ router.post('/', async (req, res) => {
     if (informouNumero(req.body)) return res.status(400).json({ error: ERRO_NUMERO_DO_BUFFET });
 
     const proposito = String(req.body.proposito || 'game').trim().toLowerCase();
-    if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game ou reception' });
+    if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game, reception ou score' });
 
     const tipo = String(req.body.tipo || 'NFC').trim();
     if (tipo.length > 20) return res.status(400).json({ error: 'O tipo deve ter até 20 caracteres' });
@@ -181,7 +181,7 @@ router.patch('/:id', async (req, res) => {
     }
     if (req.body.proposito !== undefined) {
       const proposito = String(req.body.proposito).trim().toLowerCase();
-      if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game ou reception' });
+      if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game, reception ou score' });
       campos.push('proposito = @proposito');
       params.proposito = proposito;
     }

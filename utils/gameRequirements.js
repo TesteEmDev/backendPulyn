@@ -76,7 +76,7 @@ async function checkGameStartRequirements(eventoId, game) {
   const online = await allQuery(
     `SELECT checkpointId FROM "pontoVerificacao"
      WHERE LOWER(eventoId) = LOWER(@eventoId)
-       AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+       AND LOWER(COALESCE(proposito, 'game')) = 'game'
        AND LOWER(COALESCE(status, 'offline')) = 'online'`,
     { eventoId }
   );

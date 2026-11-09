@@ -7,7 +7,8 @@
 // Os checkpoints que já existiam antes deste fluxo ficam como 'aceito'.
 
 const STATUS = Object.freeze({ ESTOQUE: 'estoque', ACEITO: 'aceito' });
-const PROPOSITOS = ['game', 'reception'];
+// game = jogo; reception = leitor da recepção; score = leitor do totem de consulta de pontuação
+const PROPOSITOS = ['game', 'reception', 'score'];
 
 // "aa-bb-cc-dd-ee-ff", "AABBCCDDEEFF" ou "aa:bb:cc:dd:ee:ff" -> "AA:BB:CC:DD:EE:FF". null se não for um MAC.
 function normalizarMac(valor) {

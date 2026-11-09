@@ -717,7 +717,7 @@ router.get('/:eventoId/pontoVerificacao', verifyToken, async (req, res) => {
       SELECT * FROM pontoVerificacao 
       WHERE eventoId = @eventoId
       AND empresaId = @empresaId
-      AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+      AND LOWER(COALESCE(proposito, 'game')) = 'game'
       ORDER BY nome ASC
     `, { eventoId, empresaId });
     res.json(semIdNovo(pontoVerificacao));
