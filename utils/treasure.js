@@ -1,6 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { awardWinnerBonus, escolherLider } = require('./winnerBonus');
+const { statusEfetivo } = require('./statusCheckpoint');
 
 const TREASURE_GAME_TYPE = 'treasure_hunt';
 const TREASURE_TURN_DELAY_MS = 10 * 1000;
@@ -58,15 +59,17 @@ async function getLatestSession(eventoId) {
   );
 }
 
+// Checkpoints de jogo do evento que estão LIGADOS agora: o banco guarda 'online' e nada o volta para 'offline', então vale o
+// último sinal da placa (heartbeat ou leitura nos últimos minutos, utils/statusCheckpoint.js).
 async function getEventCheckpoints(eventoId) {
-  return allQuery(
-    `SELECT checkpointId, territorioDonoTimeId
+  const linhas = await allQuery(
+    `SELECT checkpointId, territorioDonoTimeId, status, ultimoVisto
      FROM "pontoVerificacao"
      WHERE LOWER(eventoId) = LOWER(@eventoId)
-       AND LOWER(status) = 'online'
        AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
     { eventoId }
   );
+  return linhas.filter((linha) => statusEfetivo(linha.status, linha.ultimoVisto) === 'online');
 }
 
 async function getTeamRaceTimes(eventoId, session) {
