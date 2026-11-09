@@ -302,7 +302,8 @@ async function getConfiguredTreasureCheckpointIds(eventoId, brincadeiraId) {
     .map(checkpoint => String(checkpoint.checkpointId));
 }
 
-async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId = null, allowedCheckpointIds = null) {
+// finalId: o checkpoint que o recreacionista escolheu como o último. Ele só vira alvo quando não resta outro para a equipe.
+async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId = null, allowedCheckpointIds = null, finalId = null) {
   const checkpoints = await getEventCheckpoints(eventoId);
   const allowedSet = Array.isArray(allowedCheckpointIds) && allowedCheckpointIds.length
     ? new Set(allowedCheckpointIds.map(id => String(id).trim().toLowerCase()))
@@ -322,7 +323,8 @@ async function getNextTargetCheckpointId(eventoId, teamId, excludedCheckpointId 
     .map(checkpoint => String(checkpoint.checkpointId));
 
   if (candidates.length) {
-    return chooseRandom(candidates);
+    const antesDoFinal = finalId ? candidates.filter(id => !sameId(id, finalId)) : candidates;
+    return chooseRandom(antesDoFinal.length ? antesDoFinal : candidates);
   }
 
   // Não deixar uma partida ativa sem alvo. Isso pode ocorrer quando os dados
@@ -367,7 +369,7 @@ async function validarQuantidadeCheckpoints(eventoId, brincadeiraId, quantidade)
   return normalizarQuantidadeCheckpoints(quantidade, await contarCheckpointsDisponiveis(eventoId, brincadeiraId));
 }
 
-async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null } = {}) {
+async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null, checkpointFinalId = null } = {}) {
   const game = await getGameForEvent(eventoId, brincadeiraId);
   if (!game || game.tipo !== TREASURE_GAME_TYPE) {
     throw new Error('Jogo Caça ao Tesouro não encontrado para este evento');
@@ -381,7 +383,18 @@ async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null } 
   // O recreacionista pode escolher usar só parte deles: sorteia quais e guarda na partida
   const quantidadeUsada = normalizarQuantidadeCheckpoints(quantidade, todosOsIds.length);
   const usarSubconjunto = quantidadeUsada !== null && quantidadeUsada < todosOsIds.length;
-  const ids = usarSubconjunto ? sortearCheckpoints(todosOsIds, quantidadeUsada) : todosOsIds;
+  // O último escolhido precisa estar entre os usados: ele entra primeiro e o resto é sorteado
+  const finalId = checkpointFinalId ? todosOsIds.find(id => sameId(id, checkpointFinalId)) || null : null;
+  if (checkpointFinalId && !finalId) {
+    const erro = new Error('O checkpoint escolhido como último não está na lista do jogo ou está offline.');
+    erro.statusCode = 400;
+    throw erro;
+  }
+  const ids = usarSubconjunto
+    ? (finalId
+      ? [finalId, ...sortearCheckpoints(todosOsIds.filter(id => !sameId(id, finalId)), quantidadeUsada - 1)]
+      : sortearCheckpoints(todosOsIds, quantidadeUsada))
+    : todosOsIds;
 
   const participatingTeams = await getParticipatingTeams(eventoId);
   if (participatingTeams.length < 2) {
@@ -394,17 +407,17 @@ async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null } 
   await stopTreasureGame(eventoId);
   const now = new Date();
   const initialTurnAvailableAt = new Date(now.getTime() + TREASURE_TURN_DELAY_MS);
-  const targetCheckpointId = chooseRandom(ids);
+  const targetCheckpointId = chooseRandom(finalId && ids.length > 1 ? ids.filter(id => !sameId(id, finalId)) : ids);
   const partidaId = uuidv4();
 
   await query(
     `INSERT INTO cacaTesourPartida
       (partidaId, eventoId, brincadeiraId, status, numeroRonda, timeInicialId,
        timeVezId, vezDisponvelEm, checkpointAlvoId, checkpointsCompletadosIds,
-       checkpointsUsadosIds, iniciadoEm, rondaIniciadaEm)
+       checkpointsUsadosIds, checkpointFinalId, iniciadoEm, rondaIniciadaEm)
      VALUES (@id, @eventoId, @brincadeiraId, 'active', 1, @startingTeamId,
        @turnTeamId, @turnAvailableAt, @targetCheckpointId, @completedCheckpointIds,
-       @usedCheckpointIds, @startedAt, @roundStartedAt)`,
+       @usedCheckpointIds, @finalCheckpointId, @startedAt, @roundStartedAt)`,
     {
       id: partidaId,
       eventoId,
@@ -415,6 +428,7 @@ async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null } 
       targetCheckpointId,
       completedCheckpointIds: JSON.stringify([]),
       usedCheckpointIds: usarSubconjunto ? JSON.stringify(ids) : null,
+      finalCheckpointId: finalId ? String(finalId) : null,
       startedAt: now,
       roundStartedAt: initialTurnAvailableAt,
     }
@@ -454,6 +468,7 @@ async function startTreasureGame(eventoId, brincadeiraId, { quantidade = null } 
     completedCheckpointIds: [],
     totalCheckpoints: ids.length,
     usedCheckpointIds: ids.map(String),
+    checkpointFinalId: finalId ? String(finalId) : null,
     status: 'active',
   };
 }
@@ -843,7 +858,7 @@ async function processTreasureScan({ eventoId, checkpointId, crianca, brincadeir
   const nextTargetCheckpointId = raceFinished
     ? null
     : nextTurnTeam
-      ? await getNextTargetCheckpointId(eventoId, nextTurnTeam.teamId, checkpointId, treasureCheckpointIds)
+      ? await getNextTargetCheckpointId(eventoId, nextTurnTeam.teamId, checkpointId, treasureCheckpointIds, session.checkpointFinalId)
       : null;
 
   // Ao trocar de equipe, o mapa começa uma nova busca: os domínios da
@@ -984,7 +999,8 @@ async function refreshTreasureTargetAfterListChange(eventoId) {
     eventoId,
     session.timeVezId || session.timeInicialId,
     null,
-    ids
+    ids,
+    session.checkpointFinalId
   );
   if (!targetCheckpointId) return null;
 
@@ -1000,6 +1016,7 @@ module.exports = {
   sortearCheckpoints,
   normalizarQuantidadeCheckpoints,
   contarCheckpointsDisponiveis,
+  getConfiguredTreasureCheckpointIds,
   validarQuantidadeCheckpoints,
   leiturasNecessarias,
   refreshTreasureTargetAfterListChange,

@@ -752,7 +752,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
-      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId, { quantidade: treasureQuantidade });
+      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId, { quantidade: treasureQuantidade, checkpointFinalId: String(req.body.checkpointFinalId || '').trim() || null });
       await stopMonsterGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);

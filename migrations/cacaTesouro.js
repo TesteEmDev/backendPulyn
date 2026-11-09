@@ -53,6 +53,8 @@ async function ensureCacaTesouroSchema() {
   await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_caca_tesouro_tempo_equipe ON cacaTesourTempo (partidaId, timeId)');
   // Quando o recreacionista escolhe usar só parte dos checkpoints do jogo, os sorteados da partida ficam aqui (JSON)
   await query('ALTER TABLE cacaTesourPartida ADD COLUMN IF NOT EXISTS checkpointsUsadosIds text');
+  // Checkpoint que o recreacionista escolheu como o último a ser lido por cada equipe (vazio = qualquer ordem)
+  await query('ALTER TABLE cacaTesourPartida ADD COLUMN IF NOT EXISTS checkpointFinalId text');
 }
 
 module.exports = { ensureCacaTesouroSchema };
