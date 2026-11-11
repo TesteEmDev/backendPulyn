@@ -853,6 +853,7 @@ router.get('/todas-criancas', verifyToken, async (req, res) => {
              e.nome AS ultimoEventoNome, e.data AS ultimoEventoData, emp.nome AS buffetNome,
              CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS participacoes,
              CAST((SELECT COALESCE(SUM(c.pontos), 0) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS pontosTotais,
+             CAST((SELECT COUNT(*) FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId AND vf.status IN ('approved', 'pending')) AS INTEGER) AS vinculosEvento,
              CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId AND c.codigoPulseira IS NOT NULL) AS INTEGER) AS comPulseira
       FROM perfilCrianca p
       LEFT JOIN evento e ON e.eventoId = p.ultimoEventoId
