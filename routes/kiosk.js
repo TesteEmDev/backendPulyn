@@ -175,6 +175,9 @@ router.get('/profiles', async (req, res) => {
       empresaId: req.user.empresaId,
       eventoId: eventId,
       termo: req.query.busca,
+      // AAAA-MM-DD: sem a data de nascimento a busca não devolve ninguém
+      dataNascimento: String(req.query.dataNascimento || '').trim(),
+      nomeResponsavel: String(req.query.nomeResponsavel || '').trim().slice(0, 200),
     });
     res.json(perfis);
   } catch (error) {

@@ -45,6 +45,16 @@ function nomeAbreviado(nome) {
   return [partes[0], ...iniciais].join(' ');
 }
 
+// Dois nomes de responsável "batem" quando são iguais (sem acento/maiúscula) ou quando todas as palavras do mais curto
+// estão no mais longo ("Carlos Almeida" x "Carlos Almeida Silva"): a recepção e o pai nem sempre digitam o nome completo.
+function responsaveisParecidos(a, b) {
+  const palavrasA = normalizarBusca(a).split(' ').filter(Boolean);
+  const palavrasB = normalizarBusca(b).split(' ').filter(Boolean);
+  if (!palavrasA.length || !palavrasB.length) return false;
+  const [curto, longo] = palavrasA.length <= palavrasB.length ? [palavrasA, palavrasB] : [palavrasB, palavrasA];
+  return curto.every((palavra) => longo.includes(palavra));
+}
+
 function idadeValida(idade) {
   const valor = Number.parseInt(idade, 10);
   return Number.isFinite(valor) ? Math.max(0, valor) : null;
@@ -199,21 +209,26 @@ async function recalcularUltimoEvento(perfilCriancaId) {
 // Busca para o Kiosk: só devolve o necessário para a criança se reconhecer (nome abreviado, apelido, idade, avatar).
 // Entram os cadastros que ainda não estão neste evento e também os que a recepção cadastrou no check-in e ainda estão
 // sem pulseira (`jaNoEvento`): o Kiosk só vincula a pulseira a essa participação. Quem já tem pulseira no evento não aparece.
-async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, limite = 8 }) {
+async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, dataNascimento, nomeResponsavel, limite = 8 }) {
   const busca = normalizarBusca(termo);
   if (busca.length < 2) return [];
+  // Privacidade: só aparece quem tem o nome E a data de nascimento informados (nunca cadastros de outras pessoas)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dataNascimento || ''))) return [];
+  // ...e o nome do pai/responsável (cadastro sem esse nome não é achado por aqui)
+  if (normalizarBusca(nomeResponsavel).length < 2) return [];
   const rows = await allQuery(
-    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento,
+    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, p.nomeResponsavel, CAST(p.dataNascimento AS text) AS dataNascimento,
             part.criancaId AS participacaoId, part.avatar AS avatarNoEvento, part.apelido AS apelidoNoEvento, part.cor AS corNoEvento
      FROM perfilCrianca p
      LEFT JOIN crianca part ON part.perfilCriancaId = p.perfilCriancaId AND part.eventoId = @eventoId
      WHERE p.empresaId = @empresaId
+       AND CAST(p.dataNascimento AS text) = @dataNascimento
        AND (${semAcentosSql('p.apelido')} LIKE @padrao OR ${semAcentosSql('p.nome')} LIKE @padrao)
        AND (part.criancaId IS NULL OR part.codigoPulseira IS NULL)
      ORDER BY p.atualizadoEm DESC`,
-    { empresaId, eventoId, padrao: `%${busca}%`, limite }
+    { empresaId, eventoId, dataNascimento, padrao: `%${busca}%`, limite: 50 }
   );
-  return rows.map((row) => ({
+  return rows.filter((row) => responsaveisParecidos(row.nomeResponsavel, nomeResponsavel)).slice(0, limite).map((row) => ({
     perfilCriancaId: row.perfilCriancaId,
     nomeExibicao: nomeParaExibir(row.nome),
     apelido: row.apelidoNoEvento || row.apelido || '',
@@ -315,4 +330,5 @@ module.exports = {
   idadeValida,
   normalizarBusca,
   semAcentosSql,
+  responsaveisParecidos,
 };
