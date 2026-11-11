@@ -62,5 +62,16 @@ test('avatar montado com cor de fundo personalizada (6 hex no fim) e valido', ()
   const { isAvatarValido } = require('../utils/avatar');
   assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00ff7f'), true);
   assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00FF7F'), false);
-  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00ff'), false);
+  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00f'), false);
+});
+
+test('avatar montado com acessorios (4 caracteres a mais) e valido, com ou sem cor personalizada', () => {
+  const { isAvatarValido } = require('../utils/avatar');
+  const base = 'pulyn1-55k562916400010'; // 15 caracteres depois do prefixo (formato antigo)
+  assert.equal(isAvatarValido(base), true);
+  assert.equal(isAvatarValido(base + '1201'), true);
+  assert.equal(isAvatarValido(base + '1201' + '00ff7f'), true);
+  assert.equal(isAvatarValido(base + '00ff7f'), true);
+  assert.equal(isAvatarValido(base + '12'), false);
+  assert.equal(isAvatarValido(base + '12012'), false);
 });
