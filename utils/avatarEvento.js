@@ -3,7 +3,7 @@
 // Cada participante recebe um avatar diferente dos outros do evento. O padrão (nenhum avatar escolhido) vira um avatar
 // livre sorteado, e quem pede um que outro participante já usa recebe um aviso. Os avatares são 20: só quando todos
 // estão em uso a repetição é permitida (o menos usado é o que entra).
-const { ADVENTURER_AVATAR_IDS } = require('./avatar');
+const { ADVENTURER_AVATAR_IDS, isAvatarMontado } = require('./avatar');
 
 // pedido: o avatar que a pessoa escolheu (se estiver em uso, é conflito) | preferido: o avatar que ela já tinha (se estiver
 // em uso, entra outro, sem erro) | emUso: os avatares dos outros participantes do evento (repetidos contam como usos).
@@ -13,9 +13,12 @@ function escolherAvatar({ pedido = null, preferido = null, emUso = [], ids = ADV
   const livres = ids.filter((id) => !usos.has(id));
 
   if (pedido) {
+    // Avatar montado: cada criança monta o seu, então não entra na regra de "já escolhido por outro"
+    if (isAvatarMontado(pedido)) return { avatar: pedido };
     if (livres.length === 0 || livres.includes(pedido)) return { avatar: pedido };
     return { conflito: true, livres };
   }
+  if (isAvatarMontado(preferido)) return { avatar: preferido };
   if (preferido && ids.includes(preferido) && (livres.length === 0 || livres.includes(preferido))) return { avatar: preferido };
   if (livres.length) return { avatar: livres[Math.floor(aleatorio() * livres.length)] };
 

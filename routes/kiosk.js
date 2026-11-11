@@ -3,7 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { isAdventurerAvatarId } = require('../utils/avatar');
+const { isAvatarValido } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const {
@@ -324,7 +324,7 @@ router.post('/participants', async (req, res) => {
     // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
     const avatarPedido = avatar ? String(avatar) : null;
 
-    if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
+    if (avatarPedido && !isAvatarValido(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
     // Cor escolhida (opcional): sem ela, entra uma livre

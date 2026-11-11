@@ -36,3 +36,22 @@ test('preferido fora da lista de avatares (emoji antigo) é ignorado', () => {
   const r = escolherAvatar({ preferido: '👤', emUso: [], ids: IDS });
   assert.ok(IDS.includes(r.avatar));
 });
+
+const MONTADO = 'pulyn1-abcDEF123456xyz';
+
+test('avatar montado: formato valido e aceito sem conflito, mesmo repetido no evento', () => {
+  const { isAvatarMontado, isAvatarValido, getAvatarForCreate } = require('../utils/avatar');
+  assert.equal(isAvatarMontado(MONTADO), true);
+  assert.equal(isAvatarValido(MONTADO), true);
+  assert.equal(getAvatarForCreate(MONTADO), MONTADO);
+  assert.deepEqual(escolherAvatar({ pedido: MONTADO, emUso: [MONTADO, 'a'], ids: IDS }), { avatar: MONTADO });
+  assert.equal(escolherAvatar({ preferido: MONTADO, emUso: ['a'], ids: IDS }).avatar, MONTADO);
+});
+
+test('avatar montado: codigos fora do formato sao recusados', () => {
+  const { isAvatarValido, getAvatarForCreate } = require('../utils/avatar');
+  for (const ruim of ['pulyn1-curto', 'pulyn2-abcDEF123456xyz', 'pulyn1-abcDEF123456xy!', 'pulyn1-abcDEF123456xyzz', '<script>']) {
+    assert.equal(isAvatarValido(ruim), false, ruim);
+    assert.equal(getAvatarForCreate(ruim), null, ruim);
+  }
+});
