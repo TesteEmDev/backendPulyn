@@ -148,6 +148,38 @@ async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, a
   );
 }
 
+// Cadastro que nunca entrou em um evento ("não aceito"): só esses podem ser editados ou excluídos por aqui.
+async function perfilTemParticipacao(perfilCriancaId) {
+  const linha = await queryOne('SELECT COUNT(*) AS total FROM crianca WHERE perfilCriancaId = @perfilCriancaId', { perfilCriancaId });
+  return Number(linha?.total) > 0;
+}
+
+// Edita os dados de um cadastro sem participação (grava exatamente o que veio, inclusive apagando o apelido).
+async function editarPerfilSemParticipacao(perfilCriancaId, dados) {
+  const comResponsavel = Object.prototype.hasOwnProperty.call(dados, 'nomeResponsavel');
+  await query(
+    `UPDATE perfilCrianca
+     SET nome = @nome, apelido = @apelido, idade = @idade, dataNascimento = @dataNascimento,
+         ${comResponsavel ? 'nomeResponsavel = @nomeResponsavel, parentescoResponsavel = @parentescoResponsavel,' : ''}
+         atualizadoEm = CURRENT_TIMESTAMP
+     WHERE perfilCriancaId = @perfilCriancaId`,
+    {
+      perfilCriancaId,
+      nome: dados.nome,
+      apelido: dados.apelido,
+      idade: dados.idade,
+      dataNascimento: dados.dataNascimento,
+      ...(comResponsavel ? { nomeResponsavel: dados.nomeResponsavel, parentescoResponsavel: dados.parentescoResponsavel } : {}),
+    }
+  );
+}
+
+// Exclui o cadastro (e os vínculos de pré-cadastro dele). Chame só depois de confirmar que não tem participação.
+async function excluirPerfil(perfilCriancaId) {
+  await query('DELETE FROM perfilVinculoFamiliar WHERE perfilCriancaId = @perfilCriancaId', { perfilCriancaId });
+  await query('DELETE FROM perfilCrianca WHERE perfilCriancaId = @perfilCriancaId', { perfilCriancaId });
+}
+
 // Depois de remover uma participação, o "último evento" volta a ser o evento mais recente que sobrou (ou vazio).
 async function recalcularUltimoEvento(perfilCriancaId) {
   if (!perfilCriancaId) return;
@@ -270,6 +302,9 @@ module.exports = {
   buscarPerfil,
   registrarVolta,
   atualizarDadosDoPerfil,
+  perfilTemParticipacao,
+  editarPerfilSemParticipacao,
+  excluirPerfil,
   recalcularUltimoEvento,
   buscarPerfisParaKiosk,
   pontosDoPerfil,

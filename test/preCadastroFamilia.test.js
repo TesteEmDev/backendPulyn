@@ -70,3 +70,15 @@ test('nome abreviado: primeiro nome inteiro e inicial nas demais palavras', () =
   assert.equal(nomeAbreviado('Ana'), 'Ana');
   assert.equal(nomeAbreviado(''), '');
 });
+
+test('edição do cadastro: nome e data obrigatórios, idade vem da data, responsável só quando permitido', () => {
+  const { validarEdicaoPerfil } = require('../utils/preCadastroFamilia');
+  assert.equal(validarEdicaoPerfil({ nome: '', dataNascimento: '2018-01-01' }).ok, false);
+  assert.equal(validarEdicaoPerfil({ nome: 'Ana', dataNascimento: '' }).ok, false);
+  const r = validarEdicaoPerfil({ nome: ' Ana ', apelido: '  ', dataNascimento: '2018-01-01', nomeResponsavel: 'Pai' });
+  assert.equal(r.ok, true);
+  assert.equal(r.value.nome, 'Ana');
+  assert.equal(r.value.apelido, null);
+  assert.equal('nomeResponsavel' in r.value, false);
+  assert.equal(validarEdicaoPerfil({ nome: 'Ana', dataNascimento: '1990-01-01', nomeResponsavel: ' Carlos ', parentescoResponsavel: 'Pai' }, { comResponsavel: true }).value.nomeResponsavel, 'Carlos');
+});
