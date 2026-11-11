@@ -12,9 +12,6 @@ function eventoAberto(evento) {
 
 // Devolve { ok, error, value } com os campos já limpos. Os mesmos limites do check-in da recepção.
 function validarPreCadastro(body = {}) {
-  const eventoId = String(body.eventoId || '').trim();
-  if (!eventoId) return { ok: false, error: 'Escolha o evento' };
-
   const nome = String(body.nome || '').trim();
   if (!nome) return { ok: false, error: 'Nome da criança é obrigatório' };
   if (nome.length > 100) return { ok: false, error: 'Nome excede o limite de 100 caracteres' };
@@ -28,13 +25,12 @@ function validarPreCadastro(body = {}) {
   if (dataNascimento) {
     idade = idadeDeNascimento(dataNascimento);
     if (idade === null) return { ok: false, error: 'Data de nascimento inválida' };
-    if (idade > 17) return { ok: false, error: 'A criança precisa ter até 17 anos' };
   } else {
     idade = idadeValida(body.idade ?? body.age);
     if (idade === null) return { ok: false, error: 'Informe a data de nascimento da criança' };
   }
 
-  return { ok: true, value: { eventoId, nome, apelido: apelido || null, idade, dataNascimento } };
+  return { ok: true, value: { nome, apelido: apelido || null, idade, dataNascimento } };
 }
 
 // Dois nomes de responsável "batem" quando são iguais (sem acento/maiúscula) ou quando todas as palavras do mais curto

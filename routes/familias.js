@@ -5,7 +5,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
 const { criarPerfil, normalizarBusca, semAcentosSql } = require('../utils/perfilCrianca');
-const { eventoAberto, validarPreCadastro, responsaveisParecidos } = require('../utils/preCadastroFamilia');
+const { validarPreCadastro, responsaveisParecidos } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
 const { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
@@ -859,13 +859,10 @@ router.post('/perfis/verificar', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
 
-    const eventoId = String(req.body?.eventoId || '').trim();
     const nome = normalizarBusca(req.body?.nome);
     const dataNascimento = String(req.body?.dataNascimento || '').trim();
-    if (!eventoId || !nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return res.json({ existe: false });
+    if (!req.user.empresaId || !nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return res.json({ existe: false });
 
-    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @eventoId', { eventoId });
-    if (!evento) return res.json({ existe: false });
     const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
     if (!responsavel?.nomeFamilia) return res.json({ existe: false });
 
@@ -880,7 +877,7 @@ router.post('/perfis/verificar', verifyToken, async (req, res) => {
          AND NOT EXISTS (SELECT 1 FROM perfilVinculoFamiliar pv WHERE pv.perfilCriancaId = p.perfilCriancaId AND pv.loginId = @loginId)
          AND NOT EXISTS (SELECT 1 FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId)
        ORDER BY p.criadoEm DESC`,
-      { empresaId: evento.empresaId, dataNascimento, nome, loginId: req.user.id }
+      { empresaId: req.user.empresaId, dataNascimento, nome, loginId: req.user.id }
     );
     const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia));
     res.json(parecido ? { existe: true, criadoEm: parecido.criadoEm } : { existe: false });
@@ -890,26 +887,22 @@ router.post('/perfis/verificar', verifyToken, async (req, res) => {
   }
 });
 
-// Pré-cadastro: cria o cadastro da criança no buffet do evento escolhido e liga o responsável a ele.
-// O buffet vem do evento no banco, nunca do corpo da requisição.
+// Pré-cadastro: cria o cadastro da criança no buffet da conta do responsável e liga o responsável a ele.
+// Não depende de evento: a criança se vincula ao evento depois, pelo autoatendimento (Kiosk).
+// O buffet vem da conta no banco, nunca do corpo da requisição.
 router.post('/perfis', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
 
     const dados = validarPreCadastro(req.body);
     if (!dados.ok) return res.status(400).json({ error: dados.error });
-    const { eventoId, nome, apelido, idade, dataNascimento } = dados.value;
-
-    const evento = await queryOne(
-      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @eventoId',
-      { eventoId }
-    );
-    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!eventoAberto(evento)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
+    const { nome, apelido, idade, dataNascimento } = dados.value;
+    const empresaId = req.user.empresaId;
+    if (!empresaId) return res.status(400).json({ error: 'Sua conta não está ligada a um buffet' });
 
     const perfilCriancaId = await withTransaction(async () => {
       const perfilId = await criarPerfil({
-        empresaId: evento.empresaId,
+        empresaId,
         eventoId: null,
         nome,
         apelido,
@@ -924,7 +917,7 @@ router.post('/perfis', verifyToken, async (req, res) => {
           vinculoId: crypto.randomUUID(),
           loginId: req.user.id,
           perfilCriancaId: perfilId,
-          empresaId: evento.empresaId,
+          empresaId,
         }
       );
       return perfilId;

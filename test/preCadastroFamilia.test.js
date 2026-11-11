@@ -2,12 +2,12 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
 
-const valido = { eventoId: 'e1', nome: '  Ana  ', apelido: 'Aninha', idade: '6' };
+const valido = { nome: '  Ana  ', apelido: 'Aninha', idade: '6' };
 
 test('dados válidos saem limpos (nome sem espaços, idade como número)', () => {
   assert.deepEqual(validarPreCadastro(valido), {
     ok: true,
-    value: { eventoId: 'e1', nome: 'Ana', apelido: 'Aninha', idade: 6, dataNascimento: null },
+    value: { nome: 'Ana', apelido: 'Aninha', idade: 6, dataNascimento: null },
   });
 });
 
@@ -17,8 +17,8 @@ test('apelido vazio vira null', () => {
   assert.equal(r.value.apelido, null);
 });
 
-test('sem evento escolhido não cadastra', () => {
-  assert.deepEqual(validarPreCadastro({ ...valido, eventoId: '' }), { ok: false, error: 'Escolha o evento' });
+test('não exige evento: a criança se vincula a ele depois, pelo autoatendimento', () => {
+  assert.equal(validarPreCadastro({ ...valido, eventoId: '' }).ok, true);
 });
 
 test('nome obrigatório e limitado a 100 caracteres', () => {
@@ -49,10 +49,10 @@ test('com data de nascimento, a idade sai dela', () => {
   assert.ok(r.value.idade >= 9 && r.value.idade <= 11);
 });
 
-test('data de nascimento inválida, futura ou de criança acima de 17 anos é recusada', () => {
+test('data de nascimento inválida ou futura é recusada; não há limite de idade', () => {
   assert.equal(validarPreCadastro({ ...valido, dataNascimento: '2018-02-30' }).ok, false);
   assert.equal(validarPreCadastro({ ...valido, dataNascimento: '2999-01-01' }).ok, false);
-  assert.equal(validarPreCadastro({ ...valido, dataNascimento: '1990-01-01' }).ok, false);
+  assert.equal(validarPreCadastro({ ...valido, dataNascimento: '1990-01-01' }).ok, true);
 });
 
 test('responsáveis parecidos: ignora acento, maiúscula e sobrenome a mais', () => {
