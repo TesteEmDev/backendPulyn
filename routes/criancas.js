@@ -92,6 +92,33 @@ router.get('/evento/:eventoId/avatares-em-uso', async (req, res) => {
   }
 });
 
+// Check-in sem evento aberto: guarda só o cadastro permanente da criança (perfil), sem time nem pulseira.
+// Ela se vincula ao evento depois, pelo autoatendimento (Kiosk). O buffet é sempre o do token.
+router.post('/perfil', async (req, res) => {
+  try {
+    const empresaId = req.user.empresaId;
+    if (!empresaId) return res.status(400).json({ error: 'Sua conta não está ligada a um buffet' });
+    const nome = String(req.body.nome || '').trim();
+    if (!nome) return res.status(400).json({ error: 'Nome da criança é obrigatório' });
+    if (nome.length > 100) return res.status(400).json({ error: 'Nome excede o limite de 100 caracteres' });
+    const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
+    if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+    const avatar = req.body.avatar ? String(req.body.avatar) : null;
+    if (avatar && !isAvatarValido(avatar)) return res.status(400).json({ error: 'Avatar inválido' });
+
+    const apelido = String(req.body.apelido || '').trim().slice(0, 100) || null;
+    const nomeResponsavel = String(req.body.nomeResponsavel || '').trim().slice(0, 200) || null;
+    const parentescoResponsavel = String(req.body.parentescoResponsavel || '').trim().slice(0, 50) || null;
+    const perfilCriancaId = await criarPerfil({
+      empresaId, eventoId: null, nome, apelido, idade: idadeNaData(nascimento.data), avatar,
+      dataNascimento: nascimento.data, nomeResponsavel, parentescoResponsavel,
+    });
+    res.status(201).json({ perfilCriancaId, nome, apelido, dataNascimento: nascimento.data, nomeResponsavel, parentescoResponsavel, avatar });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Criar criança
 router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
