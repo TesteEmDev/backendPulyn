@@ -51,12 +51,12 @@ function idadeDeNascimento(dataISO, hoje = new Date()) {
 }
 
 // Cria o perfil de uma criança nova e já aponta o último evento para o evento atual.
-async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, dataNascimento }) {
+async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, dataNascimento, nomeResponsavel = null }) {
   if (!String(nome || '').trim()) throw new Error('Nome da criança é obrigatório');
   const perfilCriancaId = uuidv4();
   await query(
-    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, dataNascimento)
-     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId, @dataNascimento)`,
+    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, dataNascimento, nomeResponsavel)
+     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId, @dataNascimento, @nomeResponsavel)`,
     {
       perfilCriancaId,
       empresaId,
@@ -66,6 +66,7 @@ async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, 
       avatar: avatar || null,
       eventoId: eventoId || null,
       dataNascimento: dataNascimento || null,
+      nomeResponsavel: String(nomeResponsavel || '').trim() || null,
     }
   );
   return perfilCriancaId;
@@ -75,14 +76,14 @@ async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, 
 async function buscarPerfil(perfilCriancaId, empresaId) {
   if (!perfilCriancaId) return null;
   return (await queryOne(
-    `SELECT perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, CAST(dataNascimento AS text) AS dataNascimento
+    `SELECT perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, CAST(dataNascimento AS text) AS dataNascimento, nomeResponsavel
      FROM perfilCrianca WHERE perfilCriancaId = @perfilCriancaId AND empresaId = @empresaId`,
     { perfilCriancaId, empresaId }
   )) || null;
 }
 
 // A criança voltou: marca o evento atual como o último e atualiza o que mudou (idade, apelido, avatar).
-async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avatar, dataNascimento = null }) {
+async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avatar, dataNascimento = null, nomeResponsavel = null }) {
   await query(
     `UPDATE perfilCrianca
      SET ultimoEventoId = @eventoId,
@@ -90,11 +91,13 @@ async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avata
          idade = COALESCE(@idade, idade),
          avatar = COALESCE(@avatar, avatar),
          dataNascimento = COALESCE(@dataNascimento, dataNascimento),
+         nomeResponsavel = COALESCE(@nomeResponsavel, nomeResponsavel),
          atualizadoEm = CURRENT_TIMESTAMP
      WHERE perfilCriancaId = @perfilCriancaId`,
     {
       perfilCriancaId,
       eventoId,
+      nomeResponsavel: String(nomeResponsavel || '').trim() || null,
       apelido: String(apelido || '').trim() || null,
       idade: idadeValida(idade),
       avatar: avatar || null,
@@ -104,7 +107,7 @@ async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avata
 }
 
 // Quando alguém edita uma participação, o cadastro permanente acompanha.
-async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, avatar, dataNascimento = null }) {
+async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, avatar, dataNascimento = null, nomeResponsavel = null }) {
   if (!perfilCriancaId) return;
   await query(
     `UPDATE perfilCrianca
@@ -113,10 +116,12 @@ async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, a
          idade = COALESCE(@idade, idade),
          avatar = COALESCE(@avatar, avatar),
          dataNascimento = COALESCE(@dataNascimento, dataNascimento),
+         nomeResponsavel = COALESCE(@nomeResponsavel, nomeResponsavel),
          atualizadoEm = CURRENT_TIMESTAMP
      WHERE perfilCriancaId = @perfilCriancaId`,
     {
       perfilCriancaId,
+      nomeResponsavel: String(nomeResponsavel || '').trim() || null,
       nome: String(nome || '').trim() || null,
       apelido: String(apelido || '').trim() || null,
       idade: idadeValida(idade),

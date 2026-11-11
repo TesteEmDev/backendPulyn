@@ -104,6 +104,8 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       dataNascimento = nascimento.data;
     }
     const age = dataNascimento ? idadeNaData(dataNascimento) : req.body.age;
+    // Nome do pai/responsavel (opcional): fica no cadastro permanente da crianca
+    const nomeResponsavel = String(req.body.nomeResponsavel || '').trim().slice(0, 200) || null;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
     const avatarPedido = avatar ? String(avatar) : null;
@@ -203,9 +205,9 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const corValue = escolhaCor.cor;
 
     if (perfilDaCrianca) {
-      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento });
+      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento, nomeResponsavel });
     } else {
-      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento });
+      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento, nomeResponsavel });
     }
 
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
@@ -230,7 +232,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, nomeResponsavel, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
