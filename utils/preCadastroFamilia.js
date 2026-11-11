@@ -2,7 +2,7 @@
 //
 // O cadastro nasce num evento aberto escolhido pelo pai; o buffet dele é o do evento, nunca o que o app manda.
 // Sem evento não há buffet, e sem buffet a recepção não enxerga o cadastro (isolamento entre empresas).
-const { idadeValida, idadeDeNascimento, normalizarBusca } = require('./perfilCrianca');
+const { idadeValida, idadeDeNascimento, responsaveisParecidos } = require('./perfilCrianca');
 const { normalizarDataNascimento, idadeNaData } = require('./nascimento');
 
 const EVENTOS_FECHADOS = new Set(['completed', 'cancelled', 'canceled', 'finished']);
@@ -32,16 +32,6 @@ function validarPreCadastro(body = {}) {
   }
 
   return { ok: true, value: { nome, apelido: apelido || null, idade, dataNascimento } };
-}
-
-// Dois nomes de responsável "batem" quando são iguais (sem acento/maiúscula) ou quando todas as palavras do mais curto
-// estão no mais longo ("Carlos Almeida" x "Carlos Almeida Silva"): a recepção e o pai nem sempre digitam o nome completo.
-function responsaveisParecidos(a, b) {
-  const palavrasA = normalizarBusca(a).split(' ').filter(Boolean);
-  const palavrasB = normalizarBusca(b).split(' ').filter(Boolean);
-  if (!palavrasA.length || !palavrasB.length) return false;
-  const [curto, longo] = palavrasA.length <= palavrasB.length ? [palavrasA, palavrasB] : [palavrasB, palavrasA];
-  return curto.every((palavra) => longo.includes(palavra));
 }
 
 // Edição de um cadastro que ainda não entrou em nenhum evento. Mesmos limites do cadastro; sem limite de idade.
