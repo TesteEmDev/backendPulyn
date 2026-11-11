@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { isAdventurerAvatarId } = require('../utils/avatar');
+const { isAvatarValido, gerarAvatarMontado } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
@@ -110,7 +110,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const { eventoId } = req.params;
     const id = uuidv4();
 
-    if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
+    if (avatarPedido && !isAvatarValido(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
     // Cor escolhida (opcional): sem ela, entra uma livre
@@ -189,6 +189,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const escolhaAvatar = escolherAvatar({
       pedido: avatarPedido,
       preferido: perfilDaCrianca?.avatar,
+      gerarNovo: gerarAvatarMontado,
       emUso: await avataresEmUso({ allQuery }, eventoId),
     });
     if (escolhaAvatar.conflito) {
@@ -293,7 +294,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
 
     const nextAvatar = avatar === undefined || avatar === crianca.avatar
       ? crianca.avatar
-      : (isAdventurerAvatarId(avatar) ? avatar : null);
+      : (isAvatarValido(avatar) ? avatar : null);
     if (nextAvatar === null) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }

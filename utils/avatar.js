@@ -18,14 +18,45 @@ function isAdventurerAvatarId(value) {
   return typeof value === 'string' && ADVENTURER_AVATAR_SET.has(value);
 }
 
+// Avatar montado pela criança no Kiosk/recepção: "pulyn1-" + 13 posições de peças/cores + 2 de flags (22 caracteres).
+// O desenho é refeito no front a partir do código; aqui só se confere o formato (o front valida cada posição ao ler).
+const AVATAR_MONTADO_REGEX = /^pulyn1-[0-9a-z]{15}$/;
+
+function isAvatarMontado(value) {
+  return typeof value === 'string' && AVATAR_MONTADO_REGEX.test(value);
+}
+
+// Quantas opções cada campo do código tem hoje (na ordem do código: ver src/avatar/builder/code.ts do front).
+// As listas do front só crescem no fim, então um código gerado aqui continua válido mesmo quando surgirem peças novas.
+const TAMANHOS_AVATAR_MONTADO = Object.freeze([4, 6, 17, 10, 7, 6, 7, 2, 12, 8, 13, 8, 11]);
+const FLAGS_AVATAR_MONTADO = 64; // 6 flags (bits)
+
+// Personagem montado sorteado: o avatar de quem ainda não escolheu o seu.
+function gerarAvatarMontado(aleatorio = Math.random) {
+  const pos = TAMANHOS_AVATAR_MONTADO.map((tamanho) => Math.floor(aleatorio() * tamanho).toString(36));
+  // cloth ≠ "sem roupa" (posição 0) e acessório quase sempre vazio, para o sorteio não sair estranho
+  if (pos[8] === '0') pos[8] = '1';
+  if (aleatorio() < 0.7) pos[10] = '0';
+  const flags = (Math.floor(aleatorio() * FLAGS_AVATAR_MONTADO) | 0b000100 | 0b100000) & ~0b000001; // bochechas e cabeça grande ligadas, sem óculos
+  return `pulyn1-${pos.join('')}${flags.toString(36).padStart(2, '0')}`;
+}
+
+// Avatar aceito na API: um dos 20 prontos ou um avatar montado.
+function isAvatarValido(value) {
+  return isAdventurerAvatarId(value) || isAvatarMontado(value);
+}
+
 function getAvatarForCreate(value) {
-  if (value === undefined || value === null || value === '') return DEFAULT_AVATAR_ID;
-  return isAdventurerAvatarId(value) ? value : null;
+  if (value === undefined || value === null || value === '') return gerarAvatarMontado();
+  return isAvatarValido(value) ? value : null;
 }
 
 module.exports = {
   ADVENTURER_AVATAR_IDS,
   DEFAULT_AVATAR_ID,
   isAdventurerAvatarId,
+  isAvatarMontado,
+  isAvatarValido,
+  gerarAvatarMontado,
   getAvatarForCreate,
 };
