@@ -906,6 +906,8 @@ router.post('/perfis/verificar', verifyToken, async (req, res) => {
       { empresaId: req.user.empresaId, dataNascimento, nome, loginId: req.user.id }
     );
     const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia));
+    // Sem nomes no log: só o motivo, para entender por que um aviso esperado não apareceu
+    console.log(`🔎 [FAMILIAS] Cadastro parecido: ${candidatos.length} candidato(s) com mesmo nome e nascimento no buffet da conta; ${parecido ? 'responsável bate' : 'nenhum responsável bate'}`);
     res.json(parecido ? { existe: true, criadoEm: parecido.criadoEm } : { existe: false });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao verificar cadastro parecido:', err.message);
