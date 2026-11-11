@@ -842,6 +842,43 @@ router.get('/perfis', verifyToken, async (req, res) => {
   }
 });
 
+// Todas as crianças do responsável (uma linha por criança, não por evento): as que já têm pulseira, as que estão num
+// evento sem pulseira e as pré-cadastradas que ainda aguardam o buffet.
+router.get('/todas-criancas', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const rows = await allQuery(`
+      SELECT p.perfilCriancaId, p.nome, p.apelido, p.avatar, p.idade, CAST(p.dataNascimento AS text) AS dataNascimento,
+             e.nome AS ultimoEventoNome, e.data AS ultimoEventoData, emp.nome AS buffetNome,
+             CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS participacoes,
+             CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId AND c.codigoPulseira IS NOT NULL) AS INTEGER) AS comPulseira
+      FROM perfilCrianca p
+      LEFT JOIN evento e ON e.eventoId = p.ultimoEventoId
+      LEFT JOIN empresa emp ON emp.empresaId = p.empresaId
+      WHERE p.perfilCriancaId IN (
+              SELECT perfilCriancaId FROM perfilVinculoFamiliar WHERE loginId = @loginId
+              UNION
+              SELECT perfilCriancaId FROM vinculoFamiliar
+              WHERE loginId = @loginId AND status IN ('approved', 'pending') AND perfilCriancaId IS NOT NULL)
+      ORDER BY p.nome ASC
+    `, { loginId: req.user.id });
+
+    res.json({
+      total: rows.length,
+      criancas: rows.map((row) => ({
+        ...row,
+        idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
+        // com_pulseira: tem pulseira em algum evento; no_evento: já esteve num evento mas sem pulseira; aguardando: só cadastro
+        situacao: row.comPulseira > 0 ? 'com_pulseira' : row.participacoes > 0 ? 'no_evento' : 'aguardando',
+      })),
+    });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao listar todas as crianças:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Antes de salvar o pré-cadastro: já existe um cadastro (feito na recepção, por exemplo) com o mesmo nome da criança,
 // a mesma data de nascimento e o mesmo nome de pai/responsável? Só avisa; quem decide é o responsável no app.
 router.post('/perfis/verificar', verifyToken, async (req, res) => {
