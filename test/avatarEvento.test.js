@@ -57,3 +57,10 @@ test('avatar montado: codigos fora do formato sao recusados', () => {
     assert.equal(getAvatarForCreate(ruim), null, ruim);
   }
 });
+
+test('avatar montado com cor de fundo personalizada (6 hex no fim) e valido', () => {
+  const { isAvatarValido } = require('../utils/avatar');
+  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00ff7f'), true);
+  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00FF7F'), false);
+  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00ff'), false);
+});
