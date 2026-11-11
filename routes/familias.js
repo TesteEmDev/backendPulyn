@@ -4,7 +4,7 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
-const { criarPerfil, normalizarBusca, semAcentosSql } = require('../utils/perfilCrianca');
+const { criarPerfil, normalizarBusca, semAcentosSql, nomeAbreviado } = require('../utils/perfilCrianca');
 const { validarPreCadastro, responsaveisParecidos } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
@@ -881,7 +881,7 @@ router.get('/todas-criancas', verifyToken, async (req, res) => {
 
 // Antes de salvar o pré-cadastro: já existe um cadastro (feito na recepção, por exemplo) com o mesmo nome da criança,
 // a mesma data de nascimento e o mesmo nome de pai/responsável? A busca é GLOBAL (em todos os buffets): a criança pode
-// ter ido a outro buffet antes. Só devolve se existe e quando foi criado, nunca dados do cadastro nem do buffet; e só
+// ter ido a outro buffet antes. Só devolve se existe, quando foi criado e os nomes abreviados ("Guilherme G. C."), nunca o nome completo nem o buffet; e só
 // bate quando o nome do responsável do cadastro for o da própria conta de quem pergunta. Só avisa; quem decide é o pai.
 router.post('/perfis/verificar', verifyToken, async (req, res) => {
   try {
@@ -896,7 +896,7 @@ router.post('/perfis/verificar', verifyToken, async (req, res) => {
 
     // Cadastros que o próprio responsável já tem ligados a ele não contam
     const candidatos = await allQuery(
-      `SELECT p.nomeResponsavel, p.criadoEm
+      `SELECT p.nome, p.nomeResponsavel, p.criadoEm
        FROM perfilCrianca p
        WHERE CAST(p.dataNascimento AS text) = @dataNascimento
          AND ${semAcentosSql('p.nome')} = @nome
@@ -909,7 +909,10 @@ router.post('/perfis/verificar', verifyToken, async (req, res) => {
     const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia));
     // Sem nomes no log: só o motivo, para entender por que um aviso esperado não apareceu
     console.log(`🔎 [FAMILIAS] Cadastro parecido: ${candidatos.length} candidato(s) com mesmo nome e nascimento em todos os buffets; ${parecido ? 'responsável bate' : 'nenhum responsável bate'}`);
-    res.json(parecido ? { existe: true, criadoEm: parecido.criadoEm } : { existe: false });
+    // Nomes só abreviados ("Guilherme G. C."): o pai reconhece o cadastro sem o app expor o nome completo
+    res.json(parecido
+      ? { existe: true, criadoEm: parecido.criadoEm, crianca: nomeAbreviado(parecido.nome), responsavel: nomeAbreviado(parecido.nomeResponsavel) }
+      : { existe: false });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao verificar cadastro parecido:', err.message);
     res.status(500).json({ error: err.message });
