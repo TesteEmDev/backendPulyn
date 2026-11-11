@@ -4,6 +4,8 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients } = require('../utils/platformClients');
+const { statusEfetivo } = require('../utils/statusCheckpoint');
+const { STATUS } = require('../utils/checkpointTransferencia');
 
 // ✅ Dados para o dashboard master - APENAS master
 router.get('/dashboard', verifyToken, async (req, res) => {
@@ -27,16 +29,27 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         AND emp.nome != 'Master Admin'
     `);
     
-    // Checkpoints online
-    const onlineCheckpoints = await queryOne(`
-      SELECT COUNT(*) as count
+    // Checkpoints: o `status` gravado só vira 'offline' quando alguém avisa, então "online" é calculado pelo último sinal
+    // da placa (statusEfetivo). Contam todos os aparelhos do master: em estoque e com o buffet (semNumero: ainda sem o número do buffet).
+    const aparelhos = await allQuery(`
+      SELECT c.status, c.ultimoVisto, c.statusTransferencia, c.proposito, c.numCheck
       FROM pontoVerificacao c
       LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
-      WHERE c.status = 'online'
-        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
-        AND emp.nome != 'Master Admin'
+      WHERE emp.nome IS NULL OR emp.nome != 'Master Admin'
     `);
-    
+    const agora = Date.now();
+    const checkpoints = { total: aparelhos.length, online: 0, offline: 0, emEstoque: 0, semNumero: 0, comBuffets: 0, offlineComBuffets: 0 };
+    for (const ap of aparelhos) {
+      const online = statusEfetivo(ap.status, ap.ultimoVisto, agora) === 'online';
+      if (online) checkpoints.online += 1; else checkpoints.offline += 1;
+      if (ap.statusTransferencia === STATUS.ESTOQUE) checkpoints.emEstoque += 1;
+      else {
+        checkpoints.comBuffets += 1;
+        if (!ap.numCheck) checkpoints.semNumero += 1;
+        if (!online) checkpoints.offlineComBuffets += 1;
+      }
+    }
+
     // Crianças ativas hoje
     const activeChildren = await queryOne(`
       SELECT COUNT(*) as count
@@ -46,23 +59,14 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         AND emp.nome != 'Master Admin'
     `);
     
-    // Checkpoints offline
-    const offlineCheckpoints = await queryOne(`
-      SELECT COUNT(*) as count
-      FROM pontoVerificacao c
-      LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
-      WHERE (c.status = 'offline' OR c.status IS NULL)
-        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
-        AND emp.nome != 'Master Admin'
-    `);
-    
     console.log('✅ Dashboard data loaded successfully');
     res.json({
       activeClients: platformClients.filter((c) => String(c.status).toLowerCase() === 'active').length,
       activeEvents: activeEvents?.count || 0,
-      onlineCheckpoints: onlineCheckpoints?.count || 0,
+      onlineCheckpoints: checkpoints.online,
       activeChildren: activeChildren?.count || 0,
-      offlineCheckpoints: offlineCheckpoints?.count || 0,
+      offlineCheckpoints: checkpoints.offline,
+      checkpoints,
       totalClients: platformClients.length,
     });
   } catch (err) {
@@ -167,34 +171,38 @@ router.get('/alerts', verifyToken, async (req, res) => {
 
     console.log('⚠️ [MASTER] Buscando alertas...');
 
-    // Antes, a mensagem e o cliente eram textos fixos ('Checkpoint offline'
-    // / 'Sistema') para toda e qualquer linha — nunca dizia QUAL checkpoint
-    // nem DE QUEM. Agora busca os dados reais e monta a mensagem no JS
-    // (evita depender de concatenação de string, que difere entre
-    // SQL Server e Postgres).
-    const offlineCheckpoints = await allQuery(`
-      SELECT TOP 5
-        c.checkpointId,
-        c.nome,
-        c.zona,
-        c.ultimoVisto,
-        emp.nome as empresa_nome
+    // Alerta = checkpoint que está num buffet (aceito) e não dá sinal há mais de 3 minutos. O `status` gravado não serve:
+    // ele só vira 'offline' quando alguém avisa, então a situação vem do último sinal (statusEfetivo).
+    const aceitos = await allQuery(`
+      SELECT c.checkpointId, c.numCheck, c.nome, c.zona, c.status, c.ultimoVisto, emp.nome as empresa_nome
       FROM pontoVerificacao c
       LEFT JOIN empresa emp ON c.empresaId = emp.empresaId
-      WHERE c.status = 'offline'
-        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
+      WHERE c.statusTransferencia = @aceito
+        AND emp.nome != 'Master Admin'
       ORDER BY c.ultimoVisto DESC
-    `);
+    `, { aceito: STATUS.ACEITO });
 
-    const alerts = offlineCheckpoints.map((cp) => ({
-      id: cp.checkpointId,
-      type: 'offline',
-      message: `Checkpoint "${cp.nome || cp.checkpointId}" offline${cp.zona ? ` (${cp.zona})` : ''}`,
-      cliente: cp.empresa_nome || 'Sem empresa',
-      time: cp.ultimoVisto
-        ? new Date(cp.ultimoVisto).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-        : '—',
-    }));
+    const agora = Date.now();
+    const tempoSemSinal = (visto) => {
+      if (!visto) return 'nunca conectou';
+      const min = Math.max(0, Math.round((agora - new Date(visto).getTime()) / 60000));
+      if (min < 60) return `sem sinal há ${min} min`;
+      const h = Math.floor(min / 60);
+      return h < 48 ? `sem sinal há ${h} h` : `sem sinal há ${Math.floor(h / 24)} dias`;
+    };
+    const alerts = aceitos
+      .filter((cp) => statusEfetivo(cp.status, cp.ultimoVisto, agora) === 'offline')
+      .map((cp) => ({
+        id: cp.checkpointId,
+        type: 'offline',
+        message: `Checkpoint "${cp.nome || cp.checkpointId}"${cp.numCheck ? ` (nº ${cp.numCheck})` : ''} offline${cp.zona ? ` · ${cp.zona}` : ''}`,
+        detalhe: tempoSemSinal(cp.ultimoVisto),
+        client: cp.empresa_nome || 'Sem empresa',
+        cliente: cp.empresa_nome || 'Sem empresa',
+        time: cp.ultimoVisto
+          ? new Date(cp.ultimoVisto).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+          : '—',
+      }));
 
     console.log(`✅ ${alerts?.length || 0} alertas carregados`);
     res.json(alerts || []);

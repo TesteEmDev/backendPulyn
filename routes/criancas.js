@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { isAdventurerAvatarId } = require('../utils/avatar');
+const { isAvatarValido } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
@@ -99,18 +99,21 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada (versões antigas)
     let dataNascimento = null;
     if (req.body.dataNascimento) {
-      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
       if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
       dataNascimento = nascimento.data;
     }
     const age = dataNascimento ? idadeNaData(dataNascimento) : req.body.age;
+    // Nome do pai/responsavel (opcional): fica no cadastro permanente da crianca
+    const nomeResponsavel = String(req.body.nomeResponsavel || '').trim().slice(0, 200) || null;
+    const parentescoResponsavel = String(req.body.parentescoResponsavel || '').trim().slice(0, 50) || null;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
     const avatarPedido = avatar ? String(avatar) : null;
     const { eventoId } = req.params;
     const id = uuidv4();
 
-    if (avatarPedido && !isAdventurerAvatarId(avatarPedido)) {
+    if (avatarPedido && !isAvatarValido(avatarPedido)) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }
     // Cor escolhida (opcional): sem ela, entra uma livre
@@ -203,9 +206,9 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const corValue = escolhaCor.cor;
 
     if (perfilDaCrianca) {
-      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento });
+      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento, nomeResponsavel, parentescoResponsavel });
     } else {
-      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento });
+      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento, nomeResponsavel, parentescoResponsavel });
     }
 
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
@@ -230,7 +233,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, nomeResponsavel, parentescoResponsavel, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -269,7 +272,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
     // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada
     let dataNascimento = null;
     if (req.body.dataNascimento) {
-      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
       if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
       dataNascimento = nascimento.data;
     }
@@ -293,7 +296,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
 
     const nextAvatar = avatar === undefined || avatar === crianca.avatar
       ? crianca.avatar
-      : (isAdventurerAvatarId(avatar) ? avatar : null);
+      : (isAvatarValido(avatar) ? avatar : null);
     if (nextAvatar === null) {
       return res.status(400).json({ error: 'Avatar inválido' });
     }

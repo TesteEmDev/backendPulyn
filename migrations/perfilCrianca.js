@@ -73,10 +73,15 @@ async function ensurePerfilCriancaSchema() {
     // Data de nascimento no lugar da idade digitada (a idade segue gravada, calculada da data)
     await query('ALTER TABLE crianca ADD COLUMN IF NOT EXISTS dataNascimento date');
     await query('ALTER TABLE perfilCrianca ADD COLUMN IF NOT EXISTS dataNascimento date');
+    // Nome do pai/responsável, digitado no check-in: o app da família usa para achar o cadastro (nome do pai + da criança + nascimento)
+    await query('ALTER TABLE perfilCrianca ADD COLUMN IF NOT EXISTS nomeResponsavel varchar(200)');
+    await query('ALTER TABLE perfilCrianca ADD COLUMN IF NOT EXISTS parentescoResponsavel varchar(50)');
   } else {
     await query("IF COL_LENGTH('crianca', 'cor') IS NULL ALTER TABLE crianca ADD cor NVARCHAR(20) NULL");
     await query("IF COL_LENGTH('crianca', 'dataNascimento') IS NULL ALTER TABLE crianca ADD dataNascimento DATE NULL");
     await query("IF COL_LENGTH('perfilCrianca', 'dataNascimento') IS NULL ALTER TABLE perfilCrianca ADD dataNascimento DATE NULL");
+    await query("IF COL_LENGTH('perfilCrianca', 'nomeResponsavel') IS NULL ALTER TABLE perfilCrianca ADD nomeResponsavel NVARCHAR(200) NULL");
+    await query("IF COL_LENGTH('perfilCrianca', 'parentescoResponsavel') IS NULL ALTER TABLE perfilCrianca ADD parentescoResponsavel NVARCHAR(50) NULL");
   }
 }
 

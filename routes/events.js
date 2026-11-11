@@ -10,6 +10,7 @@ const { checkGameStartRequirements } = require('../utils/gameRequirements');
 const { semIdNovo } = require('../utils/checkpointTransferencia');
 const { apagarEvento } = require('../utils/apagarEvento');
 const { saveGameState, getGameState } = require('../utils/gameState');
+const { listarCheckpointsDoEvento } = require('../utils/checkpointsDoEvento');
 const {
   isClosedStatus,
   startEvent,
@@ -716,10 +717,24 @@ router.get('/:eventoId/pontoVerificacao', verifyToken, async (req, res) => {
       SELECT * FROM pontoVerificacao 
       WHERE eventoId = @eventoId
       AND empresaId = @empresaId
-      AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+      AND LOWER(COALESCE(proposito, 'game')) = 'game'
       ORDER BY nome ASC
     `, { eventoId, empresaId });
     res.json(semIdNovo(pontoVerificacao));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Checkpoints que o evento usa agora e os que já passaram por ele (saem do evento quando ele termina)
+router.get('/:eventoId/checkpoints-usados', verifyToken, async (req, res) => {
+  try {
+    const evento = await queryOne('SELECT eventoId, empresaId FROM evento WHERE eventoId = @id', { id: req.params.eventoId });
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!isMaster(req) && evento.empresaId !== req.user.empresaId) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+    res.json(await listarCheckpointsDoEvento(evento.eventoId, evento.empresaId));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -87,6 +87,31 @@ router.get('/events/:eventId/score-readings', async (req, res) => {
   }
 });
 
+// Leitores de pontuação cadastrados no buffet (P1, P2...): um para cada tela (/score-kiosk/<número>).
+router.get('/readers', async (req, res) => {
+  try {
+    const { statusEfetivo } = require('../utils/statusCheckpoint');
+    const { numeroDePontuacao } = require('../utils/checkpointTransferencia');
+    const linhas = await allQuery(
+      `SELECT numCheck, nome, status, ultimoVisto FROM pontoVerificacao
+       WHERE empresaId = @empresaId AND LOWER(COALESCE(proposito, 'game')) = 'score' AND numCheck IS NOT NULL`,
+      { empresaId: req.user.empresaId }
+    );
+    res.json(linhas
+      .filter((linha) => numeroDePontuacao(linha.numCheck))
+      .map((linha) => ({
+        numero: Number(String(linha.numCheck).slice(1)),
+        numCheck: String(linha.numCheck).toUpperCase(),
+        nome: linha.nome,
+        online: statusEfetivo(linha.status, linha.ultimoVisto) === 'online',
+      }))
+      .sort((a, b) => a.numero - b.numero));
+  } catch (error) {
+    console.error('❌ Score kiosk: erro ao listar os leitores de pontuação:', error.message);
+    res.status(500).json({ error: 'Não foi possível listar as telas de pontuação' });
+  }
+});
+
 router.get('/events', async (req, res) => {
   try {
     const events = await allQuery(

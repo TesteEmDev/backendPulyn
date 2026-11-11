@@ -18,14 +18,31 @@ function isAdventurerAvatarId(value) {
   return typeof value === 'string' && ADVENTURER_AVATAR_SET.has(value);
 }
 
+// Avatar montado pela criança no cadastro (FrontEnd/src/avatar/builder/code.ts): "pulyn1-" + 15 letras/dígitos (posição de
+// cada peça, cor e opções). O desenho é refeito a partir do código; aqui só se confere o formato (a coluna guarda 64 caracteres).
+// Com cor de fundo personalizada, o código leva mais 6 dígitos hexadecimais (a cor) no fim.
+// Códigos novos levam mais 4 letras/dígitos (acessórios: óculos, colar, brinco e cor); os antigos, sem eles, continuam valendo.
+const CODIGO_AVATAR_MONTADO = /^pulyn1-[A-Za-z0-9]{15}(?:[A-Za-z0-9]{4})?(?:[0-9a-f]{6})?$/;
+
+function isAvatarMontado(value) {
+  return typeof value === 'string' && CODIGO_AVATAR_MONTADO.test(value);
+}
+
+// Vale para o cadastro: um dos avatares prontos ou um avatar montado
+function isAvatarValido(value) {
+  return isAdventurerAvatarId(value) || isAvatarMontado(value);
+}
+
 function getAvatarForCreate(value) {
   if (value === undefined || value === null || value === '') return DEFAULT_AVATAR_ID;
-  return isAdventurerAvatarId(value) ? value : null;
+  return isAvatarValido(value) ? value : null;
 }
 
 module.exports = {
   ADVENTURER_AVATAR_IDS,
   DEFAULT_AVATAR_ID,
   isAdventurerAvatarId,
+  isAvatarMontado,
+  isAvatarValido,
   getAvatarForCreate,
 };

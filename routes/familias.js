@@ -4,8 +4,8 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
-const { criarPerfil } = require('../utils/perfilCrianca');
-const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
+const { criarPerfil, normalizarBusca, semAcentosSql } = require('../utils/perfilCrianca');
+const { eventoAberto, validarPreCadastro, responsaveisParecidos } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
 const { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
@@ -853,6 +853,43 @@ router.get('/perfis', verifyToken, async (req, res) => {
   }
 });
 
+// Antes de salvar o pré-cadastro: já existe um cadastro (feito na recepção, por exemplo) com o mesmo nome da criança,
+// a mesma data de nascimento e o mesmo nome de pai/responsável? Só avisa; quem decide é o responsável no app.
+router.post('/perfis/verificar', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const eventoId = String(req.body?.eventoId || '').trim();
+    const nome = normalizarBusca(req.body?.nome);
+    const dataNascimento = String(req.body?.dataNascimento || '').trim();
+    if (!eventoId || !nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return res.json({ existe: false });
+
+    const evento = await queryOne('SELECT empresaId FROM evento WHERE eventoId = @eventoId', { eventoId });
+    if (!evento) return res.json({ existe: false });
+    const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
+    if (!responsavel?.nomeFamilia) return res.json({ existe: false });
+
+    // Cadastros que o próprio responsável já tem ligados a ele não contam
+    const candidatos = await allQuery(
+      `SELECT p.nomeResponsavel, p.criadoEm
+       FROM perfilCrianca p
+       WHERE p.empresaId = @empresaId
+         AND CAST(p.dataNascimento AS text) = @dataNascimento
+         AND ${semAcentosSql('p.nome')} = @nome
+         AND p.nomeResponsavel IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM perfilVinculoFamiliar pv WHERE pv.perfilCriancaId = p.perfilCriancaId AND pv.loginId = @loginId)
+         AND NOT EXISTS (SELECT 1 FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId)
+       ORDER BY p.criadoEm DESC`,
+      { empresaId: evento.empresaId, dataNascimento, nome, loginId: req.user.id }
+    );
+    const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia));
+    res.json(parecido ? { existe: true, criadoEm: parecido.criadoEm } : { existe: false });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao verificar cadastro parecido:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Pré-cadastro: cria o cadastro da criança no buffet do evento escolhido e liga o responsável a ele.
 // O buffet vem do evento no banco, nunca do corpo da requisição.
 router.post('/perfis', verifyToken, async (req, res) => {
@@ -944,7 +981,7 @@ router.get('/active-event', verifyToken, async (req, res) => {
       LEFT JOIN brincadeira b ON b.brincadeiraId = e.brincadeiraAtivaId
       LEFT JOIN crianca c ON c.eventoId = e.eventoId
       LEFT JOIN "time" t ON t.eventoId = e.eventoId
-      LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.eventoId AND cp.proposito != 'reception'
+      LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.eventoId AND LOWER(COALESCE(cp.proposito, 'game')) = 'game'
       WHERE e.eventoId = @eventoId
       GROUP BY e.eventoId, e.nome, e.data, e.status, e.empresaId,
                e.tipoJogoAtivo, e.brincadeiraAtivaId,

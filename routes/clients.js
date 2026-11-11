@@ -1,8 +1,11 @@
 // routes/clients.js - Clientes/Empresas
 const express = require('express');
+const { validarCadastroCliente } = require('../utils/cadastroCliente');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { query, queryOne, allQuery } = require('../database');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
+const { garantirJogosDaEmpresa } = require('../utils/jogosDoPlano');
+const { apagarClienteDentroDaTransacao, encerrarEventosEmAndamento, resumoDoCliente } = require('../utils/apagarCliente');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { listPlatformClients, normalizeClientText } = require('../utils/platformClients');
 const { PLAN_DEFINITIONS } = require('../utils/planDefinitions');
@@ -126,7 +129,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
                   (SELECT COUNT(*) FROM crianca c WHERE c.eventoId = e.eventoId) AS children_count,
                   (SELECT COUNT(*) FROM pontoVerificacao k
                     WHERE k.eventoId = e.eventoId
-                      AND LOWER(COALESCE(k.proposito, 'game')) <> 'reception') AS totalCheckpoints
+                      AND LOWER(COALESCE(k.proposito, 'game')) = 'game') AS totalCheckpoints
            FROM evento e
            WHERE e.empresaId = @id
            ORDER BY e.data DESC, e.hora DESC`,
@@ -203,35 +206,41 @@ router.post('/', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode criar cliente' });
     }
 
-    const { nome, cidade, estado, email, senha, telefone, plan } = req.body;
+    const { plan } = req.body;
 
     if (planoInvalido(plan)) {
       return res.status(400).json({ error: `Plano inválido. Use: ${Object.keys(PLAN_DEFINITIONS).join(', ')}` });
     }
-    
-    if (!email || !senha) {
-      return res.status(400).json({ error: 'Email e senha são obrigatórios' });
+    if (!plan) {
+      return res.status(400).json({ error: 'Informe o plano' });
     }
 
-    if (senha.length < 6) {
-      return res.status(400).json({ error: 'Senha deve ter pelo menos 6 caracteres' });
+    // Todos os dados do cadastro são obrigatórios: são eles que o admin do buffet vê (fixos) em Configurações
+    const cadastro = validarCadastroCliente(req.body);
+    if (cadastro.erro) return res.status(400).json({ error: cadastro.erro });
+    const { nome, cnpj, endereco, cidade, estado, email, senha, telefone } = cadastro.valores;
+
+    const cnpjRepetido = await queryOne('SELECT empresaId FROM empresa WHERE cnpj = @cnpj', { cnpj });
+    if (cnpjRepetido) {
+      return res.status(409).json({ error: 'Este CNPJ já está cadastrado em outro buffet.' });
     }
 
     const clienteId = uuidv4();
     const empresaId = uuidv4();
     const loginId = uuidv4();
-    
+
     // Hash simples da senha (em produção, usar bcrypt)
     const hashedPassword = Buffer.from(senha).toString('base64');
-    
+
     try {
       // 1️⃣ Criar EMPRESA
       await query(
-        `INSERT INTO empresa (empresaId, nome, cidade, estado, telefone, plano, status) 
-         VALUES (@id, @nome, @cidade, @estado, @telefone, @plano, @status)`,
+        `INSERT INTO empresa (empresaId, nome, cnpj, cidade, estado, telefone, plano, status) 
+         VALUES (@id, @nome, @cnpj, @cidade, @estado, @telefone, @plano, @status)`,
         {
           id: empresaId,
           nome: nome,
+          cnpj: cnpj,
           cidade: cidade,
           estado: estado,
           telefone: telefone,
@@ -240,11 +249,13 @@ router.post('/', verifyToken, async (req, res) => {
         }
       );
       console.log(`✅ Empresa criada: ${nome} (ID: ${empresaId})`);
+      // O cliente já nasce com os jogos do plano dele cadastrados
+      await garantirJogosDaEmpresa(empresaId);
 
       // 2️⃣ Criar LOGIN
       await query(
-        `INSERT INTO login (loginId, empresaId, email, senha, status) 
-         VALUES (@id, @empresaId, @email, @senha, @status)`,
+        `INSERT INTO login (loginId, empresaId, email, senha, status, senhaTemporaria)
+         VALUES (@id, @empresaId, @email, @senha, @status, true)`,
         {
           id: loginId,
           empresaId: empresaId,
@@ -257,11 +268,12 @@ router.post('/', verifyToken, async (req, res) => {
 
       // 3️⃣ Criar CLIENTE (referência para compatibilidade)
       await query(
-        `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId) 
-         VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId)`,
+        `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId, endereco) 
+         VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId, @endereco)`,
         {
           id: clienteId,
           empresaId: empresaId,
+          endereco: endereco,
           nome: nome,
           cidade: cidade,
           estado: estado,
@@ -346,6 +358,8 @@ router.put('/:id', verifyToken, async (req, res) => {
           }
         );
       }
+      // Trocou de plano: recebe os jogos do plano novo que ainda não tem (os que já tem ficam)
+      if (plan) await garantirJogosDaEmpresa(req.params.id);
 
       for (const legacyId of legacyIds) {
         await query(
@@ -405,6 +419,18 @@ router.put('/:id/status', verifyToken, async (req, res) => {
   }
 });
 
+// O que será apagado junto com o cliente (aviso na tela antes de confirmar)
+router.get('/:id/resumo-exclusao', verifyToken, async (req, res) => {
+  try {
+    if (!isMaster(req)) return res.status(403).json({ error: 'Acesso negado: apenas master' });
+    const empresa = await queryOne('SELECT empresaId FROM empresa WHERE LOWER(empresaId) = LOWER(@id)', { id: req.params.id });
+    if (!empresa) return res.status(404).json({ error: 'Cliente não encontrado' });
+    res.json(await resumoDoCliente(req.params.id, { queryOne }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ✅ APENAS MASTER pode deletar cliente
 router.delete('/:id', verifyToken, async (req, res) => {
   try {
@@ -418,27 +444,19 @@ router.delete('/:id', verifyToken, async (req, res) => {
       // cliente reapareceria na lista logo depois de excluído.
       const legacyIds = [req.params.id, ...(await legacyClienteIdsFor(req.params.id))];
 
-      // 1. Deletar LOGIN
-      await query(
-        'DELETE FROM login WHERE empresaId = @id',
-        { id: req.params.id }
-      );
-      console.log(`✅ Login deletado`);
+      // Encerra os eventos em andamento e apaga tudo do buffet (eventos, participantes...), devolvendo os checkpoints ao
+      // estoque do master; a exclusão é tudo ou nada.
+      const encerrados = await encerrarEventosEmAndamento(req.params.id, { allQuery }, { stopGame: global.stopGameForEvento });
+      const resultado = await withTransaction((q) => apagarClienteDentroDaTransacao(req.params.id, legacyIds, q));
 
-      // 2. Deletar EMPRESA
-      await query(
-        'DELETE FROM empresa WHERE empresaId = @id',
-        { id: req.params.id }
-      );
-      console.log(`✅ Empresa deletada`);
-
-      // 3. Deletar CLIENTE (compatibilidade)
-      for (const legacyId of legacyIds) {
-        await query('DELETE FROM cliente WHERE clienteId = @id', { id: legacyId });
-      }
-      console.log(`✅ Cliente deletado`);
-
-      res.json({ deleted: true, message: 'Cliente removido com sucesso!' });
+      const { devolvidos, apagados } = resultado.checkpoints;
+      console.log(`✅ Cliente ${req.params.id} excluído por ${req.user.email || req.user.role}: ${resultado.eventosApagados} evento(s) (${encerrados} encerrado(s) antes), ${devolvidos} checkpoint(s) devolvido(s), ${apagados} apagado(s)`);
+      res.json({
+        deleted: true,
+        eventosApagados: resultado.eventosApagados,
+        checkpointsDevolvidos: devolvidos,
+        message: `Cliente removido. ${resultado.eventosApagados} evento(s) apagado(s) e ${devolvidos} checkpoint(s) devolvido(s) ao estoque do master.`,
+      });
     } catch (error) {
       console.error('❌ Erro ao deletar:', error.message);
       throw error;

@@ -5,6 +5,7 @@ const { query, queryOne, allQuery } = require('../database');
 const { semIdNovo, STATUS } = require('../utils/checkpointTransferencia');
 const { verifyToken, isMaster, requireRole } = require('../utils/middleware');
 const comandos = require('../utils/comandosCheckpoint');
+const { entrarNoEventoAtivo } = require('../utils/checkpointsDoEvento');
 const { getCheckpointTreasureStatus } = require('../utils/treasure');
 const { getCheckpointMonsterStatus } = require('../utils/monster');
 const { ONLINE_ATE_MS, statusEfetivo } = require('../utils/statusCheckpoint');
@@ -68,7 +69,7 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
     const extra = ip ? { ip } : {};
 
     const checkpoint = await queryOne(
-      'SELECT checkpointId, numCheck, statusTransferencia FROM pontoVerificacao WHERE checkpointId = @id',
+      'SELECT checkpointId, numCheck, statusTransferencia, eventoId, empresaId, macAddress FROM pontoVerificacao WHERE checkpointId = @id',
       { id: checkpointId }
     );
     if (!checkpoint) {
@@ -94,6 +95,15 @@ router.post('/:checkpointId/heartbeat', async (req, res) => {
       }
     }
     
+    // Ligou com um evento em andamento e ainda sem evento: entra nele
+    if (!checkpoint.eventoId && checkpoint.statusTransferencia === STATUS.ACEITO) {
+      try {
+        await entrarNoEventoAtivo(checkpoint);
+      } catch (err) {
+        console.warn(`⚠️ [CHECKPOINT] ${checkpointId} não entrou no evento ativo: ${err.message}`);
+      }
+    }
+
     // numCheck e statusTransferencia deixam o aparelho (identificado pelo MAC) saber o número que o buffet deu a ele
     // e se já foi aceito.
     // comando = teste de LED/som pedido pelo admin (utils/comandosCheckpoint.js); a recepção só o recebe por aqui.
@@ -129,7 +139,8 @@ router.post('/:checkpointId/testar', verifyToken, requireRole('admin'), async (r
     }
     comandos.agendar(checkpoint.checkpointId, tipo);
     // A placa de jogo busca o comando a cada ~10 s (checkpoint-mode); a de recepção só no heartbeat, a cada 60 s.
-    const recepcao = String(checkpoint.proposito || 'game').toLowerCase() === 'reception';
+    // Leitores de recepção e de pontuação só falam no heartbeat (a cada 60 s); a placa de jogo busca o comando a cada ~10 s
+    const recepcao = String(checkpoint.proposito || 'game').toLowerCase() !== 'game';
     res.json({ ok: true, tipo, esperaSegundos: recepcao ? 60 : 10 });
   } catch (err) {
     console.error('❌ Erro ao agendar teste do checkpoint:', err);
@@ -169,7 +180,7 @@ router.get('/resumo', verifyToken, async (req, res) => {
       FROM pontoVerificacao c
       INNER JOIN evento e ON e.eventoId = c.eventoId
       WHERE e.empresaId = @empresaId
-        AND LOWER(COALESCE(c.proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(c.proposito, 'game')) = 'game'
       GROUP BY c.eventoId, e.nome, e.status, e.data
       ORDER BY e.data DESC
     `, { empresaId: req.user.empresaId, limite: new Date(Date.now() - ONLINE_ATE_MS) });
@@ -218,13 +229,15 @@ router.get('/evento/:eventoId', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
-    // Por padrão só os checkpoints de jogo; ?proposito=reception lista os de recepção.
-    const operador = String(req.query.proposito || '').toLowerCase() === 'reception' ? '=' : '<>';
+    // Por padrão só os checkpoints de jogo; ?proposito=reception ou score lista os dessa finalidade e ?proposito=todos todos.
+    const pedido = String(req.query.proposito || '').toLowerCase();
+    const finalidade = ['reception', 'score'].includes(pedido) ? pedido : 'game';
+    const filtroFinalidade = pedido === 'todos' ? '' : `AND LOWER(COALESCE(proposito, 'game')) = '${finalidade}'`;
     const pontoVerificacao = await allQuery(
       `SELECT * FROM pontoVerificacao
        WHERE eventoId = @eventoId
          AND empresaId = @empresaId
-         AND LOWER(COALESCE(proposito, 'game')) ${operador} 'reception'
+         ${filtroFinalidade}
        ORDER BY nome`,
       { eventoId, empresaId: evento.empresaId }
     );
@@ -523,8 +536,9 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
     );
     await query(
       `DELETE FROM leitura
-       WHERE LOWER(checkpointId) = LOWER(@checkpointId)`,
-      { checkpointId: checkpoint.checkpointId }
+       WHERE LOWER(checkpointId) = LOWER(@checkpointId)
+         AND (criancaId IS NULL OR criancaId IN (SELECT criancaId FROM crianca WHERE LOWER(eventoId) = LOWER(@eventoId)))`,
+      { checkpointId: checkpoint.checkpointId, eventoId }
     );
     await query(
       `DELETE FROM "etiquetaCheckpoint"
@@ -537,6 +551,8 @@ router.delete('/evento/:eventoId/:checkpointId', verifyToken, async (req, res) =
       await query(
         `UPDATE pontoVerificacao
          SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+             devolvidoEm = now(), devolvidoMotivo = 'devolvido',
+             devolvidoPorNome = (SELECT nome FROM empresa WHERE empresaId = @empresaId),
              numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
              territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
          WHERE LOWER(checkpointId) = LOWER(@checkpointId)

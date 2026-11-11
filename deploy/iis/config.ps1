@@ -31,9 +31,9 @@ $NomeCertSrv  = 'Pulyn Servidor'
 # Pasta do repositorio (so existe quando o script roda de dentro dele, nao na copia em C:\Pulyn\scripts).
 $RepoRaiz = $null
 try { $RepoRaiz = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..') -ErrorAction Stop).Path } catch { }
-if ($RepoRaiz -and -not (Test-Path (Join-Path $RepoRaiz 'backendPulyn\index.js'))) { $RepoRaiz = $null }
-$RepoBackend  = if ($RepoRaiz) { Join-Path $RepoRaiz 'backendPulyn' } else { $null }
-$RepoFront    = if ($RepoRaiz) { Join-Path $RepoRaiz 'frontenPulyn' } else { $null }
+if ($RepoRaiz -and -not (Test-Path (Join-Path $RepoRaiz 'BackEnd\index.js'))) { $RepoRaiz = $null }
+$RepoBackend  = if ($RepoRaiz) { Join-Path $RepoRaiz 'BackEnd' } else { $null }
+$RepoFront    = if ($RepoRaiz) { Join-Path $RepoRaiz 'FrontEnd' } else { $null }
 
 function Exigir-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -43,7 +43,7 @@ function Exigir-Admin {
 }
 
 function Exigir-Repo {
-    if (-not $RepoRaiz) { throw 'Rode este script a partir da pasta backendPulyn\deploy\iis do repositorio.' }
+    if (-not $RepoRaiz) { throw 'Rode este script a partir da pasta BackEnd\deploy\iis do repositorio.' }
 }
 
 function Escrever-Passo($texto) { Write-Host ''; Write-Host ('==> ' + $texto) -ForegroundColor Cyan }

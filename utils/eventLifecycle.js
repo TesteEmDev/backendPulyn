@@ -5,6 +5,7 @@
 // o evento para 'active' e "parar jogo" voltava para 'scheduled').
 const { query, queryOne, allQuery } = require('../database');
 const { releaseBraceletsForEvent } = require('./braceletRelease');
+const { liberarCheckpointsParaEvento, restaurarCheckpointsDoEvento, trazerCheckpointsParaEvento } = require('./checkpointsDoEvento');
 
 // Data e hora do evento são digitadas pelo buffet no relógio local dele, sem fuso.
 // O servidor (Render) roda em UTC, então o "agora" é convertido para esse fuso.
@@ -93,6 +94,13 @@ async function startEvent(eventoId, { source = 'manual' } = {}) {
 
   const evento = await queryOne('SELECT "eventoId", empresaId, iniciadoEm FROM "evento" WHERE LOWER("eventoId") = LOWER(@eventoId)', { eventoId });
   console.log(`▶️ [EVENTO] ${eventoId} iniciado (${source})`);
+  // Os checkpoints ligados do buffet passam a ser deste evento (os desligados não entram)
+  try {
+    const trazidos = await trazerCheckpointsParaEvento(eventoId, evento?.empresaId);
+    if (trazidos > 0) console.log(`📍 [EVENTO] ${eventoId}: ${trazidos} checkpoint(s) ligado(s) entraram no evento`);
+  } catch (err) {
+    console.error(`❌ [EVENTO] Não foi possível trazer os checkpoints para ${eventoId}: ${err.message}`);
+  }
   broadcastCompany(evento?.empresaId, {
     type: 'EVENT_STATUS_CHANGED',
     payload: { eventoId, status: 'active', startedAt: evento?.iniciadoEm || null, source },
@@ -173,7 +181,19 @@ async function finishEvent(eventoId, { source = 'manual', stopGame } = {}) {
   } catch (err) {
     console.error(`❌ [EVENTO] Não foi possível liberar as pulseiras de ${evento.eventoId}: ${err.message}`);
   }
-  return { changed: true, ...pulseiras };
+
+  // Os checkpoints também são do buffet e passam por vários eventos: saem deste ao encerrar, ficando registrado
+  // quais ele usou (eventoCheckpoint). Uma falha aqui não desfaz o encerramento.
+  let checkpoints = { checkpointsLiberados: 0 };
+  try {
+    checkpoints = await liberarCheckpointsParaEvento(evento.eventoId);
+    if (checkpoints.checkpointsLiberados > 0) {
+      console.log(`🔓 [EVENTO] ${evento.eventoId}: ${checkpoints.checkpointsLiberados} checkpoint(s) liberado(s) ao encerrar`);
+    }
+  } catch (err) {
+    console.error(`❌ [EVENTO] Não foi possível liberar os checkpoints de ${evento.eventoId}: ${err.message}`);
+  }
+  return { changed: true, ...pulseiras, ...checkpoints };
 }
 
 // Reabre um evento encerrado: volta para "agendado" na nova data/horário (e duração, se informada),
@@ -203,6 +223,14 @@ async function reopenEvent(eventoId, { date, time, duration } = {}) {
   );
   if (!(Number(result?.rowsAffected?.[0] || 0) > 0)) return { changed: false, reason: 'not_finished' };
 
+  // Os checkpoints que o evento usou voltam para ele, se ainda estiverem livres
+  try {
+    const devolvidos = await restaurarCheckpointsDoEvento(evento.eventoId);
+    if (devolvidos > 0) console.log(`🔓 [EVENTO] ${evento.eventoId}: ${devolvidos} checkpoint(s) devolvido(s) ao reabrir`);
+  } catch (err) {
+    console.error(`❌ [EVENTO] Não foi possível devolver os checkpoints de ${evento.eventoId}: ${err.message}`);
+  }
+
   console.log(`🔓 [EVENTO] ${evento.eventoId} reaberto para ${date} ${time}`);
   broadcastCompany(evento.empresaId, {
     type: 'EVENT_STATUS_CHANGED',
@@ -230,6 +258,8 @@ async function runLifecycleTick({ stopGame, now = new Date() } = {}) {
       if (action === 'start') await startEvent(row.eventoId, { source: 'auto' });
       else await finishEvent(row.eventoId, { source: 'auto', stopGame });
       actions.push({ eventoId: row.eventoId, action });
+      // As telas abertas veem o evento começar/terminar na hora
+      require('./feedDados').avisarMudanca(['eventos', 'checkpoints', 'jogos', 'criancas', 'times'], [row.empresaId]);
     } catch (err) {
       console.error(`❌ [EVENTO] Falha ao aplicar '${action}' automático em ${row.eventoId}:`, err.message);
     }

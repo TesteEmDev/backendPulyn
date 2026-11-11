@@ -5,12 +5,18 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
-const { STATUS, validarNumCheck } = require('../utils/checkpointTransferencia');
+const { STATUS, validarNumCheck, validarNumeroPorFinalidade } = require('../utils/checkpointTransferencia');
+const { statusEfetivo } = require('../utils/statusCheckpoint');
+
+// O banco guarda 'online' e nada o volta para 'offline': o status que a tela vê é calculado pelo último sinal da placa.
+const comStatusReal = (linha) => (linha ? { ...linha, status: statusEfetivo(linha.status, linha.ultimoVisto) } : linha);
 
 router.use(verifyToken, requireRole('admin'));
 
 const COLUNAS = `p.checkpointId, p.numCheck, p.macAddress, p.nome, p.tipo, p.proposito, p.status, p.ultimoVisto,
-  p.statusTransferencia, p.eventoId, p.transferidoEm, p.zona, p.pontos, e.nome AS eventoNome`;
+  p.statusTransferencia, p.eventoId, p.transferidoEm, p.zona, p.pontos, e.nome AS eventoNome,
+  (SELECT ev.nome FROM eventoCheckpoint h JOIN evento ev ON ev.eventoId = h.eventoId
+   WHERE h.checkpointId = p.checkpointId ORDER BY h.usadoEm DESC LIMIT 1) AS ultimoEventoNome`;
 
 const buscar = (checkpointId) => queryOne(
   `SELECT ${COLUNAS}, p.empresaId, p.empresaDestinoId
@@ -43,7 +49,7 @@ router.get('/sem-numero', async (req, res) => {
        ORDER BY p.transferidoEm, p.checkpointId`,
       { empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
     );
-    res.json(linhas);
+    res.json(linhas.map(comStatusReal));
   } catch (err) {
     console.error('❌ [RECEBIMENTO] Erro ao listar checkpoints sem número:', err);
     res.status(500).json({ error: err.message });
@@ -61,7 +67,7 @@ router.get('/sem-evento', async (req, res) => {
        ORDER BY p.nome, p.checkpointId`,
       { empresaId: req.user.empresaId, aceito: STATUS.ACEITO }
     );
-    res.json(linhas);
+    res.json(linhas.map(comStatusReal));
   } catch (err) {
     console.error('❌ [RECEBIMENTO] Erro ao listar checkpoints sem evento:', err);
     res.status(500).json({ error: err.message });
@@ -97,6 +103,10 @@ router.patch('/:checkpointId/numero', async (req, res) => {
     const numero = validarNumCheck(req.body.numCheck);
     if (!numero.ok) return res.status(400).json({ error: numero.erro });
     if (!numero.valor) return res.status(400).json({ error: 'Informe o número do checkpoint' });
+    // Recepção: R1, R2...; os demais não usam esse formato
+    const porFinalidade = validarNumeroPorFinalidade(atual.proposito, numero.valor);
+    if (!porFinalidade.ok) return res.status(400).json({ error: porFinalidade.erro });
+    numero.valor = porFinalidade.valor;
 
     const repetido = await numeroEmUso(req.user.empresaId, numero.valor, atual.checkpointId);
     if (repetido) {
@@ -108,7 +118,7 @@ router.patch('/:checkpointId/numero', async (req, res) => {
       { numCheck: numero.valor, checkpointId: atual.checkpointId }
     );
     console.log(`🔢 [RECEBIMENTO] Checkpoint ${atual.checkpointId}: número ${atual.numCheck} -> ${numero.valor}`);
-    res.json(await buscar(atual.checkpointId));
+    res.json(comStatusReal(await buscar(atual.checkpointId)));
   } catch (err) {
     if (violouUnicidade(err)) return res.status(409).json({ error: 'Já existe um checkpoint com esse número no seu buffet' });
     console.error('❌ [RECEBIMENTO] Erro ao trocar o número:', err);
@@ -116,15 +126,48 @@ router.patch('/:checkpointId/numero', async (req, res) => {
   }
 });
 
-// Coloca o checkpoint em um evento (ou tira, com eventoId null). Se ele já tem leituras ou pontos, o evento não muda:
-// o histórico pertence ao evento em que foi feito.
+// Devolve ao super admin um checkpoint aceito que ainda não está em evento nenhum (o que já está num evento é devolvido
+// pela exclusão do evento, que também limpa as leituras e pontos dele).
+router.post('/:checkpointId/devolver', async (req, res) => {
+  try {
+    const atual = await checkpointDoBuffet(req, res, { exigirMac: true });
+    if (!atual) return;
+    if (atual.eventoId) {
+      return res.status(409).json({ error: 'Este checkpoint está em um evento: devolva pela lista de checkpoints do evento' });
+    }
+
+    const atualizado = await queryOne(
+      `UPDATE pontoVerificacao
+       SET statusTransferencia = @estoque, empresaId = NULL, eventoId = NULL, empresaDestinoId = NULL, transferidoEm = NULL,
+           devolvidoEm = now(), devolvidoMotivo = 'devolvido',
+           devolvidoPorNome = (SELECT nome FROM empresa WHERE empresaId = @empresaId),
+           numCheck = NULL, codigo = NULL, territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
+           territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL, atualizadoEm = now()
+       WHERE checkpointId = @checkpointId AND statusTransferencia = @aceito AND empresaId = @empresaId AND eventoId IS NULL
+       RETURNING checkpointId`,
+      { estoque: STATUS.ESTOQUE, aceito: STATUS.ACEITO, empresaId: req.user.empresaId, checkpointId: atual.checkpointId }
+    );
+    if (!atualizado) return res.status(409).json({ error: 'O checkpoint mudou de situação; atualize a lista e tente de novo' });
+
+    console.log(`↩️ [RECEBIMENTO] Buffet ${req.user.empresaId} devolveu o checkpoint ${atual.checkpointId}`);
+    res.json({ success: true, devolvido: true });
+  } catch (err) {
+    console.error('❌ [RECEBIMENTO] Erro ao devolver:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Coloca o checkpoint em um evento, troca de evento ou tira (eventoId null). O mesmo aparelho serve a vários eventos, um
+// de cada vez. O histórico não anda junto: as leituras pertencem ao evento pelas crianças (crianca.eventoId) e os pontos
+// têm o próprio eventoId, então o evento antigo continua com o que aconteceu nele. O que é só do evento em andamento
+// (território conquistado) é zerado ao trocar.
 router.patch('/:checkpointId/evento', async (req, res) => {
   try {
     const atual = await checkpointDoBuffet(req, res, { exigirMac: true });
     if (!atual) return;
 
     const pedido = req.body.eventoId ? String(req.body.eventoId) : null;
-    if (pedido === atual.eventoId) return res.json(atual);
+    if (pedido === atual.eventoId) return res.json(comStatusReal(atual));
 
     let eventoId = null;
     if (pedido) {
@@ -133,23 +176,26 @@ router.patch('/:checkpointId/evento', async (req, res) => {
       eventoId = evento.eventoId;
     }
 
+    // O evento de onde ele sai guarda que usou este checkpoint
     if (atual.eventoId) {
-      const historico = await queryOne(
-        `SELECT (SELECT COUNT(*) FROM leitura WHERE checkpointId = @checkpointId) AS leituras,
-                (SELECT COUNT(*) FROM pontuacao WHERE checkpointId = @checkpointId) AS pontos`,
-        { checkpointId: atual.checkpointId }
+      await query(
+        `INSERT INTO eventoCheckpoint (id, empresaId, eventoId, checkpointId, numCheck, nome)
+         VALUES (@id, @empresaId, @eventoId, @checkpointId, @numCheck, @nome)
+         ON CONFLICT (eventoId, checkpointId) DO UPDATE SET numCheck = EXCLUDED.numCheck, nome = EXCLUDED.nome, usadoEm = CURRENT_TIMESTAMP`,
+        { id: require('uuid').v4(), empresaId: atual.empresaId || null, eventoId: atual.eventoId, checkpointId: atual.checkpointId, numCheck: atual.numCheck ?? null, nome: atual.nome ?? null }
       );
-      if (Number(historico.leituras) > 0 || Number(historico.pontos) > 0) {
-        return res.status(409).json({ error: 'Este checkpoint já tem leituras ou pontos no evento atual, então não pode mudar de evento' });
-      }
     }
 
     await query(
-      'UPDATE pontoVerificacao SET eventoId = @eventoId, atualizadoEm = now() WHERE checkpointId = @checkpointId',
+      `UPDATE pontoVerificacao
+       SET eventoId = @eventoId, atualizadoEm = now(),
+           territorioDonoTimeId = NULL, territorioDonosCriancaId = NULL,
+           territorioTravadoAte = NULL, territorioCooldownAte = NULL, ultimoConquistadoEm = NULL
+       WHERE checkpointId = @checkpointId`,
       { eventoId, checkpointId: atual.checkpointId }
     );
     console.log(`📅 [RECEBIMENTO] Checkpoint ${atual.checkpointId}: evento ${atual.eventoId || '-'} -> ${eventoId || '-'}`);
-    res.json(await buscar(atual.checkpointId));
+    res.json(comStatusReal(await buscar(atual.checkpointId)));
   } catch (err) {
     console.error('❌ [RECEBIMENTO] Erro ao atribuir evento:', err);
     res.status(500).json({ error: err.message });

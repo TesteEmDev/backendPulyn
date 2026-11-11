@@ -588,7 +588,7 @@ async function calcularEstado(eventoId) {
 
   const checkpointsDoEvento = await allQuery(
     `SELECT checkpointId, nome, status FROM pontoVerificacao
-     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
     { eventoId }
   );
   const ids = idsDaSequencia(partida) || [];

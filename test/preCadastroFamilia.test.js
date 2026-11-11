@@ -54,3 +54,11 @@ test('data de nascimento inválida, futura ou de criança acima de 17 anos é re
   assert.equal(validarPreCadastro({ ...valido, dataNascimento: '2999-01-01' }).ok, false);
   assert.equal(validarPreCadastro({ ...valido, dataNascimento: '1990-01-01' }).ok, false);
 });
+
+test('responsáveis parecidos: ignora acento, maiúscula e sobrenome a mais', () => {
+  const { responsaveisParecidos } = require('../utils/preCadastroFamilia');
+  assert.equal(responsaveisParecidos('Carlos Almeida', 'carlos  ALMEIDA'), true);
+  assert.equal(responsaveisParecidos('José Silva', 'Jose da Silva Santos'), true);
+  assert.equal(responsaveisParecidos('Carlos Almeida', 'Carla Almeida'), false);
+  assert.equal(responsaveisParecidos('', 'Carlos'), false);
+});
