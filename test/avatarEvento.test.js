@@ -39,12 +39,14 @@ test('preferido fora da lista de avatares (emoji antigo) é ignorado', () => {
 
 const MONTADO = 'pulyn1-abcDEF123456xyz';
 
-test('avatar montado: formato valido e aceito sem conflito, mesmo repetido no evento', () => {
+test('avatar montado: formato valido e aceito; repetido no evento vira conflito', () => {
   const { isAvatarMontado, isAvatarValido, getAvatarForCreate } = require('../utils/avatar');
   assert.equal(isAvatarMontado(MONTADO), true);
   assert.equal(isAvatarValido(MONTADO), true);
   assert.equal(getAvatarForCreate(MONTADO), MONTADO);
-  assert.deepEqual(escolherAvatar({ pedido: MONTADO, emUso: [MONTADO, 'a'], ids: IDS }), { avatar: MONTADO });
+  assert.deepEqual(escolherAvatar({ pedido: MONTADO, emUso: ['a'], ids: IDS }), { avatar: MONTADO });
+  // mesmo desenho que outro participante do evento já usa: conflito
+  assert.equal(escolherAvatar({ pedido: MONTADO, emUso: [MONTADO, 'a'], ids: IDS }).conflito, true);
   assert.equal(escolherAvatar({ preferido: MONTADO, emUso: ['a'], ids: IDS }).avatar, MONTADO);
 });
 

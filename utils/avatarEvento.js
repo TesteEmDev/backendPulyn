@@ -13,12 +13,12 @@ function escolherAvatar({ pedido = null, preferido = null, emUso = [], ids = ADV
   const livres = ids.filter((id) => !usos.has(id));
 
   if (pedido) {
-    // Avatar montado: cada criança monta o seu, então não entra na regra de "já escolhido por outro"
-    if (isAvatarMontado(pedido)) return { avatar: pedido };
+    // Avatar montado: também é único no evento (outro participante com o mesmo desenho = conflito; o jogador muda uma peça)
+    if (isAvatarMontado(pedido)) return usos.has(pedido) ? { conflito: true, livres: [] } : { avatar: pedido };
     if (livres.length === 0 || livres.includes(pedido)) return { avatar: pedido };
     return { conflito: true, livres };
   }
-  if (isAvatarMontado(preferido)) return { avatar: preferido };
+  if (isAvatarMontado(preferido) && !usos.has(preferido)) return { avatar: preferido };
   if (preferido && ids.includes(preferido) && (livres.length === 0 || livres.includes(preferido))) return { avatar: preferido };
   if (livres.length) return { avatar: livres[Math.floor(aleatorio() * livres.length)] };
 
