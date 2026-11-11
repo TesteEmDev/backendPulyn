@@ -62,3 +62,11 @@ test('responsáveis parecidos: ignora acento, maiúscula e sobrenome a mais', ()
   assert.equal(responsaveisParecidos('Carlos Almeida', 'Carla Almeida'), false);
   assert.equal(responsaveisParecidos('', 'Carlos'), false);
 });
+
+test('nome abreviado: primeiro nome inteiro e inicial nas demais palavras', () => {
+  const { nomeAbreviado } = require('../utils/perfilCrianca');
+  assert.equal(nomeAbreviado('Guilherme Gomes Cavalcanti'), 'Guilherme G. C.');
+  assert.equal(nomeAbreviado('  José da Silva  '), 'José S.');
+  assert.equal(nomeAbreviado('Ana'), 'Ana');
+  assert.equal(nomeAbreviado(''), '');
+});

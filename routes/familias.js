@@ -4,7 +4,7 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
-const { criarPerfil, normalizarBusca, semAcentosSql } = require('../utils/perfilCrianca');
+const { criarPerfil, normalizarBusca, semAcentosSql, nomeAbreviado } = require('../utils/perfilCrianca');
 const { validarPreCadastro, responsaveisParecidos } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
@@ -853,34 +853,77 @@ router.get('/perfis', verifyToken, async (req, res) => {
   }
 });
 
+// Todas as crianças do responsável (uma linha por criança, não por evento): as que já têm pulseira, as que estão num
+// evento sem pulseira e as pré-cadastradas que ainda aguardam o buffet.
+router.get('/todas-criancas', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const rows = await allQuery(`
+      SELECT p.perfilCriancaId, p.nome, p.apelido, p.avatar, p.idade, CAST(p.dataNascimento AS text) AS dataNascimento,
+             e.nome AS ultimoEventoNome, e.data AS ultimoEventoData, emp.nome AS buffetNome,
+             CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS participacoes,
+             CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId AND c.codigoPulseira IS NOT NULL) AS INTEGER) AS comPulseira
+      FROM perfilCrianca p
+      LEFT JOIN evento e ON e.eventoId = p.ultimoEventoId
+      LEFT JOIN empresa emp ON emp.empresaId = p.empresaId
+      WHERE p.perfilCriancaId IN (
+              SELECT perfilCriancaId FROM perfilVinculoFamiliar WHERE loginId = @loginId
+              UNION
+              SELECT perfilCriancaId FROM vinculoFamiliar
+              WHERE loginId = @loginId AND status IN ('approved', 'pending') AND perfilCriancaId IS NOT NULL)
+      ORDER BY p.nome ASC
+    `, { loginId: req.user.id });
+
+    res.json({
+      total: rows.length,
+      criancas: rows.map((row) => ({
+        ...row,
+        idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
+        // com_pulseira: tem pulseira em algum evento; no_evento: já esteve num evento mas sem pulseira; aguardando: só cadastro
+        situacao: row.comPulseira > 0 ? 'com_pulseira' : row.participacoes > 0 ? 'no_evento' : 'aguardando',
+      })),
+    });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao listar todas as crianças:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Antes de salvar o pré-cadastro: já existe um cadastro (feito na recepção, por exemplo) com o mesmo nome da criança,
-// a mesma data de nascimento e o mesmo nome de pai/responsável? Só avisa; quem decide é o responsável no app.
+// a mesma data de nascimento e o mesmo nome de pai/responsável? A busca é GLOBAL (em todos os buffets): a criança pode
+// ter ido a outro buffet antes. Só devolve se existe, quando foi criado e os nomes abreviados ("Guilherme G. C."), nunca o nome completo nem o buffet; e só
+// bate quando o nome do responsável do cadastro for o da própria conta de quem pergunta. Só avisa; quem decide é o pai.
 router.post('/perfis/verificar', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
 
     const nome = normalizarBusca(req.body?.nome);
     const dataNascimento = String(req.body?.dataNascimento || '').trim();
-    if (!req.user.empresaId || !nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return res.json({ existe: false });
+    if (!nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return res.json({ existe: false });
 
     const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
     if (!responsavel?.nomeFamilia) return res.json({ existe: false });
 
     // Cadastros que o próprio responsável já tem ligados a ele não contam
     const candidatos = await allQuery(
-      `SELECT p.nomeResponsavel, p.criadoEm
+      `SELECT p.nome, p.nomeResponsavel, p.criadoEm
        FROM perfilCrianca p
-       WHERE p.empresaId = @empresaId
-         AND CAST(p.dataNascimento AS text) = @dataNascimento
+       WHERE CAST(p.dataNascimento AS text) = @dataNascimento
          AND ${semAcentosSql('p.nome')} = @nome
          AND p.nomeResponsavel IS NOT NULL
          AND NOT EXISTS (SELECT 1 FROM perfilVinculoFamiliar pv WHERE pv.perfilCriancaId = p.perfilCriancaId AND pv.loginId = @loginId)
          AND NOT EXISTS (SELECT 1 FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId)
        ORDER BY p.criadoEm DESC`,
-      { empresaId: req.user.empresaId, dataNascimento, nome, loginId: req.user.id }
+      { dataNascimento, nome, loginId: req.user.id }
     );
     const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia));
-    res.json(parecido ? { existe: true, criadoEm: parecido.criadoEm } : { existe: false });
+    // Sem nomes no log: só o motivo, para entender por que um aviso esperado não apareceu
+    console.log(`🔎 [FAMILIAS] Cadastro parecido: ${candidatos.length} candidato(s) com mesmo nome e nascimento em todos os buffets; ${parecido ? 'responsável bate' : 'nenhum responsável bate'}`);
+    // Nomes só abreviados ("Guilherme G. C."): o pai reconhece o cadastro sem o app expor o nome completo
+    res.json(parecido
+      ? { existe: true, criadoEm: parecido.criadoEm, crianca: nomeAbreviado(parecido.nome), responsavel: nomeAbreviado(parecido.nomeResponsavel) }
+      : { existe: false });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao verificar cadastro parecido:', err.message);
     res.status(500).json({ error: err.message });

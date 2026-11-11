@@ -33,6 +33,18 @@ function nomeParaExibir(nome) {
   return `${partes[0]} ${partes[partes.length - 1][0].toUpperCase()}.`;
 }
 
+// Nome com privacidade: o primeiro nome inteiro e as demais palavras só com a inicial.
+// "Guilherme Gomes Cavalcanti" -> "Guilherme G. C."; "José da Silva" -> "José S." (da/de/do... não contam).
+const LIGACOES = new Set(['da', 'de', 'do', 'das', 'dos', 'e']);
+function nomeAbreviado(nome) {
+  const partes = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return '';
+  const iniciais = partes.slice(1)
+    .filter((parte) => !LIGACOES.has(parte.toLowerCase()))
+    .map((parte) => `${parte[0].toUpperCase()}.`);
+  return [partes[0], ...iniciais].join(' ');
+}
+
 function idadeValida(idade) {
   const valor = Number.parseInt(idade, 10);
   return Number.isFinite(valor) ? Math.max(0, valor) : null;
@@ -264,6 +276,7 @@ module.exports = {
   copiarVinculosParaParticipacao,
   vinculosParaNovaParticipacao,
   nomeParaExibir,
+  nomeAbreviado,
   idadeValida,
   normalizarBusca,
   semAcentosSql,
