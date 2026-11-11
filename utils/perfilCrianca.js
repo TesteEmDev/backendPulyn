@@ -266,4 +266,5 @@ module.exports = {
   nomeParaExibir,
   idadeValida,
   normalizarBusca,
+  semAcentosSql,
 };
