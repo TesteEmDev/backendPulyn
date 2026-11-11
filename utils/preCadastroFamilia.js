@@ -25,7 +25,6 @@ function validarPreCadastro(body = {}) {
   if (dataNascimento) {
     idade = idadeDeNascimento(dataNascimento);
     if (idade === null) return { ok: false, error: 'Data de nascimento inválida' };
-    if (idade > 17) return { ok: false, error: 'A criança precisa ter até 17 anos' };
   } else {
     idade = idadeValida(body.idade ?? body.age);
     if (idade === null) return { ok: false, error: 'Informe a data de nascimento da criança' };

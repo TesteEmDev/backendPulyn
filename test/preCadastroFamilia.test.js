@@ -49,10 +49,10 @@ test('com data de nascimento, a idade sai dela', () => {
   assert.ok(r.value.idade >= 9 && r.value.idade <= 11);
 });
 
-test('data de nascimento inválida, futura ou de criança acima de 17 anos é recusada', () => {
+test('data de nascimento inválida ou futura é recusada; não há limite de idade', () => {
   assert.equal(validarPreCadastro({ ...valido, dataNascimento: '2018-02-30' }).ok, false);
   assert.equal(validarPreCadastro({ ...valido, dataNascimento: '2999-01-01' }).ok, false);
-  assert.equal(validarPreCadastro({ ...valido, dataNascimento: '1990-01-01' }).ok, false);
+  assert.equal(validarPreCadastro({ ...valido, dataNascimento: '1990-01-01' }).ok, true);
 });
 
 test('responsáveis parecidos: ignora acento, maiúscula e sobrenome a mais', () => {
