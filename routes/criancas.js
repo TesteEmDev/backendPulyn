@@ -42,6 +42,32 @@ router.get('/', verifyToken, async (req, res) => {
   }
 });
 
+// Cadastros permanentes (perfis) do buffet, com o último evento de cada criança e quantas participações ela tem.
+// Quem tem 0 participações foi cadastrada sem evento (check-in sem evento aberto ou pré-cadastro do app).
+router.get('/cadastros', async (req, res) => {
+  try {
+    const rows = await allQuery(`
+      SELECT TOP 5000
+        p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, p.nomeResponsavel, p.parentescoResponsavel,
+        CAST(p.dataNascimento AS text) AS dataNascimento, p.criadoEm,
+        p.ultimoEventoId, e.nome AS ultimoEventoNome, e.data AS ultimoEventoData,
+        CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS participacoes
+      FROM perfilCrianca p
+      LEFT JOIN evento e ON e.eventoId = p.ultimoEventoId
+      WHERE p.empresaId = @empresaId
+      ORDER BY p.criadoEm DESC
+    `, { empresaId: req.user?.empresaId });
+    res.json(rows.map((row) => ({
+      ...row,
+      // Com a data de nascimento a idade é a de hoje
+      idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
+    })));
+  } catch (err) {
+    console.error('❌ Erro ao listar cadastros das crianças:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Cadastro permanente da criança: dados, pontos totais (todos os eventos) e pontos por evento.
 router.get('/perfil/:perfilCriancaId', verifyToken, async (req, res) => {
   try {
