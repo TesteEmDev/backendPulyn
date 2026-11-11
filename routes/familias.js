@@ -4,8 +4,8 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
-const { criarPerfil, normalizarBusca, semAcentosSql, nomeAbreviado } = require('../utils/perfilCrianca');
-const { validarPreCadastro, responsaveisParecidos } = require('../utils/preCadastroFamilia');
+const { criarPerfil, normalizarBusca, semAcentosSql, nomeAbreviado, perfilTemParticipacao, editarPerfilSemParticipacao, excluirPerfil } = require('../utils/perfilCrianca');
+const { validarPreCadastro, validarEdicaoPerfil, responsaveisParecidos } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
 const { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
@@ -827,7 +827,7 @@ router.get('/perfis', verifyToken, async (req, res) => {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
 
     const perfis = await allQuery(`
-      SELECT p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, emp.nome AS buffetNome
+      SELECT p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento, emp.nome AS buffetNome
       FROM perfilVinculoFamiliar pv
       JOIN perfilCrianca p ON p.perfilCriancaId = pv.perfilCriancaId
       JOIN empresa emp ON emp.empresaId = pv.empresaId
@@ -958,6 +958,48 @@ router.post('/perfis', verifyToken, async (req, res) => {
     res.status(201).json({ perfilCriancaId, nome, apelido, idade, dataNascimento });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao pré-cadastrar criança:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Só edita/exclui o cadastro que o próprio responsável fez e que ainda não entrou em nenhum evento ("não aceito").
+async function perfilEditavelDaFamilia(req, res) {
+  if (req.user.role !== 'family') { res.status(403).json({ error: 'Acesso exclusivo para famílias' }); return null; }
+  const { perfilCriancaId } = req.params;
+  const vinculo = await queryOne(
+    'SELECT 1 AS ok FROM perfilVinculoFamiliar WHERE loginId = @loginId AND perfilCriancaId = @perfilCriancaId',
+    { loginId: req.user.id, perfilCriancaId }
+  );
+  if (!vinculo) { res.status(404).json({ error: 'Cadastro não encontrado' }); return null; }
+  if (await perfilTemParticipacao(perfilCriancaId)) {
+    res.status(409).json({ error: 'Esta criança já entrou em um evento e não pode mais ser alterada por aqui' });
+    return null;
+  }
+  return perfilCriancaId;
+}
+
+router.put('/perfis/:perfilCriancaId', verifyToken, async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaFamilia(req, res);
+    if (!perfilCriancaId) return;
+    const dados = validarEdicaoPerfil(req.body);
+    if (!dados.ok) return res.status(400).json({ error: dados.error });
+    await editarPerfilSemParticipacao(perfilCriancaId, dados.value);
+    res.json({ perfilCriancaId, ...dados.value });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao editar pré-cadastro:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/perfis/:perfilCriancaId', verifyToken, async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaFamilia(req, res);
+    if (!perfilCriancaId) return;
+    await withTransaction(async () => { await excluirPerfil(perfilCriancaId); });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao excluir pré-cadastro:', err.message);
     res.status(500).json({ error: err.message });
   }
 });

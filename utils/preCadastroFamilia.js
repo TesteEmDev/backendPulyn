@@ -3,6 +3,7 @@
 // O cadastro nasce num evento aberto escolhido pelo pai; o buffet dele é o do evento, nunca o que o app manda.
 // Sem evento não há buffet, e sem buffet a recepção não enxerga o cadastro (isolamento entre empresas).
 const { idadeValida, idadeDeNascimento, normalizarBusca } = require('./perfilCrianca');
+const { normalizarDataNascimento, idadeNaData } = require('./nascimento');
 
 const EVENTOS_FECHADOS = new Set(['completed', 'cancelled', 'canceled', 'finished']);
 
@@ -43,4 +44,25 @@ function responsaveisParecidos(a, b) {
   return curto.every((palavra) => longo.includes(palavra));
 }
 
-module.exports = { eventoAberto, validarPreCadastro, responsaveisParecidos };
+// Edição de um cadastro que ainda não entrou em nenhum evento. Mesmos limites do cadastro; sem limite de idade.
+// `comResponsavel`: a recepção também edita o nome e o parentesco do responsável (a família não).
+function validarEdicaoPerfil(body = {}, { comResponsavel = false } = {}) {
+  const nome = String(body.nome || '').trim();
+  if (!nome) return { ok: false, error: 'Nome da criança é obrigatório' };
+  if (nome.length > 100) return { ok: false, error: 'Nome excede o limite de 100 caracteres' };
+
+  const apelido = String(body.apelido || '').trim();
+  if (apelido.length > 100) return { ok: false, error: 'Apelido excede o limite de 100 caracteres' };
+
+  const nascimento = normalizarDataNascimento(body.dataNascimento, new Date(), { limiteIdade: null });
+  if (nascimento.erro) return { ok: false, error: nascimento.erro };
+
+  const value = { nome, apelido: apelido || null, dataNascimento: nascimento.data, idade: idadeNaData(nascimento.data) };
+  if (comResponsavel) {
+    value.nomeResponsavel = String(body.nomeResponsavel || '').trim().slice(0, 200) || null;
+    value.parentescoResponsavel = String(body.parentescoResponsavel || '').trim().slice(0, 50) || null;
+  }
+  return { ok: true, value };
+}
+
+module.exports = { eventoAberto, validarPreCadastro, validarEdicaoPerfil, responsaveisParecidos };

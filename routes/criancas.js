@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { query, queryOne, allQuery } = require('../database');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { isAvatarValido } = require('../utils/avatar');
@@ -9,6 +9,8 @@ const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../ut
 const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
+const { validarEdicaoPerfil } = require('../utils/preCadastroFamilia');
+const { perfilTemParticipacao, editarPerfilSemParticipacao, excluirPerfil } = require('../utils/perfilCrianca');
 const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil, copiarVinculosParaParticipacao } = require('../utils/perfilCrianca');
 
 router.use(verifyToken, (req, res, next) => {
@@ -64,6 +66,41 @@ router.get('/cadastros', async (req, res) => {
     })));
   } catch (err) {
     console.error('❌ Erro ao listar cadastros das crianças:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Recepção: edita/exclui um cadastro que ainda não entrou em nenhum evento (só do próprio buffet).
+async function perfilEditavelDaRecepcao(req, res) {
+  const perfil = await buscarPerfil(req.params.perfilCriancaId, req.user?.empresaId);
+  if (!perfil) { res.status(404).json({ error: 'Cadastro da criança não encontrado' }); return null; }
+  if (await perfilTemParticipacao(perfil.perfilCriancaId)) {
+    res.status(409).json({ error: 'Esta criança já entrou em um evento: edite ou exclua pela lista do evento' });
+    return null;
+  }
+  return perfil.perfilCriancaId;
+}
+
+router.put('/perfil/:perfilCriancaId', async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaRecepcao(req, res);
+    if (!perfilCriancaId) return;
+    const dados = validarEdicaoPerfil(req.body, { comResponsavel: true });
+    if (!dados.ok) return res.status(400).json({ error: dados.error });
+    await editarPerfilSemParticipacao(perfilCriancaId, dados.value);
+    res.json({ perfilCriancaId, ...dados.value });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/perfil/:perfilCriancaId', async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaRecepcao(req, res);
+    if (!perfilCriancaId) return;
+    await withTransaction(async () => { await excluirPerfil(perfilCriancaId); });
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
