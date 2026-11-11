@@ -879,42 +879,66 @@ router.get('/todas-criancas', verifyToken, async (req, res) => {
   }
 });
 
-// Antes de salvar o pré-cadastro: já existe um cadastro (feito na recepção, por exemplo) com o mesmo nome da criança,
-// a mesma data de nascimento e o mesmo nome de pai/responsável? A busca é GLOBAL (em todos os buffets): a criança pode
-// ter ido a outro buffet antes. Só devolve se existe, quando foi criado e os nomes abreviados ("Guilherme G. C."), nunca o nome completo nem o buffet; e só
-// bate quando o nome do responsável do cadastro for o da própria conta de quem pergunta. Só avisa; quem decide é o pai.
+// Procura, em TODOS os buffets (a criança pode ter ido a outro antes), um cadastro com o mesmo nome da criança, a mesma
+// data de nascimento e um nome de responsável que bata com o nome da conta de quem pergunta. Cadastros que o próprio
+// responsável já tem ligados a ele não contam. Devolve o cadastro encontrado ou null.
+async function buscarCadastroParecido(req) {
+  const nome = normalizarBusca(req.body?.nome);
+  const dataNascimento = String(req.body?.dataNascimento || '').trim();
+  if (!nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return null;
+
+  const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
+  if (!responsavel?.nomeFamilia) return null;
+
+  const candidatos = await allQuery(
+    `SELECT p.perfilCriancaId, p.empresaId, p.nome, p.nomeResponsavel, p.criadoEm
+     FROM perfilCrianca p
+     WHERE CAST(p.dataNascimento AS text) = @dataNascimento
+       AND ${semAcentosSql('p.nome')} = @nome
+       AND p.nomeResponsavel IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM perfilVinculoFamiliar pv WHERE pv.perfilCriancaId = p.perfilCriancaId AND pv.loginId = @loginId)
+       AND NOT EXISTS (SELECT 1 FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId)
+     ORDER BY p.criadoEm DESC`,
+    { dataNascimento, nome, loginId: req.user.id }
+  );
+  const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia)) || null;
+  // Sem nomes no log: só o motivo, para entender por que um aviso esperado não apareceu
+  console.log(`🔎 [FAMILIAS] Cadastro parecido: ${candidatos.length} candidato(s) com mesmo nome e nascimento em todos os buffets; ${parecido ? 'responsável bate' : 'nenhum responsável bate'}`);
+  return parecido;
+}
+
+// Antes de salvar o pré-cadastro: já existe um cadastro parecido? Só devolve se existe, quando foi criado e os nomes
+// abreviados ("Guilherme G. C."), nunca o nome completo, o id nem o buffet. Só avisa; quem decide é o pai.
 router.post('/perfis/verificar', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
-
-    const nome = normalizarBusca(req.body?.nome);
-    const dataNascimento = String(req.body?.dataNascimento || '').trim();
-    if (!nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return res.json({ existe: false });
-
-    const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
-    if (!responsavel?.nomeFamilia) return res.json({ existe: false });
-
-    // Cadastros que o próprio responsável já tem ligados a ele não contam
-    const candidatos = await allQuery(
-      `SELECT p.nome, p.nomeResponsavel, p.criadoEm
-       FROM perfilCrianca p
-       WHERE CAST(p.dataNascimento AS text) = @dataNascimento
-         AND ${semAcentosSql('p.nome')} = @nome
-         AND p.nomeResponsavel IS NOT NULL
-         AND NOT EXISTS (SELECT 1 FROM perfilVinculoFamiliar pv WHERE pv.perfilCriancaId = p.perfilCriancaId AND pv.loginId = @loginId)
-         AND NOT EXISTS (SELECT 1 FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId)
-       ORDER BY p.criadoEm DESC`,
-      { dataNascimento, nome, loginId: req.user.id }
-    );
-    const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia));
-    // Sem nomes no log: só o motivo, para entender por que um aviso esperado não apareceu
-    console.log(`🔎 [FAMILIAS] Cadastro parecido: ${candidatos.length} candidato(s) com mesmo nome e nascimento em todos os buffets; ${parecido ? 'responsável bate' : 'nenhum responsável bate'}`);
-    // Nomes só abreviados ("Guilherme G. C."): o pai reconhece o cadastro sem o app expor o nome completo
+    const parecido = await buscarCadastroParecido(req);
     res.json(parecido
       ? { existe: true, criadoEm: parecido.criadoEm, crianca: nomeAbreviado(parecido.nome), responsavel: nomeAbreviado(parecido.nomeResponsavel) }
       : { existe: false });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao verificar cadastro parecido:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// O pai confirmou que o cadastro parecido é do filho dele: liga a conta a esse cadastro (em vez de criar outro).
+// O servidor refaz a busca com os mesmos critérios: o app nunca escolhe o cadastro por id. Vale só para o cadastro
+// permanente da criança; o histórico de eventos anteriores não é aberto por isso (a participação em eventos novos
+// vincula sozinha, como em qualquer cadastro).
+router.post('/perfis/vincular', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+    const parecido = await buscarCadastroParecido(req);
+    if (!parecido) return res.status(404).json({ error: 'Cadastro não encontrado. Confira o nome e a data de nascimento.' });
+    await query(
+      `INSERT INTO perfilVinculoFamiliar (vinculoId, loginId, perfilCriancaId, empresaId, relacionamento)
+       VALUES (@vinculoId, @loginId, @perfilCriancaId, @empresaId, 'responsável')`,
+      { vinculoId: crypto.randomUUID(), loginId: req.user.id, perfilCriancaId: parecido.perfilCriancaId, empresaId: parecido.empresaId }
+    );
+    res.status(201).json({ perfilCriancaId: parecido.perfilCriancaId, nome: nomeAbreviado(parecido.nome) });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao vincular cadastro existente:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
