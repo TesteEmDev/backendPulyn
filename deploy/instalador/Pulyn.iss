@@ -59,7 +59,10 @@ FinishedHeadingLabel=Pulyn
 ButtonInstall=&Começar
 
 [Files]
-Source: "{#Montagem}\pacote\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Check: not EhDesinstalacao
+Source: "{#Montagem}\pacote\*"; Excludes: "\terceiros\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Check: not EhDesinstalacao
+; Instaladores do Node.js, PostgreSQL, URL Rewrite, ARR e WinSW (~380 MB): so na primeira instalacao. Ficam num bloco
+; comprimido separado (solidbreak) para a atualizacao nem precisar descompacta-los.
+Source: "{#Montagem}\pacote\terceiros\*"; DestDir: "{app}\terceiros"; Flags: ignoreversion solidbreak; Check: EhPrimeiraInstalacao
 ; Usados so pela opcao Desinstalar (extraidos para a pasta temporaria do setup)
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\desinstalar.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\config.ps1"; Flags: dontcopy
@@ -103,6 +106,11 @@ end;
 function EhDesinstalacao: Boolean;
 begin
   Result := Modo = MODO_DESINSTALAR;
+end;
+
+function EhPrimeiraInstalacao: Boolean;
+begin
+  Result := Modo = MODO_INSTALAR;
 end;
 
 // IP da placa de rede que tem rota para a rede (o mesmo criterio dos scripts).
@@ -188,7 +196,7 @@ begin
   PaginaModo := CreateInputOptionPage(wpWelcome, 'O que você quer fazer?', Situacao,
     'Escolha uma opção e clique em Avançar.', True, False);
   PaginaModo.Add('Primeira instalação' + #13#10 + 'Instala o Pulyn completo: banco de dados novo, servidor, telas e certificado HTTPS.');
-  PaginaModo.Add('Atualizar' + #13#10 + 'Publica esta versão. Faz backup do banco antes; dados, senhas e certificado continuam os mesmos.');
+  PaginaModo.Add('Atualizar' + #13#10 + 'Só publica a versão nova do sistema, com backup do banco antes. Não reinstala Node.js, PostgreSQL nem IIS; dados, senhas e certificado continuam os mesmos.');
   PaginaModo.Add('Desinstalar' + #13#10 + 'Remove o Pulyn deste computador. O banco de dados só é apagado se você escolher.');
   PaginaModo.CheckListBox.ItemEnabled[MODO_INSTALAR] := not JaInstalado;
   PaginaModo.CheckListBox.ItemEnabled[MODO_ATUALIZAR] := JaInstalado;
@@ -360,7 +368,10 @@ begin
     Result := 'ATUALIZAR o Pulyn';
     if VersaoInstalada <> '' then Result := Result + NewLine + NewLine + 'Instalada: ' + VersaoInstalada;
     Result := Result + NewLine + 'Nova: Pulyn {#Versao}' + NewLine + NewLine +
-      'Antes de publicar é feito um backup do banco. Dados, senhas e certificado continuam os mesmos.';
+      'O que acontece:' + NewLine +
+      '- backup do banco;' + NewLine +
+      '- publicação da versão nova do sistema (servidor e telas).' + NewLine + NewLine +
+      'Não são reinstalados: Node.js, PostgreSQL, IIS. Dados, senhas e certificado continuam os mesmos.';
   end
   else
     Result := 'PRIMEIRA INSTALAÇÃO do Pulyn {#Versao}' + NewLine + NewLine +
@@ -395,7 +406,10 @@ procedure InstalarOuAtualizar;
 var
   Parametros: string;
 begin
-  WizardForm.StatusLabel.Caption := 'Configurando o Pulyn (acompanhe na janela do PowerShell)...';
+  if Modo = MODO_ATUALIZAR then
+    WizardForm.StatusLabel.Caption := 'Atualizando o Pulyn (acompanhe na janela do PowerShell)...'
+  else
+    WizardForm.StatusLabel.Caption := 'Configurando o Pulyn (acompanhe na janela do PowerShell)...';
   Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\BackEnd\deploy\iis\instalar-tudo.ps1') + '"' +
     ' -Terceiros "' + ExpandConstant('{app}\terceiros') + '"' +
     ' -SiteBuild "' + ExpandConstant('{app}\site-build') + '"';

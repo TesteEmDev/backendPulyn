@@ -47,7 +47,7 @@ if ($atualizacao -and -not $Ip) {
     $urlFront = Ler-Env $envProdArquivo 'FRONTEND_URL'
     if ($urlFront -match '^https?://(\d{1,3}(\.\d{1,3}){3})') { $Ip = $Matches[1] }
 }
-$totalPassos = 7
+$totalPassos = if ($atualizacao) { 6 } else { 7 }
 $passo = 0
 function Proximo-Passo($texto) {
     $script:passo++
@@ -66,7 +66,10 @@ $sucesso = $false
 try {
     if ($modoErrado) { throw $modoErrado }
     Write-Host ''
-    if ($atualizacao) { Write-Host 'Pulyn ja instalado nesta maquina: vou ATUALIZAR (banco, .env e certificado ficam como estao).' -ForegroundColor Cyan }
+    if ($atualizacao) {
+        Write-Host 'ATUALIZACAO do Pulyn: publica so a versao nova do sistema.' -ForegroundColor Cyan
+        Write-Host 'Nao reinstala Node.js, PostgreSQL nem IIS; o banco, as senhas e o certificado ficam como estao.' -ForegroundColor Cyan
+    }
     else { Write-Host 'Instalacao nova do Pulyn.' -ForegroundColor Cyan }
     Write-Host ('Registro desta instalacao: ' + $log)
 
@@ -79,8 +82,16 @@ try {
     Escrever-Ok ('Windows com IIS; IP do servidor: ' + $Ip)
 
     # ------------------------------------------------------------------ 2
-    Proximo-Passo 'Node.js e PostgreSQL'
     Atualizar-Path
+    $psql = Join-Path $PgBin 'psql.exe'
+    if ($atualizacao) {
+        # Atualizacao: Node.js e PostgreSQL ja estao instalados (o setup nem traz os instaladores deles); so confere.
+        Proximo-Passo 'Conferindo o Node.js e o PostgreSQL (ja instalados)'
+        if (-not (Get-Command node -ErrorAction SilentlyContinue)) { throw 'O Node.js nao esta instalado neste computador. Reinstale o Node.js LTS e rode a atualizacao de novo.' }
+        if (-not (Test-Path $psql)) { throw ('O PostgreSQL nao esta em ' + $PgBin + '.') }
+        Escrever-Ok ('Node.js ' + (& node -v) + ' e PostgreSQL 18')
+    } else {
+    Proximo-Passo 'Node.js e PostgreSQL'
     if (Get-Command node -ErrorAction SilentlyContinue) {
         Escrever-Ok ('Node.js ja instalado: ' + (& node -v))
     } else {
@@ -94,7 +105,6 @@ try {
         Escrever-Ok ('Node.js instalado: ' + (& node -v))
     }
 
-    $psql = Join-Path $PgBin 'psql.exe'
     if (Test-Path $psql) {
         Escrever-Ok ('PostgreSQL ja instalado em ' + $PgBin)
     } else {
@@ -116,6 +126,7 @@ try {
         if (-not (Test-Path $psql)) { throw ('PostgreSQL instalado, mas nao achei ' + $psql) }
         Escrever-Ok 'PostgreSQL 18 instalado'
     }
+    }
     $svcPg = Get-Service $PgServico -ErrorAction SilentlyContinue
     if ($svcPg -and $svcPg.Status -ne 'Running') { Start-Service $PgServico; Escrever-Ok ($PgServico + ' iniciado') }
 
@@ -136,12 +147,15 @@ try {
     }
 
     # ------------------------------------------------------------------ 3
-    Proximo-Passo 'Preparando o IIS'
-    & "$PSScriptRoot\01-preparar-iis.ps1" -Sim
+    # Na atualizacao o IIS ja esta pronto (o 04 confere o URL Rewrite de qualquer forma).
+    if (-not $atualizacao) {
+        Proximo-Passo 'Preparando o IIS'
+        & "$PSScriptRoot\01-preparar-iis.ps1" -Sim
+    }
 
     # ------------------------------------------------------------------ 4
     if ($atualizacao) {
-        Proximo-Passo 'Banco de dados: backup antes de atualizar'
+        Proximo-Passo 'Backup do banco antes de atualizar (os dados nao sao alterados)'
         & "$PSScriptRoot\backup-banco.ps1"
     } else {
         Proximo-Passo 'Criando o banco de dados'
@@ -160,11 +174,11 @@ try {
     }
 
     # ------------------------------------------------------------------ 5
-    Proximo-Passo 'Certificado HTTPS'
+    Proximo-Passo $(if ($atualizacao) { 'Certificado HTTPS (o atual continua valendo)' } else { 'Certificado HTTPS' })
     & "$PSScriptRoot\03-certificado.ps1" -Ip $Ip
 
     # ------------------------------------------------------------------ 6
-    Proximo-Passo 'Publicando o sistema'
+    Proximo-Passo $(if ($atualizacao) { 'Publicando a versao nova' } else { 'Publicando o sistema' })
     # Frontend ja compilado no pacote.
     if (-not $SiteBuild -or -not (Test-Path (Join-Path $SiteBuild 'index.html'))) { throw 'O frontend compilado nao veio no pacote.' }
     $destinoBuild = Join-Path $Raiz 'site-build'
@@ -195,9 +209,13 @@ try {
     Write-Host '==================================================================' -ForegroundColor Green
     Write-Host (' Pulyn ' + $(if ($atualizacao) { 'atualizado' } else { 'instalado' }) + '. Acesse: https://' + $Ip + '/') -ForegroundColor Green
     Write-Host '==================================================================' -ForegroundColor Green
-    Write-Host ('Tablets e celulares: instale o certificado ' + (Join-Path $Certs 'PulynCA.cer') + ' (guia, secao 6).')
-    Write-Host ('O IP ' + $Ip + ' precisa ficar fixo (reserva no roteador).')
-    if (-not $atualizacao) { Write-Host ('Entre com o master (' + $EmailMaster + ') e cadastre o buffet em Master > Clientes.') }
+    if ($atualizacao) {
+        Write-Host 'Tablets, celulares e placas continuam funcionando sem mudar nada.'
+    } else {
+        Write-Host ('Tablets e celulares: instale o certificado ' + (Join-Path $Certs 'PulynCA.cer') + ' (guia, secao 6).')
+        Write-Host ('O IP ' + $Ip + ' precisa ficar fixo (reserva no roteador).')
+        Write-Host ('Entre com o master (' + $EmailMaster + ') e cadastre o buffet em Master > Clientes.')
+    }
 } catch {
     Write-Host ''
     Write-Host ('ERRO: ' + $_.Exception.Message) -ForegroundColor Red
