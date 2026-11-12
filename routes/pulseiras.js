@@ -3,6 +3,7 @@ const router = express.Router();
 const { query, queryOne, allQuery } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { controleAtivo, MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE } = require('../utils/pulseiraControle');
 
 // Listar pulseira
 router.get('/', verifyToken, async (req, res) => {
@@ -43,6 +44,11 @@ router.post('/', verifyToken, async (req, res) => {
     const { codigo } = req.body;
     const empresaId = req.user.empresaId;
     const codeUpper = normalizeUid(codigo);
+
+    // O cliente não cadastra pulseira por conta própria: quem fornece é o master (envio e aceite)
+    if (controleAtivo() && !isMaster(req)) {
+      return res.status(403).json({ error: 'As pulseiras são fornecidas pelo master. Peça o envio das pulseiras e aceite-as no painel do admin.' });
+    }
     
     if (!codeUpper) {
       return res.status(400).json({ error: 'Código da pulseira é obrigatório' });
@@ -155,6 +161,19 @@ router.post('/detectar', async (req, res) => {
     
     console.log(`📡 Pulseira detectada no Arduino: ${normalizedCode} (Checkpoint: ${checkpointId})`);
     
+    // Só repassa a leitura de pulseira fornecida ao mesmo cliente do checkpoint (rota sem login: o checkpoint é obrigatório)
+    if (controleAtivo()) {
+      const dono = checkpointId ? await queryOne(
+        `SELECT p.codigo FROM pontoVerificacao c
+         JOIN pulseira p ON LOWER(p.empresaId) = LOWER(c.empresaId) AND ${uidSqlExpression('p.codigo')} = @codigo
+         WHERE c.checkpointId = @checkpointId`,
+        { codigo: normalizedCode, checkpointId }
+      ) : null;
+      if (!dono) {
+        return res.json({ success: false, ignored: true, codigo: normalizedCode, message: MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE });
+      }
+    }
+
     // Broadcast para o frontend atualizar o input
     if (global.broadcast) {
       global.broadcast({

@@ -7,6 +7,7 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { processParallelScan } = require('../utils/parallelGame');
+const { controleAtivo, MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE } = require('../utils/pulseiraControle');
 const {
   getActiveSession,
   processTreasureScan,
@@ -219,6 +220,17 @@ router.post('/score', async (req, res) => {
       return res.status(404).json({ error: 'Checkpoint de pontuação não encontrado' });
     }
 
+    // Só vale pulseira fornecida a este cliente (ver utils/pulseiraControle.js)
+    if (controleAtivo()) {
+      const daEmpresa = await queryOne(
+        `SELECT codigo FROM pulseira WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
+        { uid: normalizedUid, empresaId: checkpoint.empresaId }
+      );
+      if (!daEmpresa) {
+        return res.json({ ok: true, registered: false, ignored: true, braceletCode: normalizedUid, message: MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE });
+      }
+    }
+
     const eventosAbertos = await allQuery(
       `SELECT eventoId FROM evento
        WHERE LOWER(empresaId) = LOWER(@empresaId)
@@ -293,17 +305,40 @@ router.post('/reception', async (req, res) => {
       return res.json({ ok: true, registered: false, braceletCode: normalizedUid, message: 'Pulseira lida para o estoque do master' });
     }
 
+    const pulseira = checkpoint.pulseira_code
+      ? { codigo: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
+      : null;
+
+    // Pulseira que o master enviou a este cliente e que ainda espera o aceite: o admin a confere passando no leitor
+    let aguardandoAceite = false;
+    if (!pulseira && controleAtivo()) {
+      aguardandoAceite = Boolean(await queryOne(
+        `SELECT codigo FROM pulseira
+         WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaDestinoId) = LOWER(@empresaId) AND statusTransferencia = 'pendente'`,
+        { uid: normalizedUid, empresaId: checkpoint.empresaId }
+      ));
+    }
+
     // O admin do buffet confere as pulseiras recebidas do master passando-as no leitor, mesmo sem evento aberto
-    if (typeof global.broadcastToCompany === 'function') {
+    if ((pulseira || aguardandoAceite || !controleAtivo()) && typeof global.broadcastToCompany === 'function') {
       global.broadcastToCompany(checkpoint.empresaId, {
         type: 'RECEPTION_BRACELET_READ',
         payload: { braceletCode: normalizedUid, checkpointId: checkpoint.checkpointId, timestamp: now.toISOString() },
       });
     }
 
-    const pulseira = checkpoint.pulseira_code
-      ? { codigo: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
-      : null;
+    // Pulseira que o master não forneceu a este cliente: o leitor a ignora (não chega ao check-in nem ao autoatendimento)
+    if (!pulseira && controleAtivo()) {
+      return res.json({
+        ok: true,
+        registered: false,
+        ignored: true,
+        braceletCode: normalizedUid,
+        message: aguardandoAceite
+          ? 'Pulseira enviada pelo master: aceite-a no painel do admin para usar'
+          : MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE,
+      });
+    }
 
     const registered = Boolean(pulseira);
     // Eventos que podem estar cadastrando pulseira agora. O evento do próprio
@@ -398,7 +433,28 @@ router.post('/', async (req, res) => {
       }
     };
 
-    // A leitura é enviada também quando a pulseira ainda não existe no banco,
+    // A pulseira precisa existir, pertencer à mesma empresa e estar ativa.
+    // Isso evita processar uma criança cujo vínculo foi removido ou bloqueado.
+    const pulseira = await queryOne(
+      `SELECT codigo, empresaId, status, criancaId
+       FROM pulseira
+       WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
+      { uid: normalizedUid, empresaId: checkpoint.empresaId }
+    );
+
+    // Pulseira que o master não forneceu a este cliente: o leitor a ignora, sem avisar nenhuma tela
+    if (!pulseira && controleAtivo()) {
+      return res.json({
+        ok: true,
+        registered: false,
+        braceletExists: false,
+        ignored: true,
+        braceletCode: normalizedUid,
+        message: MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE,
+      });
+    }
+
+    // Com o controle desligado, a leitura é enviada também quando a pulseira ainda não existe no banco,
     // pois as telas de recepção precisam poder cadastrá-la pelo NFC.
     broadcast(broadcastData);
 
@@ -427,15 +483,6 @@ router.post('/', async (req, res) => {
       }
     }
     
-    // A pulseira precisa existir, pertencer à mesma empresa e estar ativa.
-    // Isso evita processar uma criança cujo vínculo foi removido ou bloqueado.
-    const pulseira = await queryOne(
-      `SELECT codigo, empresaId, status, criancaId
-       FROM pulseira
-       WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
-      { uid: normalizedUid, empresaId: checkpoint.empresaId }
-    );
-
     if (!pulseira) {
       return res.json({
         ok: true,
