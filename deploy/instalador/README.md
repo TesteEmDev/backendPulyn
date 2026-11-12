@@ -2,19 +2,32 @@
 
 Um único `Pulyn-Setup-<versão>.exe` instala o Pulyn inteiro no computador do buffet: Node.js, PostgreSQL 18, IIS (WebSocket, URL Rewrite e ARR), banco de dados limpo, certificado HTTPS, o serviço `PulynBackend`, o site `Pulyn` e o backup diário. O mesmo arquivo atualiza um buffet já instalado, e o desinstalador remove o sistema.
 
-## Gerar o instalador (na máquina de desenvolvimento)
+## Gerar o instalador
 
-1. Faça o commit do BackEnd: o pacote leva o **último commit** do backend. O frontend é compilado da pasta como ela está.
-2. Se o banco ganhou tabelas novas, gere de novo a estrutura e faça o commit:
-   `powershell -ExecutionPolicy Bypass -File BackEnd\deploy\iis\gerar-banco-base.ps1`
-3. Gere o instalador:
+O gerador baixa o código do **GitHub** e monta o setup.exe com tudo dentro:
+- o backend vem do `backendPulyn`, branch `main`;
+- o frontend vem do `frontenPulyn`, branch `main`.
+
+O computador do cliente não precisa de internet nem de nenhum arquivo do projeto.
+
+1. Deixe a `main` dos dois repositórios com a versão que deve ir para os buffets (PRs mergeados).
+2. Gere o instalador:
    `powershell -ExecutionPolicy Bypass -File BackEnd\deploy\instalador\gerar-instalador.ps1`
 
-O arquivo sai em `BackEnd\deploy\instalador\saida\`. Para gerar, é preciso:
-- **Inno Setup 6**;
+Outras opções:
+- `-Branch <nome>` gera de outra branch nos dois repositórios. Para usar uma branch diferente só no frontend, acrescente `-BranchFront <nome>`.
+- `-Origem Local` usa o último commit do BackEnd desta máquina e a pasta FrontEnd como está. Serve para testar antes de enviar ao GitHub.
+
+O instalador e os scripts (`deploy/instalador` e `deploy/iis`) vêm junto com o backend baixado. Por isso a branch escolhida precisa tê-los; se não tiver, o gerador para e avisa.
+
+Se o banco ganhou tabelas novas, gere de novo a estrutura antes do commit:
+`powershell -ExecutionPolicy Bypass -File BackEnd\deploy\iis\gerar-banco-base.ps1`
+
+O arquivo sai em `BackEnd\deploy\instalador\saida\`. O `C:\Pulyn\pacote\VERSAO.txt`, que o setup grava no computador do cliente, mostra a versão, a origem e a branch e o commit de cada repositório. Para gerar, é preciso:
+- **Inno Setup 6** e **git**;
 - os instaladores do Node.js (`node-v*-x64.msi`) e do PostgreSQL 18 (`postgresql-18*-windows-x64.exe`) na pasta Downloads, ou indicados com `-NodeMsi` e `-PostgresExe`;
 - `rewrite_amd64_en-US.msi`, `requestRouter_amd64.msi` e `WinSW-x64.exe` em `C:\Pulyn\instaladores` (ou `-PastaIis`);
-- internet, para o `npm ci`.
+- internet, para baixar do GitHub e para o `npm ci`.
 
 ## As telas do assistente
 
