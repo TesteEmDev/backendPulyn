@@ -16,6 +16,19 @@ O arquivo sai em `BackEnd\deploy\instalador\saida\`. Para gerar, é preciso:
 - `rewrite_amd64_en-US.msi`, `requestRouter_amd64.msi` e `WinSW-x64.exe` em `C:\Pulyn\instaladores` (ou `-PastaIis`);
 - internet, para o `npm ci`.
 
+## As telas do assistente
+
+O assistente usa o visual do Pulyn: fundo escuro, logo e mascote. As imagens ficam em `imagens/`. Na segunda tela você escolhe o que fazer:
+
+- **Primeira instalação.** Só aparece liberada se o Pulyn ainda não estiver instalado.
+- **Atualizar.** Só aparece liberada se o Pulyn já estiver instalado.
+- **Desinstalar.** Aparece liberada se existir alguma coisa do Pulyn no computador.
+
+A tela mostra a situação do computador e a versão instalada.
+
+Para ver as telas sem instalar nada (não pede administrador e não executa nada), compile uma prévia:
+`ISCC.exe /DPrevia /DVersao=previa /DMontagem=<pasta com pacote\BackEnd\deploy\iis\{desinstalar,config,backup-banco}.ps1> Pulyn.iss`
+
 ## Instalar no buffet
 
 1. Ligue o computador no roteador por cabo e reserve o IP dele no roteador. O Windows precisa ser Pro, Enterprise ou Server.
@@ -36,7 +49,9 @@ Rode o setup.exe da versão nova. Se existir `C:\Pulyn\backend\.env`, o assisten
 
 ## Desinstalar
 
-Use **Configurações > Aplicativos > Pulyn > Desinstalar**. O desinstalador pergunta se o banco de dados também deve ser apagado. A resposta padrão é **Não**.
+Há dois caminhos:
+- rode o setup.exe e escolha **Desinstalar**, marcando ou não "Apagar também o banco de dados";
+- ou use **Configurações > Aplicativos > Pulyn > Desinstalar**. Esse caminho pergunta se o banco também deve ser apagado, e a resposta padrão é **Não**.
 
 - **Sempre remove:** o serviço `PulynBackend`, o site e o pool `Pulyn` do IIS, o certificado da porta 443, as regras de firewall `Pulyn HTTPS` e `Pulyn HTTP UHF`, a tarefa de backup, os certificados do Pulyn (CA e servidor) e as pastas em `C:\Pulyn`.
 - **Banco, se você responder Sim:** faz um backup em `C:\Pulyn\backups` e depois apaga o banco `AdvPulyn`.

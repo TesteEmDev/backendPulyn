@@ -19,22 +19,34 @@
 # Senhas (por variavel de ambiente, nunca na linha de comando):
 #   PULYN_PG_ADMIN_SENHA  senha do usuario postgres (a que ja existe, ou a que sera criada na instalacao do PostgreSQL)
 #   PULYN_MASTER_SENHA    senha do usuario master
+#   -Modo          Instalar ou Atualizar (o que a pessoa escolheu no setup). Sem ele, decide sozinho pelo .env.
 param(
     [string]$Ip,
     [string]$EmailMaster,
     [string]$Terceiros,
     [string]$SiteBuild,
+    [ValidateSet('', 'Instalar', 'Atualizar')][string]$Modo = '',
     [switch]$SemPausa
 )
 . "$PSScriptRoot\config.ps1"
 Exigir-Admin
 Exigir-Repo
+try { $Host.UI.RawUI.WindowTitle = 'Pulyn - instalacao' } catch { }
 
 foreach ($p in $Raiz, $Logs, $Instaladores) { if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null } }
 $log = Join-Path $Logs ('instalacao-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
 Start-Transcript -Path $log -Append | Out-Null
 
-$atualizacao = Test-Path (Join-Path $Backend '.env')
+$envProdArquivo = Join-Path $Backend '.env'
+$atualizacao = Test-Path $envProdArquivo
+$modoErrado = $null
+if ($Modo -eq 'Instalar' -and $atualizacao) { $modoErrado = 'O Pulyn ja esta instalado neste computador. Para publicar uma versao nova, escolha Atualizar.' }
+if ($Modo -eq 'Atualizar' -and -not $atualizacao) { $modoErrado = 'O Pulyn nao esta instalado neste computador (falta ' + $envProdArquivo + '). Escolha Primeira instalacao.' }
+# Atualizacao sem -Ip: usa o endereco que o sistema ja usa (FRONTEND_URL), para o certificado continuar o mesmo.
+if ($atualizacao -and -not $Ip) {
+    $urlFront = Ler-Env $envProdArquivo 'FRONTEND_URL'
+    if ($urlFront -match '^https?://(\d{1,3}(\.\d{1,3}){3})') { $Ip = $Matches[1] }
+}
 $totalPassos = 7
 $passo = 0
 function Proximo-Passo($texto) {
@@ -52,6 +64,7 @@ function Achar-Arquivo($pasta, $filtro) {
 
 $sucesso = $false
 try {
+    if ($modoErrado) { throw $modoErrado }
     Write-Host ''
     if ($atualizacao) { Write-Host 'Pulyn ja instalado nesta maquina: vou ATUALIZAR (banco, .env e certificado ficam como estao).' -ForegroundColor Cyan }
     else { Write-Host 'Instalacao nova do Pulyn.' -ForegroundColor Cyan }

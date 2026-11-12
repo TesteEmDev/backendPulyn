@@ -12,8 +12,9 @@
 param([switch]$ApagarBanco, [switch]$Sim, [switch]$SemPausa)
 . "$PSScriptRoot\config.ps1"
 Exigir-Admin
+try { $Host.UI.RawUI.WindowTitle = 'Pulyn - desinstalacao' } catch { }
 
-$log = Join-Path $env:TEMP ('pulyn-desinstalacao-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
+$log =Join-Path $env:TEMP ('pulyn-desinstalacao-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
 Start-Transcript -Path $log -Append | Out-Null
 $envProd = Join-Path $Backend '.env'
 $sucesso = $false
