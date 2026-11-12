@@ -1,6 +1,6 @@
 # Instalador do Pulyn (setup.exe)
 
-Um único `Pulyn-Setup-<versão>.exe` instala o Pulyn inteiro no computador do buffet: Node.js, PostgreSQL 18, IIS (WebSocket, URL Rewrite e ARR), banco de dados limpo, certificado HTTPS, o serviço `PulynBackend`, o site `Pulyn` e o backup diário.
+Um único `Pulyn-Setup-<versão>.exe` instala o Pulyn inteiro no computador do buffet: Node.js, PostgreSQL 18, IIS (WebSocket, URL Rewrite e ARR), banco de dados limpo, certificado HTTPS, o serviço `PulynBackend`, o site `Pulyn` e o backup diário. O mesmo arquivo atualiza um buffet já instalado, e o desinstalador remove o sistema.
 
 ## Gerar o instalador (na máquina de desenvolvimento)
 
@@ -32,10 +32,21 @@ O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 
 ## Atualizar um buffet já instalado
 
-Rode o setup.exe da versão nova. Se existir `C:\Pulyn\backend\.env`, o assistente não pede senhas. Ele faz backup do banco e publica a versão nova. O banco, o `.env` e o certificado continuam os mesmos.
+Rode o setup.exe da versão nova. Se existir `C:\Pulyn\backend\.env`, o assistente não pede senhas. Ele faz backup do banco e publica a versão nova. O banco, o `.env` e o certificado continuam os mesmos. O Node.js e o PostgreSQL não são reinstalados.
+
+## Desinstalar
+
+Use **Configurações > Aplicativos > Pulyn > Desinstalar**. O desinstalador pergunta se o banco de dados também deve ser apagado. A resposta padrão é **Não**.
+
+- **Sempre remove:** o serviço `PulynBackend`, o site e o pool `Pulyn` do IIS, o certificado da porta 443, as regras de firewall `Pulyn HTTPS` e `Pulyn HTTP UHF`, a tarefa de backup, os certificados do Pulyn (CA e servidor) e as pastas em `C:\Pulyn`.
+- **Banco, se você responder Sim:** faz um backup em `C:\Pulyn\backups` e depois apaga o banco `AdvPulyn`.
+- **Banco, se você responder Não:** o banco fica, e o `C:\Pulyn\backend\.env` também, porque ele guarda a senha do banco. Se você instalar de novo, o sistema volta com os mesmos dados. Os tablets vão precisar do certificado novo.
+- **Não remove nunca:** Node.js, PostgreSQL, os recursos do IIS, URL Rewrite e ARR (podem servir a outros sites, como o `suporte`), nem a pasta `C:\Pulyn\backups`.
+
+O registro da remoção fica em `%TEMP%\pulyn-desinstalacao-*.log`. Sem o setup, dá para remover com `C:\Pulyn\scripts\desinstalar.ps1` (como administrador; acrescente `-ApagarBanco` para apagar o banco).
+
+O desinstalador só aparece nos Aplicativos depois que o Pulyn for instalado (ou atualizado) por um setup.exe desta versão em diante.
 
 ## Se der erro
 
 Corrija o problema e rode o setup.exe de novo: o que já foi feito é reaproveitado. Se a instalação parou depois de criar o banco e antes de gravar o `.env`, o banco é recriado vazio. Isso só acontece depois de um backup e depois que você digita a confirmação pedida na janela.
-
-O setup não tem desinstalador, porque remover só o pacote deixaria o IIS, o serviço e o banco pela metade. Para remover, apague o site `Pulyn` no IIS, rode `C:\Pulyn\servico\PulynBackend.exe uninstall` e remova o banco `AdvPulyn`.

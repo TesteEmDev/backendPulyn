@@ -4,6 +4,7 @@
 ; O setup copia o pacote para C:\Pulyn\pacote, pergunta o IP, a senha do postgres e o usuario master e roda
 ; BackEnd\deploy\iis\instalar-tudo.ps1 (uma janela do PowerShell mostra o andamento). Se o Pulyn ja estiver instalado,
 ; nao pergunta senhas: so atualiza o sistema (com backup do banco antes).
+; Desinstalar remove servico, site, certificados e arquivos; o banco so e apagado se a pessoa escolher (com backup antes).
 
 #ifndef Versao
   #define Versao "0.0.0"
@@ -25,8 +26,9 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
-; Desinstalar so o pacote deixaria o IIS, o servico e o banco pela metade: a remocao e manual (README do instalador).
-Uninstallable=no
+; O desinstalador (Configuracoes > Aplicativos > Pulyn) roda BackEnd\deploy\iis\desinstalar.ps1 antes de apagar o pacote.
+Uninstallable=yes
+UninstallDisplayName=Pulyn
 OutputBaseFilename=Pulyn-Setup-{#Versao}
 Compression=lzma2/max
 SolidCompression=yes
@@ -245,4 +247,24 @@ begin
       'A configuração do Pulyn NÃO terminou.' + #13#10#13#10 +
       'O motivo aparece na janela do PowerShell e no registro em C:\Pulyn\logs (arquivo instalacao-*.log).' + #13#10#13#10 +
       'Corrija o problema e rode este instalador de novo: o que já foi feito é reaproveitado.';
+end;
+
+// ---------------------------------------------------------------- desinstalacao
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Parametros: string;
+  Codigo: Integer;
+  ApagarBanco: Boolean;
+begin
+  if CurUninstallStep <> usUninstall then Exit;
+  ApagarBanco := MsgBox('Apagar também o BANCO DE DADOS do Pulyn (crianças, eventos, pulseiras, pontuação)?' + #13#10#13#10 +
+    'Sim: antes é feito um backup em C:\Pulyn\backups e depois o banco é apagado.' + #13#10 +
+    'Não: o banco fica no PostgreSQL. Instalando o Pulyn de novo, o sistema volta com os mesmos dados.',
+    mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+  Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\BackEnd\deploy\iis\desinstalar.ps1') + '" -Sim';
+  if ApagarBanco then
+    Parametros := Parametros + ' -ApagarBanco';
+  if (not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Parametros, '', SW_SHOW, ewWaitUntilTerminated, Codigo)) or (Codigo <> 0) then
+    MsgBox('A remoção do Pulyn terminou com avisos. Veja a janela do PowerShell ou o registro pulyn-desinstalacao-*.log na pasta temporária do Windows (%TEMP%).',
+      mbInformation, MB_OK);
 end;
