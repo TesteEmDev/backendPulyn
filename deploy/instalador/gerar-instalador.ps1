@@ -16,6 +16,7 @@
 #   -NodeMsi      instalador do Node.js LTS x64 (padrao: o mais novo node-v*-x64.msi em Downloads)
 #   -PostgresExe  instalador do PostgreSQL 18 x64 (padrao: o mais novo postgresql-18*-windows-x64.exe em Downloads)
 #   -PastaIis     pasta com rewrite_amd64_en-US.msi, requestRouter_amd64.msi e WinSW-x64.exe (padrao C:\Pulyn\instaladores)
+#   -MinGitZip    Git portatil para a atualizacao pela internet (padrao: o mais novo MinGit-*-64-bit.zip em -PastaIis)
 #   -Iscc         caminho do ISCC.exe (padrao: Inno Setup 6 do usuario ou de Arquivos de Programas)
 param(
     [string]$Branch = 'main',
@@ -26,6 +27,7 @@ param(
     [string]$PostgresExe,
     [string]$PastaIis = 'C:\Pulyn\instaladores',
     [string]$Iscc,
+    [string]$MinGitZip,
     [string]$RepoBackUrl = 'https://github.com/TesteEmDev/backendPulyn.git',
     [string]$RepoFrontUrl = 'https://github.com/TesteEmDev/frontenPulyn.git'
 )
@@ -57,11 +59,14 @@ if (-not $NodeMsi -or -not (Test-Path $NodeMsi)) { throw 'Instalador do Node.js 
 if (-not $PostgresExe -or -not (Test-Path $PostgresExe)) { throw 'Instalador do PostgreSQL 18 (postgresql-18*-windows-x64.exe) nao encontrado: informe -PostgresExe.' }
 $arquivosIis = 'rewrite_amd64_en-US.msi', 'requestRouter_amd64.msi', 'WinSW-x64.exe'
 foreach ($a in $arquivosIis) { if (-not (Test-Path (Join-Path $PastaIis $a))) { throw ('Falta ' + $a + ' em ' + $PastaIis + ' (informe -PastaIis).') } }
+if (-not $MinGitZip) { $MinGitZip = Get-ChildItem $PastaIis -Filter 'MinGit-*-64-bit.zip' -File -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1 -ExpandProperty FullName }
+if (-not $MinGitZip -or -not (Test-Path $MinGitZip)) { throw ('MinGit (MinGit-*-64-bit.zip) nao encontrado em ' + $PastaIis + ': baixe de github.com/git-for-windows/git/releases ou informe -MinGitZip.') }
+Ok ('Git portatil: ' + (Split-Path $MinGitZip -Leaf))
 Ok ('Inno Setup: ' + $Iscc)
 Ok ('Node.js: ' + (Split-Path $NodeMsi -Leaf) + ' | PostgreSQL: ' + (Split-Path $PostgresExe -Leaf))
 
 if (Test-Path $montagem) { Remove-Item $montagem -Recurse -Force }
-New-Item -ItemType Directory -Path $fontes, (Join-Path $pacote 'BackEnd'), (Join-Path $pacote 'terceiros') -Force | Out-Null
+New-Item -ItemType Directory -Path $fontes, (Join-Path $pacote 'BackEnd'), (Join-Path $pacote 'terceiros'), (Join-Path $montagem 'extras') -Force | Out-Null
 
 # ------------------------------------------------------------------ codigo-fonte
 if ($Origem -eq 'GitHub') {
@@ -88,7 +93,7 @@ $commitFront = (& git -C $repoFront rev-parse --short HEAD).Trim()
 Ok ('backend ' + $Branch + ' @ ' + $commitBack + ' | frontend ' + $BranchFront + ' @ ' + $commitFront)
 
 # O instalador e os scripts vem junto com o backend: a branch precisa te-los.
-$faltando = @('deploy\instalador\Pulyn.iss', 'deploy\iis\instalar-tudo.ps1', 'deploy\iis\desinstalar.ps1', 'deploy\iis\banco-base.sql', 'deploy\iis\criar-master.js') |
+$faltando = @('deploy\instalador\Pulyn.iss', 'deploy\iis\instalar-tudo.ps1', 'deploy\iis\desinstalar.ps1', 'deploy\iis\atualizar-github.ps1', 'deploy\iis\banco-base.sql', 'deploy\iis\criar-master.js') |
             Where-Object { -not (Test-Path (Join-Path $repoBack $_)) }
 if ($faltando) {
     throw ('A branch "' + $Branch + '" do backend ainda nao tem o instalador (falta: ' + ($faltando -join ', ') + '). ' +
@@ -137,13 +142,14 @@ Ok 'frontend compilado'
 Passo 'Instaladores'
 Copy-Item $NodeMsi, $PostgresExe (Join-Path $pacote 'terceiros')
 foreach ($a in $arquivosIis) { Copy-Item (Join-Path $PastaIis $a) (Join-Path $pacote 'terceiros') }
+Copy-Item $MinGitZip (Join-Path $montagem 'extras\MinGit.zip')
 [IO.File]::WriteAllText((Join-Path $pacote 'VERSAO.txt'), (
     'Pulyn ' + $Versao + "`r`n" +
     'Origem ' + $origemTexto + "`r`n" +
     'BackEnd ' + $Branch + ' @ ' + $commitBack + "`r`n" +
     'FrontEnd ' + $BranchFront + ' @ ' + $commitFront + "`r`n" +
     'Gerado em ' + (Get-Date -Format 'yyyy-MM-dd HH:mm') + "`r`n"))
-Ok 'Node.js, PostgreSQL, URL Rewrite, ARR e WinSW'
+Ok 'Node.js, PostgreSQL, URL Rewrite, ARR, WinSW e Git'
 
 # ------------------------------------------------------------------ setup.exe
 Passo 'Compilando o setup.exe (alguns minutos)'

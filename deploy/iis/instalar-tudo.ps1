@@ -20,12 +20,14 @@
 #   PULYN_PG_ADMIN_SENHA  senha do usuario postgres (a que ja existe, ou a que sera criada na instalacao do PostgreSQL)
 #   PULYN_MASTER_SENHA    senha do usuario master
 #   -Modo          Instalar ou Atualizar (o que a pessoa escolheu no setup). Sem ele, decide sozinho pelo .env.
+#   -MinGitZip     MinGit (.zip): instala o Git em C:\Pulyn\git, usado pelo atalho "Atualizar Pulyn" (atualizar-github.ps1)
 param(
     [string]$Ip,
     [string]$EmailMaster,
     [string]$Terceiros,
     [string]$SiteBuild,
     [ValidateSet('', 'Instalar', 'Atualizar')][string]$Modo = '',
+    [string]$MinGitZip,
     [switch]$SemPausa
 )
 . "$PSScriptRoot\config.ps1"
@@ -201,8 +203,19 @@ try {
     & "$PSScriptRoot\04-publicar.ps1" -SemBuild
 
     # ------------------------------------------------------------------ 7
-    Proximo-Passo 'Backup diario'
+    Proximo-Passo 'Backup diario e atualizacao pela internet'
     & "$PSScriptRoot\backup-banco.ps1" -Agendar
+    # Git portatil para o atalho "Atualizar Pulyn" (git pull do GitHub). Sem ele o sistema funciona; so a atualizacao
+    # pela internet fica indisponivel.
+    $gitLocal = Join-Path $Raiz 'git\cmd\git.exe'
+    if ((Test-Path $gitLocal) -or (Get-Command git -ErrorAction SilentlyContinue)) {
+        Escrever-Ok 'Git ja instalado'
+    } elseif ($MinGitZip -and (Test-Path $MinGitZip)) {
+        Expand-Archive -Path $MinGitZip -DestinationPath (Join-Path $Raiz 'git') -Force
+        if (Test-Path $gitLocal) { Escrever-Ok ('Git instalado em ' + (Join-Path $Raiz 'git')) } else { Escrever-Aviso 'nao consegui instalar o Git (a atualizacao pela internet fica indisponivel)' }
+    } else {
+        Escrever-Aviso 'o Git nao veio no pacote: a atualizacao pela internet fica indisponivel'
+    }
 
     $sucesso = $true
     Write-Host ''

@@ -26,7 +26,7 @@ Se o banco ganhou tabelas novas, gere de novo a estrutura antes do commit:
 O arquivo sai em `BackEnd\deploy\instalador\saida\`. O `C:\Pulyn\pacote\VERSAO.txt`, que o setup grava no computador do cliente, mostra a versão, a origem e a branch e o commit de cada repositório. Para gerar, é preciso:
 - **Inno Setup 6** e **git**;
 - os instaladores do Node.js (`node-v*-x64.msi`) e do PostgreSQL 18 (`postgresql-18*-windows-x64.exe`) na pasta Downloads, ou indicados com `-NodeMsi` e `-PostgresExe`;
-- `rewrite_amd64_en-US.msi`, `requestRouter_amd64.msi` e `WinSW-x64.exe` em `C:\Pulyn\instaladores` (ou `-PastaIis`);
+- `rewrite_amd64_en-US.msi`, `requestRouter_amd64.msi`, `WinSW-x64.exe` e o Git portátil `MinGit-*-64-bit.zip` em `C:\Pulyn\instaladores` (ou `-PastaIis`);
 - internet, para baixar do GitHub e para o `npm ci`.
 
 ## As telas do assistente
@@ -34,13 +34,13 @@ O arquivo sai em `BackEnd\deploy\instalador\saida\`. O `C:\Pulyn\pacote\VERSAO.t
 O assistente usa o visual do Pulyn: fundo escuro, logo e mascote. As imagens ficam em `imagens/`. Na segunda tela você escolhe o que fazer:
 
 - **Primeira instalação.** Só aparece liberada se o Pulyn ainda não estiver instalado.
-- **Atualizar.** Só aparece liberada se o Pulyn já estiver instalado.
+- **Atualizar pela internet (GitHub)** e **Atualizar com este instalador (sem internet).** Só aparecem liberadas se o Pulyn já estiver instalado.
 - **Desinstalar.** Aparece liberada se existir alguma coisa do Pulyn no computador.
 
 A tela mostra a situação do computador e a versão instalada.
 
 Para ver as telas sem instalar nada (não pede administrador e não executa nada), compile uma prévia:
-`ISCC.exe /DPrevia /DVersao=previa /DMontagem=<pasta com pacote\BackEnd\deploy\iis\{desinstalar,config,backup-banco}.ps1> Pulyn.iss`
+`ISCC.exe /DPrevia /DVersao=previa /DMontagem=<pasta com pacote\BackEnd\deploy\iis\{desinstalar,atualizar-github,config,backup-banco}.ps1 e extras\MinGit.zip> Pulyn.iss`
 
 ## Instalar no buffet
 
@@ -58,7 +58,17 @@ O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 
 ## Atualizar um buffet já instalado
 
-Rode o setup.exe da versão nova. Se existir `C:\Pulyn\backend\.env`, o assistente não pede senhas. Ele faz backup do banco e publica a versão nova. O banco, o `.env` e o certificado continuam os mesmos. O Node.js e o PostgreSQL não são reinstalados.
+**Pela internet (recomendado).** Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Iniciar. Também dá para rodar o setup e escolher **Atualizar pela internet (GitHub)**. Funciona como o `atualizar.ps1`:
+1. Faz `git pull` da `main` dos dois repositórios em `C:\Pulyn\fonte`. Baixa só o que mudou; na primeira vez, baixa o código todo.
+2. Se o conteúdo não mudou, avisa e para, sem mexer no sistema. Para publicar mesmo assim, use `-Forcar`.
+3. Instala as dependências das telas, só se o `package-lock.json` mudou. Na primeira vez isso leva alguns minutos.
+4. Roda o `atualizar.ps1` que veio do GitHub: backup do banco, compilação das telas e publicação.
+
+O Git portátil fica em `C:\Pulyn\git`. Precisa de internet. O registro fica em `C:\Pulyn\logs\atualizacao-*.log`. Para usar outra branch: `C:\Pulyn\scripts\atualizar-github.ps1 -Branch <nome>`.
+
+**Com o setup, sem internet.** Rode o setup.exe da versão nova e escolha **Atualizar com este instalador**. Ele publica a versão que veio dentro do arquivo.
+
+Nos dois casos, o banco, o `.env`, as senhas e o certificado continuam os mesmos, e o Node.js, o PostgreSQL e o IIS não são reinstalados.
 
 ## Desinstalar
 
@@ -66,7 +76,7 @@ Há dois caminhos:
 - rode o setup.exe e escolha **Desinstalar**, marcando ou não "Apagar também o banco de dados";
 - ou use **Configurações > Aplicativos > Pulyn > Desinstalar**. Esse caminho pergunta se o banco também deve ser apagado, e a resposta padrão é **Não**.
 
-- **Sempre remove:** o serviço `PulynBackend`, o site e o pool `Pulyn` do IIS, o certificado da porta 443, as regras de firewall `Pulyn HTTPS` e `Pulyn HTTP UHF`, a tarefa de backup, os certificados do Pulyn (CA e servidor) e as pastas em `C:\Pulyn`.
+- **Sempre remove:** o serviço `PulynBackend`, o site e o pool `Pulyn` do IIS, o certificado da porta 443, as regras de firewall `Pulyn HTTPS` e `Pulyn HTTP UHF`, a tarefa de backup, os certificados do Pulyn (CA e servidor), o atalho "Atualizar Pulyn" e as pastas em `C:\Pulyn`, incluindo o código baixado (`fonte`) e o Git portátil (`git`).
 - **Banco, se você responder Sim:** faz um backup em `C:\Pulyn\backups` e depois apaga o banco `AdvPulyn`.
 - **Banco, se você responder Não:** o banco fica, e o `C:\Pulyn\backend\.env` também, porque ele guarda a senha do banco. Se você instalar de novo, o sistema volta com os mesmos dados. Os tablets vão precisar do certificado novo.
 - **Não remove nunca:** Node.js, PostgreSQL, os recursos do IIS, URL Rewrite e ARR (podem servir a outros sites, como o `suporte`), nem a pasta `C:\Pulyn\backups`.

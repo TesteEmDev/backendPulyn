@@ -4,10 +4,11 @@
 ; A segunda tela pergunta o que fazer:
 ;   Primeira instalacao: pede IP, senha do postgres e usuario master; copia o pacote para C:\Pulyn\pacote e roda
 ;                        BackEnd\deploy\iis\instalar-tudo.ps1 -Modo Instalar
-;   Atualizar:           copia o pacote e roda instalar-tudo.ps1 -Modo Atualizar (backup do banco e publicacao)
+;   Atualizar pela internet: roda atualizar-github.ps1 (git pull da main do GitHub, so o que mudou, backup e publicacao)
+;   Atualizar com este instalador: copia o pacote e roda instalar-tudo.ps1 -Modo Atualizar (sem internet)
 ;   Desinstalar:         roda desinstalar.ps1 (o banco so e apagado se a pessoa marcar, com backup antes)
 ; Uma janela do PowerShell mostra o andamento. O desinstalador de Configuracoes > Aplicativos faz o mesmo que a opcao
-; Desinstalar.
+; Desinstalar. O atalho "Atualizar Pulyn" (area de trabalho e menu Iniciar) roda C:\Pulyn\scripts\atualizar-github.ps1.
 
 #ifndef Versao
   #define Versao "0.0.0"
@@ -25,6 +26,9 @@ AppPublisher=Pulyn
 DefaultDirName=C:\Pulyn\pacote
 DisableDirPage=yes
 DisableProgramGroupPage=yes
+DefaultGroupName=Pulyn
+SetupIconFile=imagens\pulyn.ico
+UninstallDisplayIcon={app}\pulyn.ico
 #ifdef Previa
 ; Previa (ISCC /DPrevia): so para ver as telas; nao pede administrador e nao executa nada
 PrivilegesRequired=lowest
@@ -59,20 +63,29 @@ FinishedHeadingLabel=Pulyn
 ButtonInstall=&Começar
 
 [Files]
-Source: "{#Montagem}\pacote\*"; Excludes: "\terceiros\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Check: not EhDesinstalacao
+Source: "{#Montagem}\pacote\*"; Excludes: "\terceiros\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Check: CopiarPacote
+Source: "imagens\pulyn.ico"; DestDir: "{app}"; Flags: ignoreversion; Check: not EhDesinstalacao
 ; Instaladores do Node.js, PostgreSQL, URL Rewrite, ARR e WinSW (~380 MB): so na primeira instalacao. Ficam num bloco
 ; comprimido separado (solidbreak) para a atualizacao nem precisar descompacta-los.
 Source: "{#Montagem}\pacote\terceiros\*"; DestDir: "{app}\terceiros"; Flags: ignoreversion solidbreak; Check: EhPrimeiraInstalacao
-; Usados so pela opcao Desinstalar (extraidos para a pasta temporaria do setup)
-Source: "{#Montagem}\pacote\BackEnd\deploy\iis\desinstalar.ps1"; Flags: dontcopy
+; Usados pelas opcoes Desinstalar e Atualizar pela internet (extraidos para a pasta temporaria do setup)
+Source: "{#Montagem}\pacote\BackEnd\deploy\iis\desinstalar.ps1"; Flags: dontcopy solidbreak
+Source: "{#Montagem}\pacote\BackEnd\deploy\iis\atualizar-github.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\config.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\backup-banco.ps1"; Flags: dontcopy
+; Git portatil (MinGit) para a atualizacao pela internet
+Source: "{#Montagem}\extras\MinGit.zip"; Flags: dontcopy solidbreak
+
+[Icons]
+Name: "{commondesktop}\Atualizar Pulyn"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""C:\Pulyn\scripts\atualizar-github.ps1"""; IconFilename: "{app}\pulyn.ico"; Comment: "Baixa do GitHub a versão nova do Pulyn e publica"; Check: not EhDesinstalacao
+Name: "{group}\Atualizar Pulyn"; Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""C:\Pulyn\scripts\atualizar-github.ps1"""; IconFilename: "{app}\pulyn.ico"; Comment: "Baixa do GitHub a versão nova do Pulyn e publica"; Check: not EhDesinstalacao
 
 [Code]
 const
   MODO_INSTALAR = 0;
-  MODO_ATUALIZAR = 1;
-  MODO_DESINSTALAR = 2;
+  MODO_ATUALIZAR_GITHUB = 1;
+  MODO_ATUALIZAR_PACOTE = 2;
+  MODO_DESINSTALAR = 3;
   CHAVE_DESINSTALADOR = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8F3C2B1A-6D4E-4B7F-9A21-5C3E7D9B0F42}_is1';
 
 var
@@ -111,6 +124,17 @@ end;
 function EhPrimeiraInstalacao: Boolean;
 begin
   Result := Modo = MODO_INSTALAR;
+end;
+
+// O pacote (sistema compilado) so e copiado na primeira instalacao e na atualizacao com este instalador.
+function CopiarPacote: Boolean;
+begin
+  Result := (Modo = MODO_INSTALAR) or (Modo = MODO_ATUALIZAR_PACOTE);
+end;
+
+function EhAtualizacao: Boolean;
+begin
+  Result := (Modo = MODO_ATUALIZAR_GITHUB) or (Modo = MODO_ATUALIZAR_PACOTE);
 end;
 
 // IP da placa de rede que tem rota para a rede (o mesmo criterio dos scripts).
@@ -196,13 +220,15 @@ begin
   PaginaModo := CreateInputOptionPage(wpWelcome, 'O que você quer fazer?', Situacao,
     'Escolha uma opção e clique em Avançar.', True, False);
   PaginaModo.Add('Primeira instalação' + #13#10 + 'Instala o Pulyn completo: banco de dados novo, servidor, telas e certificado HTTPS.');
-  PaginaModo.Add('Atualizar' + #13#10 + 'Só publica a versão nova do sistema, com backup do banco antes. Não reinstala Node.js, PostgreSQL nem IIS; dados, senhas e certificado continuam os mesmos.');
+  PaginaModo.Add('Atualizar pela internet (GitHub)' + #13#10 + 'Como o comando atualizar: baixa do GitHub só o que mudou, faz backup do banco e publica. Dados, senhas e certificado continuam os mesmos.');
+  PaginaModo.Add('Atualizar com este instalador (sem internet)' + #13#10 + 'Publica a versão {#Versao} que veio dentro deste arquivo, com backup do banco antes.');
   PaginaModo.Add('Desinstalar' + #13#10 + 'Remove o Pulyn deste computador. O banco de dados só é apagado se você escolher.');
   PaginaModo.CheckListBox.ItemEnabled[MODO_INSTALAR] := not JaInstalado;
-  PaginaModo.CheckListBox.ItemEnabled[MODO_ATUALIZAR] := JaInstalado;
+  PaginaModo.CheckListBox.ItemEnabled[MODO_ATUALIZAR_GITHUB] := JaInstalado;
+  PaginaModo.CheckListBox.ItemEnabled[MODO_ATUALIZAR_PACOTE] := JaInstalado;
   PaginaModo.CheckListBox.ItemEnabled[MODO_DESINSTALAR] := TemRestos;
   if JaInstalado then
-    PaginaModo.SelectedValueIndex := MODO_ATUALIZAR
+    PaginaModo.SelectedValueIndex := MODO_ATUALIZAR_GITHUB
   else
     PaginaModo.SelectedValueIndex := MODO_INSTALAR;
 
@@ -323,7 +349,7 @@ begin
   begin
     if Modo = MODO_DESINSTALAR then
       WizardForm.NextButton.Caption := '&Desinstalar'
-    else if Modo = MODO_ATUALIZAR then
+    else if EhAtualizacao then
       WizardForm.NextButton.Caption := '&Atualizar'
     else
       WizardForm.NextButton.Caption := '&Instalar';
@@ -339,7 +365,12 @@ begin
       WizardForm.FinishedLabel.Caption :=
         'O Pulyn foi removido deste computador.' + #13#10#13#10 +
         'Os backups continuam em C:\Pulyn\backups.'
-    else if Modo = MODO_ATUALIZAR then
+    else if Modo = MODO_ATUALIZAR_GITHUB then
+      WizardForm.FinishedLabel.Caption :=
+        'O Pulyn está com a versão mais nova do GitHub.' + #13#10#13#10 +
+        'Da próxima vez, basta usar o atalho "Atualizar Pulyn" da área de trabalho.' + #13#10 +
+        'Os tablets e as placas continuam funcionando sem mudar nada.'
+    else if Modo = MODO_ATUALIZAR_PACOTE then
       WizardForm.FinishedLabel.Caption :=
         'O Pulyn foi atualizado para a versão {#Versao}.' + #13#10#13#10 +
         'Os tablets e as placas continuam funcionando sem mudar nada.'
@@ -363,9 +394,20 @@ begin
     else
       Result := Result + 'Banco de dados: continua no PostgreSQL';
   end
-  else if Modo = MODO_ATUALIZAR then
+  else if Modo = MODO_ATUALIZAR_GITHUB then
   begin
-    Result := 'ATUALIZAR o Pulyn';
+    Result := 'ATUALIZAR o Pulyn pela internet (GitHub, branch main)';
+    if VersaoInstalada <> '' then Result := Result + NewLine + NewLine + 'Instalada: ' + VersaoInstalada;
+    Result := Result + NewLine + NewLine +
+      'O que acontece:' + NewLine +
+      '- baixa do GitHub só o que mudou (na primeira vez, o código todo);' + NewLine +
+      '- se não houver nada novo, para e avisa;' + NewLine +
+      '- backup do banco, compilação das telas e publicação.' + NewLine + NewLine +
+      'Precisa de internet. Dados, senhas e certificado continuam os mesmos.';
+  end
+  else if Modo = MODO_ATUALIZAR_PACOTE then
+  begin
+    Result := 'ATUALIZAR o Pulyn com este instalador (sem internet)';
     if VersaoInstalada <> '' then Result := Result + NewLine + NewLine + 'Instalada: ' + VersaoInstalada;
     Result := Result + NewLine + 'Nova: Pulyn {#Versao}' + NewLine + NewLine +
       'O que acontece:' + NewLine +
@@ -402,17 +444,37 @@ begin
     DelTree('C:\Pulyn\pacote', True, True, True);
 end;
 
+procedure AtualizarPeloGithub;
+var
+  Parametros: string;
+begin
+  WizardForm.StatusLabel.Caption := 'Atualizando o Pulyn pelo GitHub (acompanhe na janela do PowerShell)...';
+  ExtractTemporaryFile('config.ps1');
+  ExtractTemporaryFile('backup-banco.ps1');
+  ExtractTemporaryFile('atualizar-github.ps1');
+  ExtractTemporaryFile('MinGit.zip');
+  // O atalho "Atualizar Pulyn" usa C:\Pulyn\scripts; instalacoes antigas podem nao ter este script ainda.
+  if DirExists('C:\Pulyn\scripts') and not FileExists('C:\Pulyn\scripts\atualizar-github.ps1') then
+    FileCopy(ExpandConstant('{tmp}\atualizar-github.ps1'), 'C:\Pulyn\scripts\atualizar-github.ps1', True);
+  Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\atualizar-github.ps1') + '"' +
+    ' -MinGitZip "' + ExpandConstant('{tmp}\MinGit.zip') + '"';
+  if not Exec(PowerShell, Parametros, '', SW_SHOW, ewWaitUntilTerminated, CodigoResultado) then
+    CodigoResultado := -1;
+end;
+
 procedure InstalarOuAtualizar;
 var
   Parametros: string;
 begin
-  if Modo = MODO_ATUALIZAR then
+  if Modo = MODO_ATUALIZAR_PACOTE then
     WizardForm.StatusLabel.Caption := 'Atualizando o Pulyn (acompanhe na janela do PowerShell)...'
   else
     WizardForm.StatusLabel.Caption := 'Configurando o Pulyn (acompanhe na janela do PowerShell)...';
   Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\BackEnd\deploy\iis\instalar-tudo.ps1') + '"' +
     ' -Terceiros "' + ExpandConstant('{app}\terceiros') + '"' +
     ' -SiteBuild "' + ExpandConstant('{app}\site-build') + '"';
+  ExtractTemporaryFile('MinGit.zip');
+  Parametros := Parametros + ' -MinGitZip "' + ExpandConstant('{tmp}\MinGit.zip') + '"';
   if Modo = MODO_INSTALAR then
   begin
     // As senhas vao por variavel de ambiente (herdada pelo PowerShell), nunca pela linha de comando.
@@ -436,6 +498,8 @@ begin
 #endif
   if Modo = MODO_DESINSTALAR then
     Desinstalar
+  else if Modo = MODO_ATUALIZAR_GITHUB then
+    AtualizarPeloGithub
   else
     InstalarOuAtualizar;
 end;
