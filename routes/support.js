@@ -15,6 +15,7 @@ const TIPOS_CHECKPOINT = { NFC: 'NFC/RFID', UHF: 'UHF longa distância' };
 const FINALIDADES = { jogo: 'Jogo', pontuacao: 'Pontuação', recepcao: 'Recepção' };
 const MAX_QUANTIDADE_POR_ITEM = 500;
 const MAX_LINHAS = 12;
+const MAX_QUANTIDADE_PULSEIRAS = 5000;
 
 // Valida as linhas da solicitação: [{ tipo, finalidade, quantidade }] → junta quantidades do mesmo tipo e finalidade
 function normalizarItens(bruto) {
@@ -36,6 +37,29 @@ function normalizarItens(bruto) {
   const itens = [...porTipo.values()];
   if (itens.some((i) => i.quantidade > MAX_QUANTIDADE_POR_ITEM)) return { erro: `No máximo ${MAX_QUANTIDADE_POR_ITEM} por tipo e finalidade` };
   return { itens };
+}
+
+// Valida as linhas do pedido de pulseiras: [{ tipo, quantidade }] → junta quantidades do mesmo tipo
+function normalizarItensPulseira(bruto) {
+  if (!Array.isArray(bruto) || bruto.length === 0) return { erro: 'Informe o tipo e a quantidade de pulseiras' };
+  if (bruto.length > MAX_LINHAS) return { erro: `No máximo ${MAX_LINHAS} linhas por solicitação` };
+  const porTipo = new Map();
+  for (const item of bruto) {
+    const tipo = String(item?.tipo || '').trim().toUpperCase();
+    const quantidade = Number(item?.quantidade);
+    if (!TIPOS_CHECKPOINT[tipo]) return { erro: 'Tipo de pulseira inválido' };
+    if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > MAX_QUANTIDADE_PULSEIRAS) {
+      return { erro: `A quantidade deve ser um número inteiro de 1 a ${MAX_QUANTIDADE_PULSEIRAS}` };
+    }
+    porTipo.set(tipo, { tipo, quantidade: (porTipo.get(tipo)?.quantidade || 0) + quantidade });
+  }
+  const itens = [...porTipo.values()];
+  if (itens.some((i) => i.quantidade > MAX_QUANTIDADE_PULSEIRAS)) return { erro: `No máximo ${MAX_QUANTIDADE_PULSEIRAS} pulseiras por tipo` };
+  return { itens };
+}
+
+function resumoDosItensPulseira(itens) {
+  return itens.map((i) => `${i.quantidade} × ${TIPOS_CHECKPOINT[i.tipo]}`).join(', ');
 }
 
 function resumoDosItens(itens) {
@@ -249,6 +273,39 @@ router.post('/solicitar-checkpoints', verifyToken, requireRole('admin'), async (
   }
 });
 
+// Admin do buffet pede pulseiras ao master: chamado do tipo 'pulseira' na mesma fila do suporte
+router.post('/solicitar-pulseiras', verifyToken, requireRole('admin'), async (req, res) => {
+  try {
+    await ensureSupportTable();
+    const { empresaId } = req.user;
+    if (!empresaId) return res.status(400).json({ error: 'Usuário sem empresa vinculada' });
+    const lidos = normalizarItensPulseira(req.body?.itens);
+    if (lidos.erro) return res.status(400).json({ error: lidos.erro });
+    const observacao = String(req.body?.observacao || '').trim().slice(0, 1000);
+
+    const empresa = await queryOne('SELECT nome FROM empresa WHERE empresaId = @empresaId', { empresaId });
+    const id = uuidv4();
+    await query(`
+      INSERT INTO chamadoSuport
+        (ticketId, empresaId, cliente, assunto, status, prioridade, descricao, atribuidoPara, tipoChamado, itens)
+      VALUES
+        (@id, @empresaId, @cliente, @subject, 'aberto', 'media', @description, 'Atribuir', 'pulseira', @itens)
+    `, {
+      id,
+      empresaId,
+      cliente: empresa?.nome || req.user.email || 'Cliente',
+      subject: `Solicitação de pulseiras: ${resumoDosItensPulseira(lidos.itens)}`,
+      description: observacao || null,
+      itens: JSON.stringify(lidos.itens),
+    });
+    const ticket = await queryOne('SELECT * FROM chamadoSuport WHERE ticketId = @id', { id });
+    return res.status(201).json(serializeTicket(ticket));
+  } catch (err) {
+    console.error('❌ Erro ao solicitar pulseiras:', err);
+    return res.status(500).json({ error: 'Não foi possível enviar a solicitação' });
+  }
+});
+
 router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
   try {
     await ensureSupportTable();
@@ -275,4 +332,5 @@ router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
 
 module.exports = router;
 module.exports.normalizarItens = normalizarItens;
+module.exports.normalizarItensPulseira = normalizarItensPulseira;
 module.exports.resumoDosItens = resumoDosItens;

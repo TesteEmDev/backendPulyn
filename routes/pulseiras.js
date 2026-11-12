@@ -23,9 +23,11 @@ router.get('/', verifyToken, async (req, res) => {
       `);
     } else {
       pulseira = await allQuery(`
-        SELECT p.codigo, p.status, p.criancaId, c.nome as crianca_nome, p.empresaId
+        SELECT p.codigo, p.status, p.criancaId, c.nome as crianca_nome, c.apelido as crianca_apelido, p.empresaId,
+               e.nome as evento_nome, p.recebidoDoMasterEm
         FROM pulseira p
         LEFT JOIN crianca c ON p.criancaId = c.criancaId
+        LEFT JOIN evento e ON e.eventoId = c.eventoId
         WHERE p.empresaId = @empresaId
         ORDER BY p.codigo
       `, { empresaId });
