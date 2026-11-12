@@ -133,7 +133,7 @@ router.post('/devolver', async (req, res) => {
       for (const codigo of codigos) {
         const minha = await tx.queryOne(
           `SELECT codigo FROM pulseira
-           WHERE empresaId = @empresaId AND codigo = @codigo AND recebidoDoMasterEm IS NOT NULL AND criancaId IS NULL AND status = 'disponivel'`,
+           WHERE empresaId = @empresaId AND codigo = @codigo AND criancaId IS NULL AND status = 'disponivel'`,
           { empresaId, codigo }
         );
         if (!minha) continue;
