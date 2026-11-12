@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { controleAtivo, MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE } = require('../utils/pulseiraControle');
 const { isAvatarValido } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
@@ -154,7 +155,8 @@ router.get('/bracelets/:codigo', async (req, res) => {
     );
 
     if (!bracelet) {
-      return res.json({ codigo, exists: false, status: null, available: true });
+      // Com o controle do master, pulseira que ninguém forneceu a este cliente não pode ser usada
+      return res.json({ codigo, exists: false, status: null, available: !controleAtivo() });
     }
 
     const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.criancaId;
@@ -213,6 +215,9 @@ async function garantirPulseiraLivre(tx, codigo, empresaId) {
      WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
     { codigo, empresaId }
   );
+  if (!bracelet && controleAtivo()) {
+    throw httpError(MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE, 403);
+  }
   if (!bracelet) {
     await tx.query(
       `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
