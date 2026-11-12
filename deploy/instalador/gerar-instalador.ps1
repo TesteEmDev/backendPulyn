@@ -106,4 +106,9 @@ if (-not (Test-Path $saida)) { New-Item -ItemType Directory -Path $saida | Out-N
 Conferir 'o Inno Setup falhou'
 $exe = Join-Path $saida ('Pulyn-Setup-' + $Versao + '.exe')
 Ok ($exe + ' (' + [math]::Round((Get-Item $exe).Length / 1MB) + ' MB)')
-Remove-Item $montagem -Recurse -Force
+# A pasta de montagem e so temporaria; o antivirus as vezes segura um arquivo por alguns segundos.
+for ($i = 0; $i -lt 5 -and (Test-Path $montagem); $i++) {
+    Start-Sleep -Seconds 2
+    Remove-Item $montagem -Recurse -Force -ErrorAction SilentlyContinue
+}
+if (Test-Path $montagem) { Aviso ('nao consegui apagar ' + $montagem + ' (apague depois; ela e recriada na proxima geracao).') }
