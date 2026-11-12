@@ -39,27 +39,15 @@ function normalizarItens(bruto) {
   return { itens };
 }
 
-// Valida as linhas do pedido de pulseiras: [{ tipo, quantidade }] → junta quantidades do mesmo tipo
-function normalizarItensPulseira(bruto) {
-  if (!Array.isArray(bruto) || bruto.length === 0) return { erro: 'Informe o tipo e a quantidade de pulseiras' };
-  if (bruto.length > MAX_LINHAS) return { erro: `No máximo ${MAX_LINHAS} linhas por solicitação` };
-  const porTipo = new Map();
-  for (const item of bruto) {
-    const tipo = String(item?.tipo || '').trim().toUpperCase();
-    const quantidade = Number(item?.quantidade);
-    if (!TIPOS_CHECKPOINT[tipo]) return { erro: 'Tipo de pulseira inválido' };
-    if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > MAX_QUANTIDADE_PULSEIRAS) {
-      return { erro: `A quantidade deve ser um número inteiro de 1 a ${MAX_QUANTIDADE_PULSEIRAS}` };
-    }
-    porTipo.set(tipo, { tipo, quantidade: (porTipo.get(tipo)?.quantidade || 0) + quantidade });
+// Pedido de pulseiras: as pulseiras são todas iguais, então o pedido é só uma quantidade (1 a MAX_QUANTIDADE_PULSEIRAS).
+// Aceita `quantidade` ou, por compatibilidade, uma lista `itens` de [{ quantidade }] (soma as quantidades).
+function normalizarPedidoPulseiras(corpo) {
+  const bruto = corpo?.quantidade ?? (Array.isArray(corpo?.itens) ? corpo.itens.reduce((soma, i) => soma + Number(i?.quantidade || 0), 0) : undefined);
+  const quantidade = Number(bruto);
+  if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > MAX_QUANTIDADE_PULSEIRAS) {
+    return { erro: `A quantidade deve ser um número inteiro de 1 a ${MAX_QUANTIDADE_PULSEIRAS}` };
   }
-  const itens = [...porTipo.values()];
-  if (itens.some((i) => i.quantidade > MAX_QUANTIDADE_PULSEIRAS)) return { erro: `No máximo ${MAX_QUANTIDADE_PULSEIRAS} pulseiras por tipo` };
-  return { itens };
-}
-
-function resumoDosItensPulseira(itens) {
-  return itens.map((i) => `${i.quantidade} × ${TIPOS_CHECKPOINT[i.tipo]}`).join(', ');
+  return { itens: [{ quantidade }], quantidade };
 }
 
 function resumoDosItens(itens) {
@@ -279,7 +267,7 @@ router.post('/solicitar-pulseiras', verifyToken, requireRole('admin'), async (re
     await ensureSupportTable();
     const { empresaId } = req.user;
     if (!empresaId) return res.status(400).json({ error: 'Usuário sem empresa vinculada' });
-    const lidos = normalizarItensPulseira(req.body?.itens);
+    const lidos = normalizarPedidoPulseiras(req.body);
     if (lidos.erro) return res.status(400).json({ error: lidos.erro });
     const observacao = String(req.body?.observacao || '').trim().slice(0, 1000);
 
@@ -294,7 +282,7 @@ router.post('/solicitar-pulseiras', verifyToken, requireRole('admin'), async (re
       id,
       empresaId,
       cliente: empresa?.nome || req.user.email || 'Cliente',
-      subject: `Solicitação de pulseiras: ${resumoDosItensPulseira(lidos.itens)}`,
+      subject: `Solicitação de pulseiras: ${lidos.quantidade}`,
       description: observacao || null,
       itens: JSON.stringify(lidos.itens),
     });
@@ -332,5 +320,5 @@ router.put('/:id/status', verifyToken, requireMaster, async (req, res) => {
 
 module.exports = router;
 module.exports.normalizarItens = normalizarItens;
-module.exports.normalizarItensPulseira = normalizarItensPulseira;
+module.exports.normalizarPedidoPulseiras = normalizarPedidoPulseiras;
 module.exports.resumoDosItens = resumoDosItens;

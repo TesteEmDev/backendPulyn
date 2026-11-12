@@ -10,12 +10,12 @@ test('o controle de pulseiras vem ligado e só desliga com PULSEIRAS_CONTROLE_MA
   assert.equal(controleAtivo({ PULSEIRAS_CONTROLE_MASTER: ' 0 ' }), false);
 });
 
-test('pedido de pulseiras: valida tipo e quantidade e junta linhas do mesmo tipo', () => {
-  const { normalizarItensPulseira } = require('../routes/support');
-  assert.equal(normalizarItensPulseira([]).erro !== undefined, true);
-  assert.equal(normalizarItensPulseira([{ tipo: 'XYZ', quantidade: 5 }]).erro, 'Tipo de pulseira inválido');
-  assert.equal(normalizarItensPulseira([{ tipo: 'NFC', quantidade: 0 }]).erro !== undefined, true);
-  assert.equal(normalizarItensPulseira([{ tipo: 'NFC', quantidade: 5001 }]).erro !== undefined, true);
-  assert.deepEqual(normalizarItensPulseira([{ tipo: 'nfc', quantidade: 10 }, { tipo: 'NFC', quantidade: 5 }, { tipo: 'UHF', quantidade: 2 }]).itens,
-    [{ tipo: 'NFC', quantidade: 15 }, { tipo: 'UHF', quantidade: 2 }]);
+test('pedido de pulseiras: só a quantidade (1 a 5000), sem tipo', () => {
+  const { normalizarPedidoPulseiras } = require('../routes/support');
+  assert.equal(normalizarPedidoPulseiras({}).erro !== undefined, true);
+  assert.equal(normalizarPedidoPulseiras({ quantidade: 0 }).erro !== undefined, true);
+  assert.equal(normalizarPedidoPulseiras({ quantidade: 5001 }).erro !== undefined, true);
+  assert.equal(normalizarPedidoPulseiras({ quantidade: 2.5 }).erro !== undefined, true);
+  assert.deepEqual(normalizarPedidoPulseiras({ quantidade: '120' }).itens, [{ quantidade: 120 }]);
+  assert.equal(normalizarPedidoPulseiras({ itens: [{ quantidade: 10 }, { quantidade: 5 }] }).quantidade, 15);
 });
