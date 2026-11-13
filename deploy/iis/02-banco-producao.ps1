@@ -9,7 +9,10 @@
 # -BancoLimpo: instalacao de um buffet novo. NAO copia o desenvolvimento: cria o banco so com a estrutura (banco-base.sql),
 # cadastra a empresa da Pulyn e o usuario master (-EmailMaster; a senha vem de PULYN_MASTER_SENHA ou e pedida) e gera o
 # .env sem sincronizacao com a nuvem. Nao precisa do .env de desenvolvimento.
-param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$EmailMaster, [string]$Ip)
+#
+# -Confirmado: com -Recriar, nao pede a confirmacao digitada (o setup.exe ja perguntou na tela dele).
+param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$EmailMaster, [string]$Ip,
+      [switch]$Confirmado)
 . "$PSScriptRoot\config.ps1"
 Exigir-Repo
 
@@ -91,10 +94,12 @@ if ($existe -and $Recriar) {
     & $pgDump @connDestino -Fc -f $seg $BancoProd
     Conferir-Saida 'Falha no backup de seguranca'
     Escrever-Ok $seg
-    Write-Host ''
-    Write-Host ('    Isto vai APAGAR o banco "' + $BancoProd + '" (os dados de producao atuais) e refazer a copia.') -ForegroundColor Yellow
-    $conf = Read-Host ('    Digite APAGAR ' + $BancoProd + ' para confirmar')
-    if ($conf -cne ('APAGAR ' + $BancoProd)) { Write-Host 'Cancelado, nada foi apagado.'; return }
+    if (-not $Confirmado) {
+        Write-Host ''
+        Write-Host ('    Isto vai APAGAR o banco "' + $BancoProd + '" (os dados de producao atuais) e refazer a copia.') -ForegroundColor Yellow
+        $conf = Read-Host ('    Digite APAGAR ' + $BancoProd + ' para confirmar')
+        if ($conf -cne ('APAGAR ' + $BancoProd)) { Write-Host 'Cancelado, nada foi apagado.'; return }
+    }
     Rodar-Sql 'postgres' ('select pg_terminate_backend(pid) from pg_stat_activity where datname = ''' + $BancoProd + ''' and pid <> pg_backend_pid(); drop database "' + $BancoProd + '";')
     Escrever-Ok 'banco antigo removido'
 }

@@ -21,8 +21,13 @@ $sucesso = $false
 $avisos = 0
 
 # Cada etapa continua mesmo que outra falhe: a ideia e tirar o maximo possivel e dizer o que sobrou.
+# Etapas numeradas: o setup.exe usa o [n/total] para a barra de progresso.
+$totalEtapas = if ($ApagarBanco) { 7 } else { 6 }
+$etapa = 0
 function Etapa($texto, [scriptblock]$acao) {
-    Escrever-Passo $texto
+    $script:etapa++
+    Write-Host ''
+    Write-Host ('[' + $script:etapa + '/' + $totalEtapas + '] ' + $texto) -ForegroundColor Cyan
     try { & $acao } catch { $script:avisos++; Escrever-Aviso ($_.Exception.Message) }
 }
 

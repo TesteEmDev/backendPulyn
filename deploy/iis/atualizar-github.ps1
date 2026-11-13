@@ -38,6 +38,13 @@ $log = Join-Path $Logs ('atualizacao-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + 
 Start-Transcript -Path $log -Append | Out-Null
 $fonte = Join-Path $Raiz 'fonte'
 $sucesso = $false
+# Etapas numeradas: o setup.exe usa o [n/4] para a barra de progresso.
+$passo = 0
+function Proximo-Passo($texto) {
+    $script:passo++
+    Write-Host ''
+    Write-Host ('[' + $script:passo + '/4] ' + $texto) -ForegroundColor Magenta
+}
 
 function Achar-Git {
     $local = Join-Path $Raiz 'git\cmd\git.exe'
@@ -89,7 +96,7 @@ try {
     Write-Host ('Registro: ' + $log)
     if (-not (Test-Path (Join-Path $Backend '.env'))) { throw 'O Pulyn nao esta instalado neste computador (falta C:\Pulyn\backend\.env). Use a Primeira instalacao do setup.' }
 
-    Escrever-Passo 'Git'
+    Proximo-Passo 'Preparando o Git'
     $git = Achar-Git
     if (-not $git) {
         if (-not $MinGitZip -or -not (Test-Path $MinGitZip)) { throw 'O Git nao esta instalado. Rode o setup do Pulyn e escolha "Atualizar pela internet" (ele instala o Git).' }
@@ -99,7 +106,7 @@ try {
     }
     Escrever-Ok ((& $git --version) + ' em ' + $git)
 
-    Escrever-Passo 'Buscando as mudancas no GitHub'
+    Proximo-Passo 'Buscando as mudancas no GitHub'
     if (-not (Test-Path $fonte)) { New-Item -ItemType Directory -Path $fonte | Out-Null }
     $back = Sincronizar $git (Join-Path $fonte 'BackEnd') $RepoBackUrl
     $front = Sincronizar $git (Join-Path $fonte 'FrontEnd') $RepoFrontUrl
@@ -116,7 +123,7 @@ try {
     $atualizarRepo = Join-Path $fonte 'BackEnd\deploy\iis\atualizar.ps1'
     if (-not (Test-Path $atualizarRepo)) { throw ('A branch ' + $Branch + ' do GitHub nao tem deploy\iis\atualizar.ps1.') }
 
-    Escrever-Passo 'Dependencias das telas'
+    Proximo-Passo 'Dependencias das telas'
     $repoFront = Join-Path $fonte 'FrontEnd'
     $lock = Join-Path $repoFront 'package-lock.json'
     $marca = Join-Path $repoFront 'node_modules\.pulyn-lock-hash'
@@ -136,6 +143,7 @@ try {
     }
 
     # Backup do banco + build das telas + publicacao, com os scripts que vieram do GitHub.
+    Proximo-Passo 'Backup do banco e publicacao'
     & $atualizarRepo
 
     $pacote = Join-Path $Raiz 'pacote'

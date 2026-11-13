@@ -35,6 +35,10 @@ if ($RepoRaiz -and -not (Test-Path (Join-Path $RepoRaiz 'BackEnd\index.js'))) { 
 $RepoBackend  = if ($RepoRaiz) { Join-Path $RepoRaiz 'BackEnd' } else { $null }
 $RepoFront    = if ($RepoRaiz) { Join-Path $RepoRaiz 'FrontEnd' } else { $null }
 
+# Saida capturada (o setup.exe roda os scripts escondidos e mostra o andamento na propria tela): UTF-8, para os acentos
+# das mensagens do Windows chegarem certos.
+try { if ([Console]::IsOutputRedirected) { [Console]::OutputEncoding = New-Object Text.UTF8Encoding $false } } catch { }
+
 function Exigir-Admin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {

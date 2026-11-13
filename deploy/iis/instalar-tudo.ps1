@@ -21,6 +21,8 @@
 #   PULYN_MASTER_SENHA    senha do usuario master
 #   -Modo          Instalar ou Atualizar (o que a pessoa escolheu no setup). Sem ele, decide sozinho pelo .env.
 #   -MinGitZip     MinGit (.zip): instala o Git em C:\Pulyn\git, usado pelo atalho "Atualizar Pulyn" (atualizar-github.ps1)
+#   -RecriarBanco  se o banco ja existir (instalacao que parou no meio), recria sem pedir a confirmacao digitada: o setup
+#                  ja perguntou na tela dele. Sem esta opcao a confirmacao e pedida no console.
 param(
     [string]$Ip,
     [string]$EmailMaster,
@@ -28,6 +30,7 @@ param(
     [string]$SiteBuild,
     [ValidateSet('', 'Instalar', 'Atualizar')][string]$Modo = '',
     [string]$MinGitZip,
+    [switch]$RecriarBanco,
     [switch]$SemPausa
 )
 . "$PSScriptRoot\config.ps1"
@@ -168,7 +171,8 @@ try {
         try { $bancoExiste = & $psql -h localhost -p 5432 -U postgres -d postgres -At -c ("select 1 from pg_database where datname = '" + $BancoProd + "'") 2>$null } catch { $bancoExiste = $null } finally { $env:PGPASSWORD = $null }
         if ($bancoExiste -eq '1') {
             Escrever-Aviso ('o banco ' + $BancoProd + ' ja existe, mas o Pulyn nao terminou de ser instalado. Ele sera recriado vazio.')
-            & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Recriar -EmailMaster $EmailMaster -Ip $Ip
+            if ($RecriarBanco) { & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Recriar -Confirmado -EmailMaster $EmailMaster -Ip $Ip }
+            else { & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Recriar -EmailMaster $EmailMaster -Ip $Ip }
         } else {
             & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -EmailMaster $EmailMaster -Ip $Ip
         }

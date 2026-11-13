@@ -7,8 +7,9 @@
 ;   Atualizar pela internet: roda atualizar-github.ps1 (git pull da main do GitHub, so o que mudou, backup e publicacao)
 ;   Atualizar com este instalador: copia o pacote e roda instalar-tudo.ps1 -Modo Atualizar (sem internet)
 ;   Desinstalar:         roda desinstalar.ps1 (o banco so e apagado se a pessoa marcar, com backup antes)
-; Uma janela do PowerShell mostra o andamento. O desinstalador de Configuracoes > Aplicativos faz o mesmo que a opcao
-; Desinstalar. O atalho "Atualizar Pulyn" (area de trabalho e menu Iniciar) roda C:\Pulyn\scripts\atualizar-github.ps1.
+; Os scripts rodam escondidos (sem janela do PowerShell): o andamento aparece na propria tela do setup (etapa, barra de
+; progresso e detalhes), a partir das linhas "[n/total] etapa" e "ERRO: ..." que eles escrevem. O desinstalador de
+; Configuracoes > Aplicativos faz o mesmo que a opcao Desinstalar. O atalho "Atualizar Pulyn" (area de trabalho e menu Iniciar) roda C:\Pulyn\scripts\atualizar-github.ps1.
 
 #ifndef Versao
   #define Versao "0.0.0"
@@ -99,6 +100,14 @@ var
   PgInstalado: Boolean;
   VersaoInstalada: string;
   CodigoResultado: Integer;
+  // Banco AdvPulyn que sobrou de uma instalacao que parou no meio: a pessoa confirmou que ele pode ser recriado.
+  RecriarBanco: Boolean;
+  // Andamento dos scripts (lido da saida deles)
+  MemoDetalhes: TNewMemo;
+  UltimoErro: string;
+  UltimoAviso: string;
+  ArquivoRegistro: string;
+  SemMudancas: Boolean;
 
 function SetEnvironmentVariable(lpName: string; lpValue: string): Boolean;
   external 'SetEnvironmentVariableW@kernel32.dll stdcall';
@@ -106,6 +115,133 @@ function SetEnvironmentVariable(lpName: string; lpValue: string): Boolean;
 function PowerShell: string;
 begin
   Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;
+
+// ---------------------------------------------------------------- andamento dos scripts
+// Os scripts sao ASCII (sem acentos); aqui os titulos das etapas ganham o texto da tela.
+function TituloPasso(Texto: string): string;
+begin
+  Result := Texto;
+  // instalar-tudo.ps1
+  if Texto = 'Conferindo o Node.js e o PostgreSQL (ja instalados)' then Result := 'Conferindo o Node.js e o PostgreSQL'
+  else if Texto = 'Node.js e PostgreSQL' then Result := 'Instalando o Node.js e o PostgreSQL'
+  else if Texto = 'Backup do banco antes de atualizar (os dados nao sao alterados)' then Result := 'Fazendo o backup do banco de dados'
+  else if Texto = 'Certificado HTTPS (o atual continua valendo)' then Result := 'Conferindo o certificado HTTPS'
+  else if Texto = 'Certificado HTTPS' then Result := 'Gerando o certificado HTTPS'
+  else if Texto = 'Publicando a versao nova' then Result := 'Publicando a versão nova'
+  else if Texto = 'Backup diario e atualizacao pela internet' then Result := 'Configurando o backup diário e a atualização pela internet'
+  // atualizar-github.ps1
+  else if Texto = 'Buscando as mudancas no GitHub' then Result := 'Buscando as mudanças no GitHub'
+  else if Texto = 'Dependencias das telas' then Result := 'Instalando as dependências das telas'
+  else if Texto = 'Backup do banco e publicacao' then Result := 'Backup do banco, compilação das telas e publicação'
+  // desinstalar.ps1
+  else if Texto = 'Parando o servico PulynBackend' then Result := 'Parando o serviço PulynBackend'
+  else if Texto = 'Banco de dados: backup e remocao' then Result := 'Fazendo o backup e apagando o banco de dados'
+  else if Texto = 'Removendo o servico' then Result := 'Removendo o serviço';
+end;
+
+// Linha "[n/total] titulo" = comeco de uma etapa.
+function LerPasso(Linha: string; var N, Total: Integer; var Titulo: string): Boolean;
+var
+  Fecha, Barra: Integer;
+begin
+  Result := False;
+  if (Length(Linha) < 6) or (Linha[1] <> '[') then Exit;
+  Fecha := Pos('] ', Linha);
+  Barra := Pos('/', Linha);
+  if (Fecha = 0) or (Barra < 3) or (Barra > Fecha) then Exit;
+  N := StrToIntDef(Copy(Linha, 2, Barra - 2), 0);
+  Total := StrToIntDef(Copy(Linha, Barra + 1, Fecha - Barra - 1), 0);
+  if (N < 1) or (Total < N) then Exit;
+  Titulo := TituloPasso(Trim(Copy(Linha, Fecha + 2, Length(Linha))));
+  Result := True;
+end;
+
+// Erros, avisos e o arquivo de registro que o script informou.
+procedure GuardarInformacoes(Linha: string);
+begin
+  if Copy(Linha, 1, 6) = 'ERRO: ' then
+    UltimoErro := Trim(Copy(Linha, 7, Length(Linha)))
+  else if Copy(Linha, 1, 9) = 'atencao: ' then
+    UltimoAviso := Trim(Copy(Linha, 10, Length(Linha)))
+  else if (Copy(Linha, 1, 9) = 'Registro:') or (Copy(Linha, 1, 26) = 'Registro desta instalacao:') then
+    ArquivoRegistro := Trim(Copy(Linha, Pos(':', Linha) + 1, Length(Linha)))
+  else if Pos('ja esta na versao mais nova', Linha) > 0 then
+    SemMudancas := True;
+end;
+
+// Chamado a cada linha que o PowerShell escreve, enquanto ele roda.
+procedure AoReceberLinha(const S: String; const Error, FirstLine: Boolean);
+var
+  Linha, Titulo: string;
+  N, Total: Integer;
+begin
+  Linha := Trim(S);
+  if Linha = '' then Exit;
+  Log('PowerShell: ' + Linha);
+  MemoDetalhes.Lines.Add(TrimRight(S));
+  SendMessage(MemoDetalhes.Handle, $0115 { WM_VSCROLL }, 7 { SB_BOTTOM }, 0);
+  if LerPasso(Linha, N, Total, Titulo) then
+  begin
+    WizardForm.StatusLabel.Caption := Titulo + ' (etapa ' + IntToStr(N) + ' de ' + IntToStr(Total) + ')';
+    WizardForm.FilenameLabel.Caption := '';
+    WizardForm.ProgressGauge.Style := npbstNormal;
+    WizardForm.ProgressGauge.Min := 0;
+    WizardForm.ProgressGauge.Max := Total;
+    WizardForm.ProgressGauge.Position := N - 1;
+    Exit;
+  end;
+  GuardarInformacoes(Linha);
+  if Length(Linha) > 110 then Linha := Copy(Linha, 1, 107) + '...';
+  WizardForm.FilenameLabel.Caption := Linha;
+end;
+
+// Roda um script do Pulyn sem janela; o andamento aparece na tela do setup.
+procedure RodarPowerShell(Parametros, Status: string);
+begin
+  UltimoErro := '';
+  UltimoAviso := '';
+  ArquivoRegistro := '';
+  SemMudancas := False;
+  WizardForm.StatusLabel.Caption := Status;
+  WizardForm.FilenameLabel.Caption := '';
+  WizardForm.ProgressGauge.Style := npbstMarquee;
+  MemoDetalhes.Lines.Clear;
+  MemoDetalhes.Visible := True;
+  try
+    // -NonInteractive: se algum script tentar perguntar algo, ele para com erro em vez de esperar para sempre.
+    if not ExecAndLogOutput(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass ' + Parametros, '',
+      SW_HIDE, ewWaitUntilTerminated, CodigoResultado, @AoReceberLinha) then
+    begin
+      UltimoErro := 'Não consegui iniciar o PowerShell (' + SysErrorMessage(CodigoResultado) + ').';
+      CodigoResultado := -1;
+    end;
+  except
+    UltimoErro := GetExceptionMessage;
+    CodigoResultado := -1;
+  end;
+  WizardForm.ProgressGauge.Style := npbstNormal;
+  if CodigoResultado = 0 then
+    WizardForm.ProgressGauge.Position := WizardForm.ProgressGauge.Max;
+end;
+
+// Senha do postgres certa? E o banco AdvPulyn ja existe? (so quando o PostgreSQL ja esta instalado)
+function ConferirPostgres(Senha: string; var BancoExiste: Boolean): Boolean;
+var
+  Arquivo: string;
+  Codigo: Integer;
+  Texto: AnsiString;
+begin
+  Arquivo := ExpandConstant('{tmp}\pg-banco.txt');
+  DeleteFile(Arquivo);
+  SetEnvironmentVariable('PGPASSWORD', Senha);
+  Result := Exec(ExpandConstant('{commonpf64}\PostgreSQL\18\bin\psql.exe'),
+    '-h localhost -p 5432 -U postgres -d postgres -w -At -o "' + Arquivo + '" -c "select 1 from pg_database where datname = ''AdvPulyn''"',
+    '', SW_HIDE, ewWaitUntilTerminated, Codigo) and (Codigo = 0);
+  SetEnvironmentVariable('PGPASSWORD', '');
+  BancoExiste := False;
+  if Result and LoadStringFromFile(Arquivo, Texto) then
+    BancoExiste := Trim(String(Texto)) = '1';
 end;
 
 function Modo: Integer;
@@ -267,6 +403,20 @@ begin
     False, False);
   PaginaRemover.Add('Apagar também o banco de dados (crianças, eventos, pulseiras, pontuação). Um backup é feito antes, em C:\Pulyn\backups.');
   PaginaRemover.Values[0] := False;
+
+  // ---- detalhes do andamento (abaixo da barra de progresso)
+  MemoDetalhes := TNewMemo.Create(WizardForm);
+  MemoDetalhes.Parent := WizardForm.InstallingPage;
+  MemoDetalhes.Left := WizardForm.ProgressGauge.Left;
+  MemoDetalhes.Width := WizardForm.ProgressGauge.Width;
+  MemoDetalhes.Top := WizardForm.ProgressGauge.Top + WizardForm.ProgressGauge.Height + ScaleY(16);
+  MemoDetalhes.Height := WizardForm.InstallingPage.Height - MemoDetalhes.Top;
+  MemoDetalhes.Anchors := [akLeft, akTop, akRight, akBottom];
+  MemoDetalhes.ReadOnly := True;
+  MemoDetalhes.ScrollBars := ssVertical;
+  MemoDetalhes.Font.Name := 'Consolas';
+  MemoDetalhes.Font.Size := 8;
+  MemoDetalhes.Visible := False;
 end;
 
 function ShouldSkipPage(PageID: Integer): Boolean;
@@ -279,6 +429,8 @@ begin
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  BancoExiste: Boolean;
 begin
   Result := True;
   if CurPageID = PaginaModo.ID then
@@ -314,6 +466,24 @@ begin
     begin
       MsgBox('A senha do postgres não pode ter aspas (").', mbError, MB_OK);
       Result := False;
+    end
+    else if PgInstalado then
+    begin
+      // Confere agora, antes de comecar: senha errada e o erro mais comum.
+      RecriarBanco := False;
+      if not ConferirPostgres(PaginaPg.Values[0], BancoExiste) then
+      begin
+        MsgBox('Não consegui entrar no PostgreSQL com essa senha.' + #13#10#13#10 +
+          'Confira a senha do usuário "postgres" e se o serviço do PostgreSQL está rodando.', mbError, MB_OK);
+        Result := False;
+      end
+      else if BancoExiste then
+      begin
+        RecriarBanco := MsgBox('Já existe um banco de dados AdvPulyn neste computador, de uma instalação do Pulyn que não terminou.' + #13#10#13#10 +
+          'Para continuar, ele será APAGADO e criado de novo, vazio. Antes é feito um backup em C:\Pulyn\backups.' + #13#10#13#10 +
+          'Continuar?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+        Result := RecriarBanco;
+      end;
     end;
   end
   else if CurPageID = PaginaMaster.ID then
@@ -344,6 +514,8 @@ begin
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
+var
+  Motivo: string;
 begin
   if CurPageID = wpReady then
   begin
@@ -357,10 +529,22 @@ begin
   else if CurPageID = wpFinished then
   begin
     if CodigoResultado <> 0 then
+    begin
+      Motivo := '';
+      if UltimoErro <> '' then
+        Motivo := 'Motivo: ' + UltimoErro + #13#10#13#10
+      else if UltimoAviso <> '' then
+        Motivo := 'Aviso: ' + UltimoAviso + #13#10#13#10;
+      if ArquivoRegistro = '' then
+        ArquivoRegistro := 'C:\Pulyn\logs';
       WizardForm.FinishedLabel.Caption :=
-        'A operação NÃO terminou.' + #13#10#13#10 +
-        'O motivo aparece na janela do PowerShell e no registro (C:\Pulyn\logs\instalacao-*.log ou %TEMP%\pulyn-desinstalacao-*.log).' + #13#10#13#10 +
-        'Corrija o problema e rode este instalador de novo: o que já foi feito é reaproveitado.'
+        'A operação NÃO terminou.' + #13#10#13#10 + Motivo +
+        'Registro completo: ' + ArquivoRegistro + #13#10#13#10 +
+        'Corrija o problema e rode este instalador de novo: o que já foi feito é reaproveitado.';
+    end
+    else if (Modo = MODO_ATUALIZAR_GITHUB) and SemMudancas then
+      WizardForm.FinishedLabel.Caption :=
+        'O Pulyn já estava na versão mais nova do GitHub. Nada foi alterado.'
     else if Modo = MODO_DESINSTALAR then
       WizardForm.FinishedLabel.Caption :=
         'O Pulyn foi removido deste computador.' + #13#10#13#10 +
@@ -416,10 +600,14 @@ begin
       'Não são reinstalados: Node.js, PostgreSQL, IIS. Dados, senhas e certificado continuam os mesmos.';
   end
   else
+  begin
     Result := 'PRIMEIRA INSTALAÇÃO do Pulyn {#Versao}' + NewLine + NewLine +
       'Endereço do sistema: https://' + PaginaIp.Values[0] + NewLine +
-      'Usuário master: ' + PaginaMaster.Values[0] + NewLine + NewLine +
-      'Uma janela do PowerShell vai mostrar cada etapa. Pode levar de 5 a 20 minutos.';
+      'Usuário master: ' + PaginaMaster.Values[0];
+    if RecriarBanco then
+      Result := Result + NewLine + 'Banco de dados: o AdvPulyn que já existe será recriado vazio (backup antes)';
+    Result := Result + NewLine + NewLine + 'O andamento aparece nesta janela. Pode levar de 5 a 20 minutos.';
+  end;
 end;
 
 procedure Desinstalar;
@@ -427,15 +615,13 @@ var
   Parametros, Desinstalador: string;
   Codigo: Integer;
 begin
-  WizardForm.StatusLabel.Caption := 'Removendo o Pulyn (acompanhe na janela do PowerShell)...';
   ExtractTemporaryFile('config.ps1');
   ExtractTemporaryFile('backup-banco.ps1');
   ExtractTemporaryFile('desinstalar.ps1');
-  Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\desinstalar.ps1') + '" -Sim';
+  Parametros := '-File "' + ExpandConstant('{tmp}\desinstalar.ps1') + '" -Sim -SemPausa';
   if PaginaRemover.Values[0] then
     Parametros := Parametros + ' -ApagarBanco';
-  if not Exec(PowerShell, Parametros, '', SW_SHOW, ewWaitUntilTerminated, CodigoResultado) then
-    CodigoResultado := -1;
+  RodarPowerShell(Parametros, 'Removendo o Pulyn...');
   // Tira o pacote e o registro em Aplicativos, se o Pulyn foi instalado por um setup (o desinstalador silencioso nao
   // roda o desinstalar.ps1 de novo).
   if RegQueryStringValue(HKLM, CHAVE_DESINSTALADOR, 'UninstallString', Desinstalador) then
@@ -448,7 +634,6 @@ procedure AtualizarPeloGithub;
 var
   Parametros: string;
 begin
-  WizardForm.StatusLabel.Caption := 'Atualizando o Pulyn pelo GitHub (acompanhe na janela do PowerShell)...';
   ExtractTemporaryFile('config.ps1');
   ExtractTemporaryFile('backup-banco.ps1');
   ExtractTemporaryFile('atualizar-github.ps1');
@@ -456,21 +641,16 @@ begin
   // O atalho "Atualizar Pulyn" usa C:\Pulyn\scripts; instalacoes antigas podem nao ter este script ainda.
   if DirExists('C:\Pulyn\scripts') and not FileExists('C:\Pulyn\scripts\atualizar-github.ps1') then
     FileCopy(ExpandConstant('{tmp}\atualizar-github.ps1'), 'C:\Pulyn\scripts\atualizar-github.ps1', True);
-  Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\atualizar-github.ps1') + '"' +
-    ' -MinGitZip "' + ExpandConstant('{tmp}\MinGit.zip') + '"';
-  if not Exec(PowerShell, Parametros, '', SW_SHOW, ewWaitUntilTerminated, CodigoResultado) then
-    CodigoResultado := -1;
+  Parametros := '-File "' + ExpandConstant('{tmp}\atualizar-github.ps1') + '"' +
+    ' -MinGitZip "' + ExpandConstant('{tmp}\MinGit.zip') + '" -SemPausa';
+  RodarPowerShell(Parametros, 'Atualizando o Pulyn pelo GitHub...');
 end;
 
 procedure InstalarOuAtualizar;
 var
-  Parametros: string;
+  Parametros, Status: string;
 begin
-  if Modo = MODO_ATUALIZAR_PACOTE then
-    WizardForm.StatusLabel.Caption := 'Atualizando o Pulyn (acompanhe na janela do PowerShell)...'
-  else
-    WizardForm.StatusLabel.Caption := 'Configurando o Pulyn (acompanhe na janela do PowerShell)...';
-  Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\BackEnd\deploy\iis\instalar-tudo.ps1') + '"' +
+  Parametros := '-File "' + ExpandConstant('{app}\BackEnd\deploy\iis\instalar-tudo.ps1') + '" -SemPausa' +
     ' -Terceiros "' + ExpandConstant('{app}\terceiros') + '"' +
     ' -SiteBuild "' + ExpandConstant('{app}\site-build') + '"';
   ExtractTemporaryFile('MinGit.zip');
@@ -481,11 +661,16 @@ begin
     SetEnvironmentVariable('PULYN_PG_ADMIN_SENHA', PaginaPg.Values[0]);
     SetEnvironmentVariable('PULYN_MASTER_SENHA', PaginaMaster.Values[1]);
     Parametros := Parametros + ' -Modo Instalar -Ip ' + PaginaIp.Values[0] + ' -EmailMaster "' + PaginaMaster.Values[0] + '"';
+    if RecriarBanco then
+      Parametros := Parametros + ' -RecriarBanco';
+    Status := 'Instalando o Pulyn...';
   end
   else
+  begin
     Parametros := Parametros + ' -Modo Atualizar';
-  if not Exec(PowerShell, Parametros, '', SW_SHOW, ewWaitUntilTerminated, CodigoResultado) then
-    CodigoResultado := -1;
+    Status := 'Atualizando o Pulyn...';
+  end;
+  RodarPowerShell(Parametros, Status);
   SetEnvironmentVariable('PULYN_PG_ADMIN_SENHA', '');
   SetEnvironmentVariable('PULYN_MASTER_SENHA', '');
 end;
@@ -505,11 +690,30 @@ begin
 end;
 
 // ---------------------------------------------------------------- desinstalador (Configuracoes > Aplicativos)
+procedure AoReceberLinhaDesinstalacao(const S: String; const Error, FirstLine: Boolean);
+var
+  Linha, Titulo: string;
+  N, Total: Integer;
+begin
+  Linha := Trim(S);
+  if Linha = '' then Exit;
+  Log('PowerShell: ' + Linha);
+  if LerPasso(Linha, N, Total, Titulo) then
+  begin
+    UninstallProgressForm.StatusLabel.Caption := Titulo + ' (etapa ' + IntToStr(N) + ' de ' + IntToStr(Total) + ')';
+    UninstallProgressForm.ProgressBar.Min := 0;
+    UninstallProgressForm.ProgressBar.Max := Total;
+    UninstallProgressForm.ProgressBar.Position := N - 1;
+  end
+  else
+    GuardarInformacoes(Linha);
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
-  Parametros: string;
+  Parametros, Mensagem: string;
   Codigo: Integer;
-  ApagarBanco: Boolean;
+  ApagarBanco, Rodou: Boolean;
 begin
   if CurUninstallStep <> usUninstall then Exit;
   // Silencioso = chamado pela opcao Desinstalar do setup, que ja removeu tudo; aqui so sai o pacote e o registro.
@@ -518,10 +722,28 @@ begin
     'Sim: antes é feito um backup em C:\Pulyn\backups e depois o banco é apagado.' + #13#10 +
     'Não: o banco fica no PostgreSQL. Instalando o Pulyn de novo, o sistema volta com os mesmos dados.',
     mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
-  Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\BackEnd\deploy\iis\desinstalar.ps1') + '" -Sim';
+  Parametros := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\BackEnd\deploy\iis\desinstalar.ps1') + '" -Sim -SemPausa';
   if ApagarBanco then
     Parametros := Parametros + ' -ApagarBanco';
-  if (not Exec(ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'), Parametros, '', SW_SHOW, ewWaitUntilTerminated, Codigo)) or (Codigo <> 0) then
-    MsgBox('A remoção do Pulyn terminou com avisos. Veja a janela do PowerShell ou o registro pulyn-desinstalacao-*.log na pasta temporária do Windows (%TEMP%).',
-      mbInformation, MB_OK);
+  UltimoErro := '';
+  UltimoAviso := '';
+  ArquivoRegistro := '';
+  UninstallProgressForm.StatusLabel.Caption := 'Removendo o Pulyn...';
+  try
+    Rodou := ExecAndLogOutput(PowerShell, Parametros, '', SW_HIDE, ewWaitUntilTerminated, Codigo, @AoReceberLinhaDesinstalacao);
+  except
+    Rodou := False;
+    UltimoErro := GetExceptionMessage;
+  end;
+  if (not Rodou) or (Codigo <> 0) then
+  begin
+    Mensagem := 'A remoção do Pulyn terminou com avisos.';
+    if UltimoErro <> '' then
+      Mensagem := Mensagem + #13#10#13#10 + 'Motivo: ' + UltimoErro
+    else if UltimoAviso <> '' then
+      Mensagem := Mensagem + #13#10#13#10 + 'Aviso: ' + UltimoAviso;
+    if ArquivoRegistro <> '' then
+      Mensagem := Mensagem + #13#10#13#10 + 'Registro completo: ' + ArquivoRegistro;
+    MsgBox(Mensagem, mbInformation, MB_OK);
+  end;
 end;
