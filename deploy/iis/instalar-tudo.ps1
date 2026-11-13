@@ -23,6 +23,7 @@
 #   -MinGitZip     MinGit (.zip): instala o Git em C:\Pulyn\git, usado pelo atalho "Atualizar Pulyn" (atualizar-github.ps1)
 #   -RecriarBanco  se o banco ja existir (instalacao que parou no meio), recria sem pedir a confirmacao digitada: o setup
 #                  ja perguntou na tela dele. Sem esta opcao a confirmacao e pedida no console.
+#   -FixarIp       deixa o -Ip fixo no Windows (fixar-ip.ps1: desliga o DHCP da placa, mantendo mascara, gateway e DNS)
 param(
     [string]$Ip,
     [string]$EmailMaster,
@@ -31,6 +32,7 @@ param(
     [ValidateSet('', 'Instalar', 'Atualizar')][string]$Modo = '',
     [string]$MinGitZip,
     [switch]$RecriarBanco,
+    [switch]$FixarIp,
     [switch]$SemPausa
 )
 . "$PSScriptRoot\config.ps1"
@@ -85,6 +87,8 @@ try {
     if (-not $Ip) { $Ip = Obter-IpLan }
     if ($Ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { throw ('IP invalido: ' + $Ip) }
     Escrever-Ok ('Windows com IIS; IP do servidor: ' + $Ip)
+    # Antes de tudo: o certificado e o endereco do sistema usam este IP.
+    if ($FixarIp -and -not $atualizacao) { & "$PSScriptRoot\fixar-ip.ps1" -Ip $Ip }
 
     # ------------------------------------------------------------------ 2
     Atualizar-Path

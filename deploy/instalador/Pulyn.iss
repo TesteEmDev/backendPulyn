@@ -100,6 +100,8 @@ var
   PaginaPg: TInputQueryWizardPage;
   PaginaMaster: TInputQueryWizardPage;
   PaginaRemover: TInputOptionWizardPage;
+  CaixaFixarIp: TNewCheckBox;
+  NotaFixarIp: TNewStaticText;
   JaInstalado: Boolean;
   TemRestos: Boolean;
   PgInstalado: Boolean;
@@ -377,6 +379,25 @@ begin
     'Tablets, celulares e placas vão acessar o sistema por este endereço (https://IP). Ele precisa estar reservado no roteador para não mudar.');
   PaginaIp.Add('IP do servidor:', False);
   PaginaIp.Values[0] := DetectarIp;
+  CaixaFixarIp := TNewCheckBox.Create(PaginaIp);
+  CaixaFixarIp.Parent := PaginaIp.Surface;
+  CaixaFixarIp.Left := PaginaIp.Edits[0].Left;
+  CaixaFixarIp.Top := PaginaIp.Edits[0].Top + PaginaIp.Edits[0].Height + ScaleY(16);
+  CaixaFixarIp.Width := PaginaIp.SurfaceWidth - CaixaFixarIp.Left;
+  CaixaFixarIp.Height := ScaleY(20);
+  CaixaFixarIp.Caption := 'Fixar este IP nas configurações de rede do Windows';
+  CaixaFixarIp.Checked := False;
+  NotaFixarIp := TNewStaticText.Create(PaginaIp);
+  NotaFixarIp.Parent := PaginaIp.Surface;
+  NotaFixarIp.Left := CaixaFixarIp.Left + ScaleX(18);
+  NotaFixarIp.Top := CaixaFixarIp.Top + CaixaFixarIp.Height + ScaleY(4);
+  NotaFixarIp.Width := PaginaIp.SurfaceWidth - NotaFixarIp.Left;
+  NotaFixarIp.AutoSize := False;
+  NotaFixarIp.WordWrap := True;
+  NotaFixarIp.Height := ScaleY(80);
+  NotaFixarIp.Caption := 'Use só se não der para reservar o IP no roteador. Desliga o IP automático (DHCP) da placa de rede ' +
+    'e mantém a máscara, o gateway e o DNS atuais. Escolha um IP fora da faixa que o roteador distribui: senão ele pode ' +
+    'entregar o mesmo IP a outro aparelho.';
 
   if PgInstalado then
     PaginaPg := CreateInputQueryPage(PaginaIp.ID, 'Banco de dados',
@@ -591,8 +612,10 @@ begin
   else
   begin
     Result := 'PRIMEIRA INSTALAÇÃO do Pulyn {#Versao}' + NewLine + NewLine +
-      'Endereço do sistema: https://' + PaginaIp.Values[0] + NewLine +
-      'Usuário master: ' + PaginaMaster.Values[0];
+      'Endereço do sistema: https://' + PaginaIp.Values[0] + NewLine;
+    if CaixaFixarIp.Checked then
+      Result := Result + 'IP fixo no Windows: sim (máscara, gateway e DNS atuais)' + NewLine;
+    Result := Result + 'Usuário master: ' + PaginaMaster.Values[0];
     if RecriarBanco then
       Result := Result + NewLine + 'Banco de dados: o AdvPulyn que já existe será recriado vazio (backup antes)';
     Result := Result + NewLine + NewLine + 'O andamento aparece nesta janela. Pode levar de 5 a 20 minutos.';
@@ -650,6 +673,8 @@ begin
   Parametros := Parametros + ' -Modo Instalar -Ip ' + PaginaIp.Values[0] + ' -EmailMaster "' + PaginaMaster.Values[0] + '"';
   if RecriarBanco then
     Parametros := Parametros + ' -RecriarBanco';
+  if CaixaFixarIp.Checked then
+    Parametros := Parametros + ' -FixarIp';
   RodarPowerShell(Parametros, 'Instalando o Pulyn...');
   SetEnvironmentVariable('PULYN_PG_ADMIN_SENHA', '');
   SetEnvironmentVariable('PULYN_MASTER_SENHA', '');
