@@ -9,7 +9,7 @@ ENV NODE_ENV=production
 COPY . .
 
 # Se alguma dependência estiver faltando, a build para aqui.
-RUN node -e "require('express'); require('pg'); console.log('dependências ok')"
+RUN node -e "require('express'); require('pg'); require('@pulyn/avatar'); require('@resvg/resvg-wasm'); console.log('dependências ok')"
 
 EXPOSE 3001
 CMD ["node", "index.js"]

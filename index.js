@@ -50,6 +50,7 @@ const monitoringRoutes = require('./routes/monitoring');
 const supportRoutes = require('./routes/support');
 const messagesRoutes = require('./routes/messages');
 const familiasRoutes = require('./routes/familias');
+const avataresRoutes = require('./routes/avatares');
 const sincronizacaoRoutes = require('./routes/sincronizacao');
 const { obterSincronizador, pararSincronizacao } = require('./utils/sincronizacao');
 const qrcodeRoutes = require('./routes/qrcode');
@@ -2041,6 +2042,10 @@ app.use('/api/messages', messagesRoutes);
 app.use('/api/parallel-games', parallelGamesRoutes);
 app.use('/api/familias', familiasRoutes);
 app.use('/api/sincronizacao', sincronizacaoRoutes);
+
+// Imagem dos avatares montados pela criança (pulyn1-...). Vem antes dos arquivos estáticos: o que não for avatar
+// montado segue adiante e os adventurer-*.svg prontos continuam saindo de public/avatars.
+app.use('/avatars', avataresRoutes);
 
 // Servir arquivos estáticos
 app.use(express.static(path.join(__dirname, 'public')));

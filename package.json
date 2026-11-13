@@ -21,6 +21,8 @@
     "sync:conferir": "node conferir-sincronizacao.js"
   },
   "dependencies": {
+    "@pulyn/avatar": "github:TesteEmDev/Pulyn_avatar#v1.0.0",
+    "@resvg/resvg-wasm": "^2.6.2",
     "cors": "^2.8.6",
     "dotenv": "16.6.1",
     "env": "^0.0.2",

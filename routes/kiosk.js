@@ -3,8 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { controleAtivo, MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE } = require('../utils/pulseiraControle');
-const { isAvatarValido } = require('../utils/avatar');
+const { isAvatarValido, gerarAvatarMontado } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const {
@@ -395,6 +394,7 @@ router.post('/participants', async (req, res) => {
       const escolhaAvatar = escolherAvatar({
         pedido: avatarPedido,
         preferido: perfilExistente?.avatar,
+        gerarNovo: gerarAvatarMontado,
         emUso: await avataresEmUso(tx, event.eventoId),
       });
       if (escolhaAvatar.conflito) {

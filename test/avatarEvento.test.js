@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { escolherAvatar } = require('../utils/avatarEvento');
+const { isAvatarMontado, isAvatarValido, getAvatarForCreate, gerarAvatarMontado, ADVENTURER_AVATAR_IDS } = require('../utils/avatar');
 
 const IDS = ['a', 'b', 'c', 'd'];
 
@@ -37,41 +38,54 @@ test('preferido fora da lista de avatares (emoji antigo) é ignorado', () => {
   assert.ok(IDS.includes(r.avatar));
 });
 
-const MONTADO = 'pulyn1-abcDEF123456xyz';
+const MONTADO = 'pulyn1-02320012000001a';
+const MONTADO_B = 'pulyn1-13100230102010b';
 
-test('avatar montado: formato valido e aceito; repetido no evento vira conflito', () => {
-  const { isAvatarMontado, isAvatarValido, getAvatarForCreate } = require('../utils/avatar');
+test('avatar montado: formato aceito, adulterações recusadas', () => {
   assert.equal(isAvatarMontado(MONTADO), true);
   assert.equal(isAvatarValido(MONTADO), true);
-  assert.equal(getAvatarForCreate(MONTADO), MONTADO);
-  assert.deepEqual(escolherAvatar({ pedido: MONTADO, emUso: ['a'], ids: IDS }), { avatar: MONTADO });
-  // mesmo desenho que outro participante do evento já usa: conflito
-  assert.equal(escolherAvatar({ pedido: MONTADO, emUso: [MONTADO, 'a'], ids: IDS }).conflito, true);
-  assert.equal(escolherAvatar({ preferido: MONTADO, emUso: ['a'], ids: IDS }).avatar, MONTADO);
-});
-
-test('avatar montado: codigos fora do formato sao recusados', () => {
-  const { isAvatarValido, getAvatarForCreate } = require('../utils/avatar');
-  for (const ruim of ['pulyn1-curto', 'pulyn2-abcDEF123456xyz', 'pulyn1-abcDEF123456xy!', 'pulyn1-abcDEF123456xyzz', '<script>']) {
-    assert.equal(isAvatarValido(ruim), false, ruim);
-    assert.equal(getAvatarForCreate(ruim), null, ruim);
+  assert.equal(isAvatarValido(ADVENTURER_AVATAR_IDS[0]), true);
+  for (const ruim of ['pulyn1-', 'pulyn1-0232', `${MONTADO}0`, 'pulyn2-02320012000001a', 'pulyn1-0232001200000.a', 'PULYN1-02320012000001A', '<svg/>', '👤', null, undefined, 42]) {
+    assert.equal(isAvatarValido(ruim), false, `deveria recusar ${String(ruim)}`);
   }
+  assert.equal(getAvatarForCreate(MONTADO), MONTADO);
+  assert.equal(getAvatarForCreate('pulyn1-zz'), null);
 });
 
-test('avatar montado com cor de fundo personalizada (6 hex no fim) e valido', () => {
-  const { isAvatarValido } = require('../utils/avatar');
-  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00ff7f'), true);
-  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00FF7F'), false);
-  assert.equal(isAvatarValido('pulyn1-abcDEF123456xyz00f'), false);
+test('avatar montado nunca conflita (só os prontos têm a regra de não repetir)', () => {
+  assert.deepEqual(escolherAvatar({ pedido: MONTADO, emUso: [MONTADO, MONTADO_B, 'a'], ids: IDS }), { avatar: MONTADO });
+  assert.deepEqual(escolherAvatar({ pedido: MONTADO, emUso: IDS, ids: IDS }), { avatar: MONTADO });
 });
 
-test('avatar montado com acessorios (4 caracteres a mais) e valido, com ou sem cor personalizada', () => {
-  const { isAvatarValido } = require('../utils/avatar');
-  const base = 'pulyn1-55k562916400010'; // 15 caracteres depois do prefixo (formato antigo)
-  assert.equal(isAvatarValido(base), true);
-  assert.equal(isAvatarValido(base + '1201'), true);
-  assert.equal(isAvatarValido(base + '1201' + '00ff7f'), true);
-  assert.equal(isAvatarValido(base + '00ff7f'), true);
-  assert.equal(isAvatarValido(base + '12'), false);
-  assert.equal(isAvatarValido(base + '12012'), false);
+test('quem volta mantém o avatar montado do cadastro; avatar montado em uso não ocupa os prontos', () => {
+  assert.deepEqual(escolherAvatar({ preferido: MONTADO, emUso: [MONTADO], ids: IDS }), { avatar: MONTADO });
+  for (let i = 0; i < 30; i += 1) {
+    const { avatar } = escolherAvatar({ emUso: [MONTADO, MONTADO_B], ids: IDS });
+    assert.ok(IDS.includes(avatar));
+  }
+  assert.equal(escolherAvatar({ pedido: 'a', emUso: [MONTADO], ids: IDS }).avatar, 'a');
+});
+
+test('avatar sorteado pelo servidor é sempre um avatar montado válido', () => {
+  for (let i = 0; i < 300; i += 1) {
+    const avatar = gerarAvatarMontado();
+    assert.equal(isAvatarMontado(avatar), true, avatar);
+    assert.equal(avatar.length, 22);
+  }
+  assert.equal(isAvatarMontado(gerarAvatarMontado(() => 0.9999)), true);
+  assert.equal(isAvatarMontado(gerarAvatarMontado(() => 0)), true);
+  assert.equal(isAvatarMontado(getAvatarForCreate(null)), true);
+  assert.equal(isAvatarMontado(getAvatarForCreate('')), true);
+});
+
+test('sem escolha: o servidor cria um personagem novo (não um dos 20 antigos); o que a criança já tinha continua valendo', () => {
+  const novo = escolherAvatar({ emUso: [], ids: IDS, gerarNovo: () => MONTADO }).avatar;
+  assert.equal(novo, MONTADO);
+  assert.equal(escolherAvatar({ preferido: 'c', emUso: [], ids: IDS, gerarNovo: () => MONTADO }).avatar, 'c');
+  // o avatar antigo do cadastro está em uso por outro: entra um personagem novo, sem erro
+  assert.equal(escolherAvatar({ preferido: 'a', emUso: ['a'], ids: IDS, gerarNovo: () => MONTADO }).avatar, MONTADO);
+  // quem pediu um antigo em uso continua com o conflito de antes
+  assert.equal(escolherAvatar({ pedido: 'a', emUso: ['a'], ids: IDS, gerarNovo: () => MONTADO }).conflito, true);
+  // as cores (sem gerarNovo) seguem sorteando da lista
+  assert.ok(IDS.includes(escolherAvatar({ emUso: ['a'], ids: IDS }).avatar));
 });
