@@ -6,6 +6,8 @@
 ;                        BackEnd\deploy\iis\instalar-tudo.ps1 -Modo Instalar
 ;   Atualizar:           roda atualizar-github.ps1 (git pull da main do GitHub, so o que mudou, backup e publicacao).
 ;                        O pacote deste arquivo NAO e usado na atualizacao: ela sempre traz a versao da internet.
+;   Voltar a versao anterior: roda voltar-versao.ps1, que troca o sistema pela versao guardada em C:\Pulyn\anterior
+;                        (cada atualizacao guarda ali a versao que estava no ar). Sem internet; o banco nao volta.
 ;   Desinstalar:         roda desinstalar.ps1 (o banco so e apagado se a pessoa marcar, com backup antes)
 ; Os scripts rodam escondidos (sem janela do PowerShell): o andamento aparece na propria tela do setup (etapa, barra de
 ; progresso e detalhes), a partir das linhas "[n/total] etapa" e "ERRO: ..." que eles escrevem. O desinstalador de
@@ -80,6 +82,7 @@ Source: "{#Montagem}\pacote\BackEnd\deploy\iis\desinstalar.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\atualizar-github.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\config.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\backup-banco.ps1"; Flags: dontcopy
+Source: "{#Montagem}\pacote\BackEnd\deploy\iis\voltar-versao.ps1"; Flags: dontcopy
 ; Git portatil (MinGit) para a atualizacao
 Source: "{#Montagem}\extras\MinGit.zip"; Flags: dontcopy solidbreak
 
@@ -91,7 +94,8 @@ Name: "{group}\Atualizar Pulyn"; Filename: "{sys}\WindowsPowerShell\v1.0\powersh
 const
   MODO_INSTALAR = 0;
   MODO_ATUALIZAR = 1;
-  MODO_DESINSTALAR = 2;
+  MODO_VOLTAR = 2;
+  MODO_DESINSTALAR = 3;
   CHAVE_DESINSTALADOR = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8F3C2B1A-6D4E-4B7F-9A21-5C3E7D9B0F42}_is1';
 
 var
@@ -107,6 +111,9 @@ var
   TemRestos: Boolean;
   PgInstalado: Boolean;
   VersaoInstalada: string;
+  // Versao guardada pela ultima atualizacao (C:\Pulyn\anterior), para "Voltar a versao anterior"
+  TemAnterior: Boolean;
+  VersaoAnterior: string;
   CodigoResultado: Integer;
   // Banco AdvPulyn que sobrou de uma instalacao que parou no meio: a pessoa confirmou que ele pode ser recriado.
   RecriarBanco: Boolean;
@@ -142,6 +149,11 @@ begin
   else if Texto = 'Buscando a versao nova' then Result := 'Buscando a versão nova'
   else if Texto = 'Dependencias das telas' then Result := 'Preparando as telas'
   else if Texto = 'Backup do banco e publicacao' then Result := 'Backup do banco, compilação das telas e publicação'
+  // voltar-versao.ps1
+  else if Texto = 'Conferindo a versao anterior' then Result := 'Conferindo a versão anterior'
+  else if Texto = 'Backup do banco' then Result := 'Fazendo o backup do banco de dados'
+  else if Texto = 'Trocando pela versao anterior' then Result := 'Trocando pela versão anterior'
+  else if Texto = 'Testando' then Result := 'Testando o sistema'
   // desinstalar.ps1
   else if Texto = 'Parando o servico PulynBackend' then Result := 'Parando o serviço PulynBackend'
   else if Texto = 'Banco de dados: backup e remocao' then Result := 'Fazendo o backup e apagando o banco de dados'
@@ -287,13 +299,14 @@ begin
       Result := Trim(String(Texto));
 end;
 
-function LerVersaoInstalada: string;
+// Primeira linha de um VERSAO.txt (C:\Pulyn\pacote = versao no ar; C:\Pulyn\anterior = versao guardada).
+function LerVersao(Arquivo: string): string;
 var
   Linhas: TArrayOfString;
   Data: string;
 begin
   Result := '';
-  if LoadStringsFromFile('C:\Pulyn\pacote\VERSAO.txt', Linhas) and (GetArrayLength(Linhas) > 0) then
+  if LoadStringsFromFile(Arquivo, Linhas) and (GetArrayLength(Linhas) > 0) then
     Result := Trim(Linhas[0]);
   // Formato antigo da atualizacao ("Pulyn GitHub main 2026-11-13 10:11"): mostra so a data.
   if Pos('Pulyn GitHub ', Result) = 1 then
@@ -355,7 +368,14 @@ begin
   TemRestos := JaInstalado or DirExists('C:\Pulyn\backend') or DirExists('C:\Pulyn\site')
     or RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\PulynBackend');
   PgInstalado := FileExists(ExpandConstant('{commonpf64}\PostgreSQL\18\bin\psql.exe'));
-  VersaoInstalada := LerVersaoInstalada;
+  VersaoInstalada := LerVersao('C:\Pulyn\pacote\VERSAO.txt');
+  TemAnterior := JaInstalado and FileExists('C:\Pulyn\anterior\backend\index.js') and FileExists('C:\Pulyn\anterior\site\index.html');
+  VersaoAnterior := '';
+  if TemAnterior then
+  begin
+    VersaoAnterior := LerVersao('C:\Pulyn\anterior\VERSAO.txt');
+    if VersaoAnterior = '' then VersaoAnterior := 'versão sem identificação';
+  end;
 
   if JaInstalado then
   begin
@@ -373,9 +393,14 @@ begin
     'Escolha uma opção e clique em Avançar.', True, False);
   PaginaModo.Add('Primeira instalação' + #13#10 + 'Instala o Pulyn completo: banco de dados novo, servidor, telas e certificado HTTPS.');
   PaginaModo.Add('Atualizar' + #13#10 + 'Baixa a versão mais nova do Pulyn (só o que mudou), faz backup do banco e publica. Dados, senhas e certificado continuam os mesmos.');
+  if TemAnterior then
+    PaginaModo.Add('Voltar à versão anterior' + #13#10 + 'Volta para a versão que estava no ar antes da última atualização (' + VersaoAnterior + '). Não precisa de internet. Os dados continuam como estão.')
+  else
+    PaginaModo.Add('Voltar à versão anterior' + #13#10 + 'Fica disponível depois da primeira atualização: cada atualização guarda a versão que estava no ar.');
   PaginaModo.Add('Desinstalar' + #13#10 + 'Remove o Pulyn deste computador. O banco de dados só é apagado se você escolher.');
   PaginaModo.CheckListBox.ItemEnabled[MODO_INSTALAR] := not JaInstalado;
   PaginaModo.CheckListBox.ItemEnabled[MODO_ATUALIZAR] := JaInstalado;
+  PaginaModo.CheckListBox.ItemEnabled[MODO_VOLTAR] := TemAnterior;
   PaginaModo.CheckListBox.ItemEnabled[MODO_DESINSTALAR] := TemRestos;
   if JaInstalado then
     PaginaModo.SelectedValueIndex := MODO_ATUALIZAR
@@ -558,6 +583,8 @@ begin
       WizardForm.NextButton.Caption := '&Desinstalar'
     else if Modo = MODO_ATUALIZAR then
       WizardForm.NextButton.Caption := '&Atualizar'
+    else if Modo = MODO_VOLTAR then
+      WizardForm.NextButton.Caption := '&Trocar versão'
     else
       WizardForm.NextButton.Caption := '&Instalar';
   end
@@ -580,6 +607,11 @@ begin
     else if (Modo = MODO_ATUALIZAR) and SemMudancas then
       WizardForm.FinishedLabel.Caption :=
         'O Pulyn já estava na versão mais nova. Nada foi alterado.'
+    else if Modo = MODO_VOLTAR then
+      WizardForm.FinishedLabel.Caption :=
+        'O Pulyn voltou para a versão anterior (' + VersaoAnterior + ').' + #13#10#13#10 +
+        'A versão que estava no ar ficou guardada: para voltar a ela, rode este instalador e escolha "Voltar à versão anterior" de novo, ou use "Atualizar".' + #13#10#13#10 +
+        'Os dados não mudaram. Os tablets e as placas continuam funcionando.'
     else if Modo = MODO_DESINSTALAR then
       WizardForm.FinishedLabel.Caption :=
         'O Pulyn foi removido deste computador.' + #13#10#13#10 +
@@ -619,6 +651,18 @@ begin
       '- se não houver nada novo, para e avisa;' + NewLine +
       '- backup do banco, preparação das telas e publicação.' + NewLine + NewLine +
       'Precisa de internet. Dados, senhas e certificado continuam os mesmos.';
+  end
+  else if Modo = MODO_VOLTAR then
+  begin
+    Result := 'VOLTAR À VERSÃO ANTERIOR do Pulyn' + NewLine + NewLine;
+    if VersaoInstalada <> '' then Result := Result + 'No ar agora: ' + VersaoInstalada + NewLine;
+    Result := Result + 'Vai voltar para: ' + VersaoAnterior + NewLine + NewLine +
+      'O que acontece:' + NewLine +
+      '- backup do banco;' + NewLine +
+      '- o sistema e as telas são trocados pela versão anterior, guardada neste computador;' + NewLine +
+      '- a versão que está no ar fica guardada no lugar dela (dá para voltar a ela depois);' + NewLine +
+      '- se a versão anterior não funcionar, a troca é desfeita sozinha.' + NewLine + NewLine +
+      'Não precisa de internet. O banco de dados NÃO volta: os dados continuam como estão. Senhas e certificado também não mudam.';
   end
   else
   begin
@@ -669,6 +713,30 @@ begin
   RodarPowerShell(Parametros, 'Atualizando o Pulyn...');
 end;
 
+procedure VoltarVersao;
+var
+  Pasta: string;
+begin
+  // Prefere os scripts da versao que esta no ar (podem ser mais novos que os deste setup). Eles sao copiados para fora de
+  // C:\Pulyn\scripts porque essa pasta e trocada durante a volta.
+  Pasta := ExpandConstant('{tmp}\voltar');
+  if FileExists('C:\Pulyn\scripts\voltar-versao.ps1') and FileExists('C:\Pulyn\scripts\config.ps1')
+    and FileExists('C:\Pulyn\scripts\backup-banco.ps1') and ForceDirectories(Pasta)
+    and FileCopy('C:\Pulyn\scripts\voltar-versao.ps1', Pasta + '\voltar-versao.ps1', False)
+    and FileCopy('C:\Pulyn\scripts\config.ps1', Pasta + '\config.ps1', False)
+    and FileCopy('C:\Pulyn\scripts\backup-banco.ps1', Pasta + '\backup-banco.ps1', False) then
+    Log('Voltar versao: scripts de C:\Pulyn\scripts')
+  else
+  begin
+    ExtractTemporaryFile('config.ps1');
+    ExtractTemporaryFile('backup-banco.ps1');
+    ExtractTemporaryFile('voltar-versao.ps1');
+    Pasta := ExpandConstant('{tmp}');
+    Log('Voltar versao: scripts deste setup');
+  end;
+  RodarPowerShell('-File "' + Pasta + '\voltar-versao.ps1" -SemPausa', 'Voltando à versão anterior...');
+end;
+
 procedure Instalar;
 var
   Parametros: string;
@@ -701,6 +769,8 @@ begin
     Desinstalar
   else if Modo = MODO_ATUALIZAR then
     Atualizar
+  else if Modo = MODO_VOLTAR then
+    VoltarVersao
   else
     Instalar;
 end;

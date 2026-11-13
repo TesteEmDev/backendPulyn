@@ -93,7 +93,7 @@ $commitFront = (& git -C $repoFront rev-parse --short HEAD).Trim()
 Ok ('backend ' + $Branch + ' @ ' + $commitBack + ' | frontend ' + $BranchFront + ' @ ' + $commitFront)
 
 # O instalador e os scripts vem junto com o backend: a branch precisa te-los.
-$faltando = @('deploy\instalador\Pulyn.iss', 'deploy\iis\instalar-tudo.ps1', 'deploy\iis\desinstalar.ps1', 'deploy\iis\atualizar-github.ps1', 'deploy\iis\banco-base.sql', 'deploy\iis\criar-master.js') |
+$faltando = @('deploy\instalador\Pulyn.iss', 'deploy\iis\instalar-tudo.ps1', 'deploy\iis\desinstalar.ps1', 'deploy\iis\atualizar-github.ps1', 'deploy\iis\voltar-versao.ps1', 'deploy\iis\banco-base.sql', 'deploy\iis\criar-master.js') |
             Where-Object { -not (Test-Path (Join-Path $repoBack $_)) }
 if ($faltando) {
     throw ('A branch "' + $Branch + '" do backend ainda nao tem o instalador (falta: ' + ($faltando -join ', ') + '). ' +

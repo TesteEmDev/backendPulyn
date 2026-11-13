@@ -35,12 +35,13 @@ O assistente usa o visual do Pulyn: fundo escuro, logo e mascote. As imagens fic
 
 - **Primeira instalação.** Só aparece liberada se o Pulyn ainda não estiver instalado.
 - **Atualizar.** Só aparece liberada se o Pulyn já estiver instalado. Sempre baixa a versão mais nova pela internet; o sistema que veio dentro do setup.exe só é usado na primeira instalação.
+- **Voltar à versão anterior.** Só aparece liberada se uma atualização já tiver guardado a versão anterior. Mostra qual versão é.
 - **Desinstalar.** Aparece liberada se existir alguma coisa do Pulyn no computador.
 
 A tela mostra a situação do computador e a versão instalada.
 
 Para ver as telas sem instalar nada (não pede administrador e não executa nada), compile uma prévia:
-`ISCC.exe /DPrevia /DVersao=previa /DMontagem=<pasta com pacote\BackEnd\deploy\iis\{desinstalar,atualizar-github,config,backup-banco}.ps1 e extras\MinGit.zip> Pulyn.iss`
+`ISCC.exe /DPrevia /DVersao=previa /DMontagem=<pasta com pacote\BackEnd\deploy\iis\{desinstalar,atualizar-github,voltar-versao,config,backup-banco}.ps1 e extras\MinGit.zip> Pulyn.iss`
 
 ## Instalar no buffet
 
@@ -71,13 +72,24 @@ A atualização nunca muda nem apaga linhas do `.env`. Se uma versão nova do si
 
 Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Iniciar. Também dá para rodar o setup e escolher **Atualizar**. Funciona como o `atualizar.ps1`:
 1. Faz `git pull` da `main` dos dois repositórios em `C:\Pulyn\fonte`. Baixa só o que mudou; na primeira vez, baixa o código todo.
-2. Se o conteúdo não mudou, avisa e para, sem mexer no sistema. Para publicar mesmo assim, use `-Forcar`.
+2. Compara o que baixou com a versão que está no ar, registrada em `C:\Pulyn\pacote\VERSAO.txt`. Se for igual, avisa e para, sem mexer no sistema. Para publicar mesmo assim, use `-Forcar`. Depois de voltar à versão anterior, ou de uma publicação que falhou, a versão no ar é outra, e ele publica de novo.
 3. Instala as dependências das telas, só se o `package-lock.json` mudou. Na primeira vez isso leva alguns minutos.
-4. Roda o `atualizar.ps1` que veio do GitHub: backup do banco, compilação das telas e publicação.
+4. Roda o `atualizar.ps1` que veio do GitHub: backup do banco, cópia da versão que está no ar para `C:\Pulyn\anterior`, compilação das telas e publicação.
 
 O Git portátil fica em `C:\Pulyn\git`. Precisa de internet. O registro fica em `C:\Pulyn\logs\atualizacao-*.log`. Para usar outra branch: `C:\Pulyn\scripts\atualizar-github.ps1 -Branch <nome>`.
 
 O banco, o `.env`, as senhas e o certificado continuam os mesmos, e o Node.js, o PostgreSQL e o IIS não são reinstalados.
+
+## Voltar à versão anterior
+
+Se uma atualização trouxe um problema, rode o setup.exe e escolha **Voltar à versão anterior**. A opção não precisa de internet. Também dá para rodar `C:\Pulyn\scripts\voltar-versao.ps1` como administrador.
+
+- Cada atualização guarda em `C:\Pulyn\anterior` a versão que estava no ar: o backend com as dependências, as telas e os scripts (uns 140 MB). Só fica guardada uma versão, a da última atualização.
+- A volta faz um backup do banco e troca os arquivos. A versão que estava no ar fica guardada no lugar da anterior, então escolher a opção de novo volta para ela. **Atualizar** também traz a versão mais nova da `main`.
+- Se a versão anterior não responder em 40 segundos, a troca é desfeita sozinha e o sistema continua como estava.
+- **O banco de dados não volta.** Os dados continuam como estão, e o `.env`, as senhas e o certificado não mudam. Em geral as migrações só acrescentam colunas e tabelas, e por isso a versão anterior costuma funcionar com o banco mais novo. Se for preciso voltar também os dados, há um backup em `C:\Pulyn\backups`, feito antes da atualização. Restaurá-lo apaga o que foi registrado depois dela.
+
+O registro fica em `C:\Pulyn\logs\voltar-versao-*.log`.
 
 ## Desinstalar
 
@@ -85,7 +97,7 @@ Há dois caminhos:
 - rode o setup.exe e escolha **Desinstalar**, marcando ou não "Apagar também o banco de dados";
 - ou use **Configurações > Aplicativos > Pulyn > Desinstalar**. Esse caminho pergunta se o banco também deve ser apagado, e a resposta padrão é **Não**.
 
-- **Sempre remove:** o serviço `PulynBackend`, o site e o pool `Pulyn` do IIS, o certificado da porta 443, as regras de firewall `Pulyn HTTPS` e `Pulyn HTTP UHF`, a tarefa de backup, os certificados do Pulyn (CA e servidor), o atalho "Atualizar Pulyn" e as pastas em `C:\Pulyn`, incluindo o código baixado (`fonte`) e o Git portátil (`git`).
+- **Sempre remove:** o serviço `PulynBackend`, o site e o pool `Pulyn` do IIS, o certificado da porta 443, as regras de firewall `Pulyn HTTPS` e `Pulyn HTTP UHF`, a tarefa de backup, os certificados do Pulyn (CA e servidor), o atalho "Atualizar Pulyn" e as pastas em `C:\Pulyn`, incluindo o código baixado (`fonte`), o Git portátil (`git`) e a versão anterior guardada (`anterior`).
 - **Banco, se você responder Sim:** faz um backup em `C:\Pulyn\backups` e depois apaga o banco `AdvPulyn`.
 - **Banco, se você responder Não:** o banco fica, e o `C:\Pulyn\backend\.env` também, porque ele guarda a senha do banco. Se você instalar de novo, o sistema volta com os mesmos dados. Os tablets vão precisar do certificado novo.
 - **Não remove nunca:** Node.js, PostgreSQL, os recursos do IIS, URL Rewrite e ARR (podem servir a outros sites, como o `suporte`), nem a pasta `C:\Pulyn\backups`.

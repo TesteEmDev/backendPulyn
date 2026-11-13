@@ -113,7 +113,9 @@ try {
         # Fica: backups, o pacote do setup (o proprio desinstalador apaga) e, se o banco ficou, o .env com a senha dele.
         $manterEnv = (-not $bancoApagado) -and (Test-Path $envProd)
         # fonte = repositorios baixados do GitHub (atualizacao pela internet); git = Git portatil
-        foreach ($pasta in $Site, (Join-Path $Raiz 'site-build'), $Servico, $Scripts, $Certs, $Instaladores, $Logs, (Join-Path $Raiz 'fonte'), (Join-Path $Raiz 'git')) {
+        # anterior = versao guardada para "Voltar a versao anterior"
+        foreach ($pasta in $Site, (Join-Path $Raiz 'site-build'), $Servico, $Scripts, $Certs, $Instaladores, $Logs, (Join-Path $Raiz 'fonte'), (Join-Path $Raiz 'git'),
+                           (Join-Path $Raiz 'anterior'), (Join-Path $Raiz 'anterior-troca')) {
             if (Test-Path $pasta) { Remove-Item $pasta -Recurse -Force }
         }
         if (Test-Path $Backend) {

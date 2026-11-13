@@ -11,6 +11,8 @@ $Backups      = Join-Path $Raiz 'backups'
 $Certs        = Join-Path $Raiz 'certs'
 $Instaladores = Join-Path $Raiz 'instaladores'
 $Scripts      = Join-Path $Raiz 'scripts'       # copia destes scripts (usada pela tarefa de backup)
+$Anterior     = Join-Path $Raiz 'anterior'      # versao que estava no ar antes da ultima atualizacao (voltar-versao.ps1)
+$ArquivoVersao = Join-Path $Raiz 'pacote\VERSAO.txt'   # qual versao esta no ar (o setup mostra a primeira linha)
 
 $NomeSite     = 'Pulyn'
 $NomePool     = 'Pulyn'
@@ -94,6 +96,65 @@ function Ler-UrlPostgres($url) {
 
 function Gravar-TextoUtf8($caminho, $texto) {
     [IO.File]::WriteAllText($caminho, $texto, (New-Object Text.UTF8Encoding($false)))
+}
+
+function Achar-Git {
+    $local = Join-Path $Raiz 'git\cmd\git.exe'
+    if (Test-Path $local) { return $local }
+    $cmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+    return $null
+}
+
+# ---------------------------------------------------------------- versao anterior (para poder voltar)
+# robocopy /MIR: deixa $para igual a $de (apaga o que sobra), menos o que $extras excluir.
+# /IS /IT: copia mesmo os arquivos com o mesmo tamanho e a mesma data. Sem isso o robocopy os pula, e o npm grava todo
+# arquivo do node_modules com a mesma data (1985): uma dependencia que mudou sem mudar de tamanho ficaria misturada.
+function Robocopiar($de, $para, [string[]]$extras = @()) {
+    & robocopy $de $para /MIR /IS /IT /R:2 /W:2 /NFL /NDL /NJH /NJS /NP @extras | Out-Null
+    $codigo = $LASTEXITCODE
+    $global:LASTEXITCODE = 0
+    if ($codigo -ge 8) { throw ('Falha ao copiar ' + $de + ' para ' + $para + ' (robocopy ' + $codigo + ')') }
+}
+
+# O que forma uma versao publicada: o backend (com node_modules, sem o .env), as telas, os scripts e o VERSAO.txt.
+$ExcluirDoBackend = @('/XD', 'logs', '/XF', '.env', '.env.*', '*.log')
+
+# Copia a versao que esta no ar para $destino (ex.: $Anterior).
+function Guardar-Publicado($destino) {
+    if (-not (Test-Path $destino)) { New-Item -ItemType Directory -Path $destino | Out-Null }
+    Robocopiar $Backend (Join-Path $destino 'backend') $ExcluirDoBackend
+    Robocopiar $Site (Join-Path $destino 'site')
+    if (Test-Path $Scripts) { Robocopiar $Scripts (Join-Path $destino 'scripts') }
+    $v = Join-Path $destino 'VERSAO.txt'
+    if (Test-Path $ArquivoVersao) { Copy-Item $ArquivoVersao $v -Force } elseif (Test-Path $v) { Remove-Item $v -Force }
+}
+
+# Poe no ar a versao guardada em $origem. O .env do backend continua o mesmo. O servico precisa estar parado.
+function Restaurar-Publicado($origem) {
+    Robocopiar (Join-Path $origem 'backend') $Backend $ExcluirDoBackend
+    Robocopiar (Join-Path $origem 'site') $Site
+    if (Test-Path (Join-Path $origem 'scripts')) { Robocopiar (Join-Path $origem 'scripts') $Scripts }
+    $v = Join-Path $origem 'VERSAO.txt'
+    if (Test-Path $v) {
+        $pasta = Split-Path $ArquivoVersao -Parent
+        if (-not (Test-Path $pasta)) { New-Item -ItemType Directory -Path $pasta | Out-Null }
+        Copy-Item $v $ArquivoVersao -Force
+    }
+}
+
+# Uma pasta guardada so serve se tiver o backend e as telas.
+function Versao-Completa($pasta) {
+    return (Test-Path (Join-Path $pasta 'backend\index.js')) -and (Test-Path (Join-Path $pasta 'site\index.html'))
+}
+
+# Commit publicado de um repositorio ("BackEnd branch @ abc1234" no VERSAO.txt), ou $null.
+function Commit-Publicado($nome) {
+    if (-not (Test-Path $ArquivoVersao)) { return $null }
+    foreach ($linha in Get-Content $ArquivoVersao -Encoding UTF8) {
+        if ($linha -match ('^' + $nome + ' .* @ ([0-9a-f]{7,40})\s*$')) { return $Matches[1] }
+    }
+    return $null
 }
 
 # Todas as chaves que o backend le no .env de producao, na ordem do arquivo. Padrao vazio = o backend usa o valor
