@@ -1,28 +1,15 @@
-# fixar-ip.ps1 - deixa o IP desta maquina fixo no Windows (desliga o DHCP da placa de rede principal), mantendo a
-# mascara, o gateway e o DNS que ela usa agora. Rode como Administrador. O setup.exe roda este script quando a pessoa
-# marca "Fixar este IP no Windows".
-# Prefira a reserva de DHCP no roteador. Use isto quando nao der para mexer no roteador, e escolha um IP FORA da faixa que
-# o roteador distribui: senao ele pode entregar o mesmo IP a outro aparelho e os dois ficam sem rede.
+# fixar-ip.ps1 - passa o IP desta maquina de automatico (DHCP) para fixo, SEM mudar nada: o mesmo IP, a mesma mascara, o
+# mesmo gateway e os mesmos DNS que a placa de rede principal usa agora. Rode como Administrador. O setup.exe roda este
+# script quando a pessoa marca "Fixar o IP atual no Windows".
+# O roteador nao fica sabendo: se puder, reserve tambem este IP nele, para ele nao entregar o mesmo IP a outro aparelho.
 #
-#   -Ip        IP que a maquina deve ter (padrao: o atual). Precisa estar na mesma rede da placa.
+#   -Ip        so confere: se o IP atual da maquina nao for este, para com erro (nada e mudado)
 #   -Simular   so mostra o que seria feito, sem mudar nada (nao precisa de administrador)
 #   -Desfazer  volta a placa para o IP automatico (DHCP)
 param([string]$Ip, [switch]$Simular, [switch]$Desfazer)
 . "$PSScriptRoot\config.ps1"
 if (-not $Simular) { Exigir-Admin }
 
-function Ip-Numero([string]$texto) {
-    $b = ([Net.IPAddress]::Parse($texto)).GetAddressBytes()
-    return ([int64]$b[0] * 16777216) + ([int64]$b[1] * 65536) + ([int64]$b[2] * 256) + [int64]$b[3]
-}
-function Mesma-Rede([string]$a, [string]$b, [int]$prefixo) {
-    $bloco = [int64][math]::Pow(2, 32 - $prefixo)
-    return [math]::Floor((Ip-Numero $a) / $bloco) -eq [math]::Floor((Ip-Numero $b) / $bloco)
-}
-function Prefixo-Mascara([int]$prefixo) {
-    $n = [int64][math]::Pow(2, 32) - [int64][math]::Pow(2, 32 - $prefixo)
-    return ((24, 16, 8, 0) | ForEach-Object { [string](([int64][math]::Floor($n / [math]::Pow(2, $_))) % 256) }) -join '.'
-}
 # Volta a placa para o automatico (usado no -Desfazer e se algo der errado no meio).
 function Voltar-Dhcp($idx) {
     Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.PrefixOrigin -eq 'Manual' } |
@@ -42,7 +29,6 @@ $ipAtual = $cfg.IPv4Address[0].IPAddress
 $prefixo = [int]$cfg.IPv4Address[0].PrefixLength
 $gateway = @($cfg.IPv4DefaultGateway)[0].NextHop
 $dns = @((Get-DnsClientServerAddress -InterfaceIndex $idx -AddressFamily IPv4).ServerAddresses | Where-Object { $_ })
-if ($dns.Count -eq 0) { $dns = @($gateway) }
 $dhcp = (Get-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4).Dhcp
 
 if ($Desfazer) {
@@ -52,39 +38,30 @@ if ($Desfazer) {
     return
 }
 
-if (-not $Ip) { $Ip = $ipAtual }
-if ($Ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { throw ('IP invalido: ' + $Ip) }
-if (-not (Mesma-Rede $Ip $ipAtual $prefixo)) {
-    throw ('O IP ' + $Ip + ' nao e da rede desta maquina (' + $ipAtual + '/' + $prefixo + '). Use um IP que comece igual ao atual.')
-}
-if ($Ip -eq $gateway) { throw ('O IP ' + $Ip + ' e o do roteador. Escolha outro.') }
-$mascara = Prefixo-Mascara $prefixo
-Write-Host ('    placa "' + $placa + '": IP ' + $Ip + ', mascara ' + $mascara + ', gateway ' + $gateway + ', DNS ' + ($dns -join ', '))
-
-if ($dhcp -eq 'Disabled' -and $Ip -eq $ipAtual) { Escrever-Ok ('o IP ' + $Ip + ' ja esta fixo'); return }
-if ($Ip -ne $ipAtual -and (Test-Connection -ComputerName $Ip -Count 2 -Quiet)) {
-    throw ('O IP ' + $Ip + ' ja esta sendo usado por outro aparelho da rede. Escolha outro.')
-}
-if ($Simular) { Escrever-Ok ('(simulacao) o DHCP da placa seria desligado e o IP ' + $Ip + ' ficaria fixo'); return }
+if ($Ip -and $Ip -ne $ipAtual) { throw ('O IP desta maquina agora e ' + $ipAtual + ', e nao ' + $Ip + '. Nada foi mudado.') }
+if ($dns.Count -eq 0) { throw 'A placa nao tem DNS configurado; nada foi mudado.' }
+Write-Host ('    placa "' + $placa + '": IP ' + $ipAtual + '/' + $prefixo + ', gateway ' + $gateway + ', DNS ' + ($dns -join ', '))
+if ($dhcp -eq 'Disabled') { Escrever-Ok ('o IP ' + $ipAtual + ' ja esta fixo'); return }
+if ($Simular) { Escrever-Ok '(simulacao) o IP passaria de automatico para fixo, com os mesmos valores'; return }
 
 try {
+    # Ao desligar o DHCP o Windows apaga o endereco que veio do roteador; ele e recriado logo em seguida, igual.
     Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled
     Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
     Get-NetRoute -InterfaceIndex $idx -AddressFamily IPv4 -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
-    New-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -IPAddress $Ip -PrefixLength $prefixo -DefaultGateway $gateway | Out-Null
+    New-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -IPAddress $ipAtual -PrefixLength $prefixo -DefaultGateway $gateway | Out-Null
     Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses $dns
-    # Espera o Windows ativar o endereco (se outro aparelho ja usa o IP, ele fica "Duplicate" e nunca ativa).
     $ativo = $false
     for ($t = 0; $t -lt 20 -and -not $ativo; $t++) {
         Start-Sleep -Seconds 1
-        $ativo = [bool](Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -eq $Ip -and $_.AddressState -eq 'Preferred' })
+        $ativo = [bool](Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -ErrorAction SilentlyContinue | Where-Object { $_.IPAddress -eq $ipAtual -and $_.AddressState -eq 'Preferred' })
     }
-    if (-not $ativo) { throw ('o Windows nao ativou o IP ' + $Ip + ' (outro aparelho da rede pode estar usando)') }
+    if (-not $ativo) { throw ('o Windows nao ativou o IP ' + $ipAtual) }
 } catch {
     $motivo = $_.Exception.Message
     try { Voltar-Dhcp $idx } catch { }
     throw ('Nao consegui fixar o IP: ' + $motivo + '. A placa voltou para o IP automatico.')
 }
-Escrever-Ok ('IP ' + $Ip + ' fixo na placa "' + $placa + '" (DHCP desligado)')
+Escrever-Ok ('IP ' + $ipAtual + ' agora e fixo na placa "' + $placa + '" (mesma mascara, gateway e DNS)')
 if (Test-Connection -ComputerName $gateway -Count 2 -Quiet) { Escrever-Ok ('roteador ' + $gateway + ' respondendo') }
 else { Escrever-Aviso ('o roteador ' + $gateway + ' nao respondeu ao ping (alguns roteadores nao respondem; confira a internet)') }

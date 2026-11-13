@@ -102,6 +102,7 @@ var
   PaginaRemover: TInputOptionWizardPage;
   CaixaFixarIp: TNewCheckBox;
   NotaFixarIp: TNewStaticText;
+  IpDetectado: string;
   JaInstalado: Boolean;
   TemRestos: Boolean;
   PgInstalado: Boolean;
@@ -338,6 +339,14 @@ begin
     and (Pos('"', Email) = 0) and (Pos('''', Email) = 0);
 end;
 
+// Fixar o IP = o IP atual da maquina: o campo volta para ele e fica travado.
+procedure CaixaFixarIpClick(Sender: TObject);
+begin
+  if CaixaFixarIp.Checked then
+    PaginaIp.Values[0] := IpDetectado;
+  PaginaIp.Edits[0].Enabled := not CaixaFixarIp.Checked;
+end;
+
 procedure InitializeWizard;
 var
   Situacao: string;
@@ -378,15 +387,18 @@ begin
     'Qual é o IP fixo deste computador?',
     'Tablets, celulares e placas vão acessar o sistema por este endereço (https://IP). Ele precisa estar reservado no roteador para não mudar.');
   PaginaIp.Add('IP do servidor:', False);
-  PaginaIp.Values[0] := DetectarIp;
+  IpDetectado := DetectarIp;
+  PaginaIp.Values[0] := IpDetectado;
   CaixaFixarIp := TNewCheckBox.Create(PaginaIp);
   CaixaFixarIp.Parent := PaginaIp.Surface;
   CaixaFixarIp.Left := PaginaIp.Edits[0].Left;
   CaixaFixarIp.Top := PaginaIp.Edits[0].Top + PaginaIp.Edits[0].Height + ScaleY(16);
   CaixaFixarIp.Width := PaginaIp.SurfaceWidth - CaixaFixarIp.Left;
   CaixaFixarIp.Height := ScaleY(20);
-  CaixaFixarIp.Caption := 'Fixar este IP nas configurações de rede do Windows';
+  CaixaFixarIp.Caption := 'Deixar o IP atual fixo no Windows (hoje ele é automático)';
   CaixaFixarIp.Checked := False;
+  CaixaFixarIp.Enabled := IpDetectado <> '';
+  CaixaFixarIp.OnClick := @CaixaFixarIpClick;
   NotaFixarIp := TNewStaticText.Create(PaginaIp);
   NotaFixarIp.Parent := PaginaIp.Surface;
   NotaFixarIp.Left := CaixaFixarIp.Left + ScaleX(18);
@@ -395,9 +407,8 @@ begin
   NotaFixarIp.AutoSize := False;
   NotaFixarIp.WordWrap := True;
   NotaFixarIp.Height := ScaleY(80);
-  NotaFixarIp.Caption := 'Use só se não der para reservar o IP no roteador. Desliga o IP automático (DHCP) da placa de rede ' +
-    'e mantém a máscara, o gateway e o DNS atuais. Escolha um IP fora da faixa que o roteador distribui: senão ele pode ' +
-    'entregar o mesmo IP a outro aparelho.';
+  NotaFixarIp.Caption := 'Nada muda além disso: o mesmo IP, a mesma máscara, o mesmo gateway e os mesmos DNS, só que ' +
+    'fixos em vez de automáticos. Se puder, reserve também o IP no roteador, para ele não entregar o mesmo IP a outro aparelho.';
 
   if PgInstalado then
     PaginaPg := CreateInputQueryPage(PaginaIp.ID, 'Banco de dados',
@@ -614,7 +625,7 @@ begin
     Result := 'PRIMEIRA INSTALAÇÃO do Pulyn {#Versao}' + NewLine + NewLine +
       'Endereço do sistema: https://' + PaginaIp.Values[0] + NewLine;
     if CaixaFixarIp.Checked then
-      Result := Result + 'IP fixo no Windows: sim (máscara, gateway e DNS atuais)' + NewLine;
+      Result := Result + 'IP: passa de automático para fixo (mesmo IP, máscara, gateway e DNS)' + NewLine;
     Result := Result + 'Usuário master: ' + PaginaMaster.Values[0];
     if RecriarBanco then
       Result := Result + NewLine + 'Banco de dados: o AdvPulyn que já existe será recriado vazio (backup antes)';
