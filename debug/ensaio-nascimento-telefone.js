@@ -6,7 +6,7 @@ require('dotenv').config();
 const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const database = require('../database');
-const { queryOne, closeDB } = database;
+const { queryOne, query, closeDB } = database;
 const withTransaction = database.withTransaction;
 database.withTransaction = (trabalho) => trabalho(database);
 const { ensureFamilySchema } = require('../migrations/family');
@@ -36,10 +36,15 @@ async function main() {
   const admin = { id: 'a', role: 'admin', empresaId: evento.empresaId };
   const usuarioKiosk = { id: 'k', role: 'kiosk', empresaId: evento.empresaId };
   let n = 0;
-  const kioskCadastrar = (extra) => chamar(kiosk, 'post', '/participants', {
-    usuario: usuarioKiosk,
-    body: { eventId: evento.eventoId, nome: `Nascimento ${++n}`, braceletCode: `0DEF${String(n).padStart(6, '0')}`, ...extra },
-  });
+  // O kiosk só aceita pulseira do estoque do buffet: a pulseira entra no estoque (dentro da transação desfeita) antes do cadastro.
+  const kioskCadastrar = async (extra) => {
+    const codigo = `0DEF${String(n + 1).padStart(6, '0')}`;
+    await query("INSERT INTO pulseira (codigo, status, empresaId, criadoEm) VALUES (@codigo, 'disponivel', @empresaId, GETDATE())", { codigo, empresaId: evento.empresaId });
+    return chamar(kiosk, 'post', '/participants', {
+      usuario: usuarioKiosk,
+      body: { eventId: evento.eventoId, nome: `Nascimento ${++n}`, braceletCode: codigo, ...extra },
+    });
+  };
 
   try {
     await withTransaction(async () => {

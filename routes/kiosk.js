@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
+const { avaliarPulseira, MOTIVO } = require('../utils/pulseiraKiosk');
 const { isAvatarValido, gerarAvatarMontado } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
@@ -125,12 +126,9 @@ router.get('/bracelets/:codigo', async (req, res) => {
       { codigo, empresaId: req.user.empresaId }
     );
 
-    if (!bracelet) {
-      return res.json({ codigo, exists: false, status: null, available: true });
-    }
-
-    const available = String(bracelet.status || '').toLowerCase() === 'disponivel' && !bracelet.criancaId;
-    res.json({ codigo: bracelet.codigo, exists: true, status: bracelet.status, available });
+    // Só vale pulseira que o buffet recebeu (está no estoque dele): fora do estoque é recusada já na leitura,
+    // com o motivo, em vez de a criança montar o personagem e falhar só no fim.
+    res.json({ codigo: bracelet?.codigo || codigo, ...avaliarPulseira(bracelet) });
   } catch (error) {
     console.error('❌ Kiosk: erro ao consultar pulseira:', error.message);
     res.status(500).json({ error: 'Não foi possível verificar a pulseira' });
@@ -245,23 +243,16 @@ router.post('/participants', async (req, res) => {
         if (!team) throw httpError('Time não pertence ao evento selecionado', 400);
       }
 
-      let bracelet = await tx.queryOne(
+      // A pulseira precisa estar no estoque do buffet e livre; o kiosk não cria pulseira nova aqui.
+      const bracelet = await tx.queryOne(
         `SELECT codigo, status, criancaId, empresaId
          FROM pulseira
          WHERE ${uidSqlExpression('codigo')} = @codigo AND LOWER(empresaId) = LOWER(@empresaId)`,
         { codigo, empresaId: event.empresaId }
       );
-      if (!bracelet) {
-        await tx.query(
-          `INSERT INTO pulseira (codigo, status, empresaId, criadoEm)
-           VALUES (@codigo, 'disponivel', @empresaId, GETDATE())`,
-          { codigo, empresaId: event.empresaId }
-        );
-        bracelet = { codigo, status: 'disponivel', criancaId: null, empresaId: event.empresaId };
-      }
-
-      if (String(bracelet.status || '').toLowerCase() !== 'disponivel' || bracelet.criancaId) {
-        throw httpError('Esta pulseira não está disponível para vínculo', 409);
+      const avaliacao = avaliarPulseira(bracelet);
+      if (!avaliacao.available) {
+        throw httpError(avaliacao.mensagem, avaliacao.motivo === MOTIVO.FORA_DO_ESTOQUE ? 404 : 409);
       }
 
       // Avatar sem repetir no evento: quem volta tenta manter o do cadastro (se outro já o usa, entra um livre)

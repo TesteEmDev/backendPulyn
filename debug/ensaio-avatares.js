@@ -4,7 +4,7 @@
 require('dotenv').config();
 const assert = require('node:assert/strict');
 const database = require('../database');
-const { queryOne, allQuery, closeDB } = database;
+const { queryOne, allQuery, query, closeDB } = database;
 const withTransaction = database.withTransaction;
 // As rotas abrem a própria transação; no ensaio elas entram na transação externa (a que será desfeita).
 database.withTransaction = (trabalho) => trabalho(database);
@@ -32,10 +32,15 @@ async function main() {
   const usuarioKiosk = { id: 'k', role: 'kiosk', empresaId: evento.empresaId };
   const admin = { id: 'a', role: 'admin', empresaId: evento.empresaId };
   let n = 0;
-  const cadastrar = (avatar, cor) => chamar(kiosk, 'post', '/participants', {
-    usuario: usuarioKiosk,
-    body: { eventId: evento.eventoId, nome: `Ensaio ${++n}`, idade: 8, braceletCode: `0ABC${String(n).padStart(6, '0')}`, ...(avatar ? { avatar } : {}), ...(cor ? { cor } : {}) },
-  });
+  // O kiosk só aceita pulseira do estoque do buffet: a pulseira entra no estoque (dentro da transação desfeita) antes do cadastro.
+  const cadastrar = async (avatar, cor) => {
+    const codigo = `0ABC${String(n + 1).padStart(6, '0')}`;
+    await query("INSERT INTO pulseira (codigo, status, empresaId, criadoEm) VALUES (@codigo, 'disponivel', @empresaId, GETDATE())", { codigo, empresaId: evento.empresaId });
+    return chamar(kiosk, 'post', '/participants', {
+      usuario: usuarioKiosk,
+      body: { eventId: evento.eventoId, nome: `Ensaio ${++n}`, idade: 8, braceletCode: codigo, ...(avatar ? { avatar } : {}), ...(cor ? { cor } : {}) },
+    });
+  };
   const emUso = async () => new Set((await allQuery('SELECT avatar FROM crianca WHERE eventoId = @e AND avatar IS NOT NULL', { e: evento.eventoId })).map((r) => r.avatar));
 
   try {
