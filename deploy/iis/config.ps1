@@ -95,3 +95,77 @@ function Ler-UrlPostgres($url) {
 function Gravar-TextoUtf8($caminho, $texto) {
     [IO.File]::WriteAllText($caminho, $texto, (New-Object Text.UTF8Encoding($false)))
 }
+
+# Todas as chaves que o backend le no .env de producao, na ordem do arquivo. Padrao vazio = o backend usa o valor
+# padrao dele (todas sao lidas com "valor || padrao"). Secao = titulo de um bloco; Nota = comentario acima da chave.
+function Modelo-Env {
+    $m = @()
+    $m += [pscustomobject]@{ Secao = 'Servidor' }
+    $m += [pscustomobject]@{ Chave = 'NODE_ENV'; Padrao = 'production' }
+    $m += [pscustomobject]@{ Chave = 'PORT'; Padrao = [string]$PortaBackend; Nota = 'Porta do Node (o IIS repassa para ela). Se mudar, mude tambem o web.config.' }
+    $m += [pscustomobject]@{ Chave = 'HOST'; Padrao = '127.0.0.1' }
+    $m += [pscustomobject]@{ Chave = 'FRONTEND_URL'; Padrao = ''; Nota = 'Endereco do site, usado nos QR codes e nos convites de familia. Se o IP mudar, use trocar-rede.ps1.' }
+    $m += [pscustomobject]@{ Chave = 'CHECKPOINT_SERVER_URL'; Padrao = ''; Nota = 'Endereco que os checkpoints usam para falar com o servidor (ex.: https://192.168.0.50). Vazio: descobre sozinho.' }
+    $m += [pscustomobject]@{ Chave = 'EVENT_TIMEZONE'; Padrao = 'America/Sao_Paulo'; Nota = 'Fuso horario dos eventos.' }
+    $m += [pscustomobject]@{ Chave = 'EXIGIR_TELEFONE_RESPONSAVEL'; Padrao = '0'; Nota = '1 = o cadastro da familia exige o telefone do responsavel.' }
+    $m += [pscustomobject]@{ Secao = 'Banco de dados (gerado pelo instalador: a senha tambem esta no PostgreSQL, nao mude so aqui)' }
+    $m += [pscustomobject]@{ Chave = 'DB_DRIVER'; Padrao = 'postgres' }
+    $m += [pscustomobject]@{ Chave = 'DATABASE_URL'; Padrao = '' }
+    $m += [pscustomobject]@{ Chave = 'DB_SSL'; Padrao = 'false' }
+    $m += [pscustomobject]@{ Chave = 'DB_TIMEOUT'; Padrao = '30000'; Nota = 'Tempo maximo para conectar, em milissegundos.' }
+    $m += [pscustomobject]@{ Chave = 'PG_POOL_MAX'; Padrao = '10'; Nota = 'Maximo de conexoes abertas com o banco.' }
+    $m += [pscustomobject]@{ Secao = 'Seguranca' }
+    $m += [pscustomobject]@{ Chave = 'JWT_SECRET'; Padrao = ''; Nota = 'Assina os logins. Se mudar, todo mundo precisa entrar de novo.' }
+    $m += [pscustomobject]@{ Secao = 'E-mail (Brevo): confirmacao de cadastro e "Esqueci minha senha". Vazio: nenhum e-mail e enviado' }
+    $m += [pscustomobject]@{ Chave = 'BREVO_API_KEY'; Padrao = ''; Nota = 'Chave de API da conta Brevo.' }
+    $m += [pscustomobject]@{ Chave = 'EMAIL_REMETENTE'; Padrao = ''; Nota = 'E-mail remetente ja validado no Brevo.' }
+    $m += [pscustomobject]@{ Chave = 'EMAIL_REMETENTE_NOME'; Padrao = 'Pulyn'; Nota = 'Nome que aparece para quem recebe.' }
+    $m += [pscustomobject]@{ Chave = 'EMAIL_LOGO_URL'; Padrao = ''; Nota = 'Endereco publico da logo usada nos e-mails. Vazio: logo padrao do Pulyn.' }
+    $m += [pscustomobject]@{ Secao = 'Sincronizacao com a nuvem (Supabase). So UM backend pode sincronizar com a mesma nuvem (veja README-IIS.md)' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_ENABLED'; Padrao = '0'; Nota = '1 = liga a sincronizacao (precisa do SYNC_NUVEM_URL).' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_NUVEM_URL'; Padrao = ''; Nota = 'postgresql://usuario:senha@servidor:porta/banco da nuvem.' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_NUVEM_SSL'; Padrao = 'true' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_EMPRESA_ID'; Padrao = ''; Nota = 'Sincroniza so esta empresa. Vazio: todas.' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_INTERVALO_MS'; Padrao = '15000' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_LOTE'; Padrao = '500' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_RETENCAO_DIAS'; Padrao = '7' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_MARGEM_SEGUNDOS'; Padrao = '60' }
+    $m += [pscustomobject]@{ Chave = 'SYNC_RECARGA'; Padrao = '0' }
+    return $m
+}
+
+# Texto do .env completo. $Valores (hashtable CHAVE -> valor) substitui o padrao das chaves geradas na instalacao.
+function Montar-Env([hashtable]$Valores, [string]$Cabecalho) {
+    $linhas = @($Cabecalho, '# Valor vazio = o sistema usa o padrao. Depois de mudar algo: Restart-Service PulynBackend')
+    foreach ($item in Modelo-Env) {
+        if ($item.Secao) { $linhas += ''; $linhas += ('# --- ' + $item.Secao + ' ---'); continue }
+        if ($item.Nota) { $linhas += ('# ' + $item.Nota) }
+        $valor = if ($Valores -and $Valores.ContainsKey($item.Chave)) { [string]$Valores[$item.Chave] } else { $item.Padrao }
+        $linhas += ($item.Chave + '=' + $valor)
+    }
+    return (($linhas -join "`r`n") + "`r`n")
+}
+
+# Acrescenta no fim de um .env existente as chaves do modelo que faltam nele (com o valor padrao, que equivale a nao ter
+# a chave). Nao muda nem apaga nenhuma linha que ja existe. Devolve quantas chaves foram acrescentadas.
+function Completar-Env($arquivo) {
+    if (-not (Test-Path $arquivo)) { return 0 }
+    $existentes = @{}
+    foreach ($linha in Get-Content $arquivo -Encoding UTF8) {
+        if ($linha -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=') { $existentes[$Matches[1]] = $true }
+    }
+    $novas = @()
+    foreach ($item in Modelo-Env) {
+        if ($item.Secao -or $existentes.ContainsKey($item.Chave)) { continue }
+        if ($item.Nota) { $novas += ('# ' + $item.Nota) }
+        $novas += ($item.Chave + '=' + $item.Padrao)
+    }
+    $qtd = @($novas | Where-Object { $_ -notlike '#*' }).Count
+    if ($qtd -eq 0) { return 0 }
+    $texto = Get-Content $arquivo -Raw -Encoding UTF8
+    $inicio = if ($texto -and -not $texto.EndsWith("`n")) { "`r`n" } else { '' }
+    $bloco = $inicio + "`r`n# --- Chaves acrescentadas em " + (Get-Date -Format 'dd/MM/yyyy HH:mm') +
+             ' (valor vazio = o sistema usa o padrao) ---' + "`r`n" + ($novas -join "`r`n") + "`r`n"
+    [IO.File]::AppendAllText($arquivo, $bloco, (New-Object Text.UTF8Encoding($false)))
+    return $qtd
+}

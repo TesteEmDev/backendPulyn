@@ -56,6 +56,17 @@ O banco começa vazio, só com a estrutura e o usuário master. Não há dados d
 
 O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 
+### O arquivo `.env`
+
+O setup.exe não leva nenhum `.env`: ele cria `C:\Pulyn\backend\.env` no buffet, com **todas** as chaves que o backend lê, separadas em blocos comentados. Cada chave tem uma explicação.
+- **Geradas na instalação:** `DATABASE_URL` (senha aleatória do usuário `pulyn_app`), `JWT_SECRET` (aleatório, diferente em cada buffet) e `FRONTEND_URL` (`https://IP`).
+- **Vazias, para preencher depois:** o e-mail (`BREVO_API_KEY` e `EMAIL_REMETENTE`; sem elas, o "Esqueci minha senha" não envia o código), a nuvem (`SYNC_NUVEM_URL` e `SYNC_EMPRESA_ID`; `SYNC_ENABLED` fica `0`), `CHECKPOINT_SERVER_URL` e `EMAIL_LOGO_URL`.
+- **As demais** vêm com o valor padrão do sistema.
+
+Uma chave vazia funciona como se não existisse. Para mudar alguma coisa, abra o Bloco de Notas como administrador, edite o arquivo e rode `Restart-Service PulynBackend`. O acesso ao arquivo é só de administradores.
+
+A atualização nunca muda nem apaga linhas do `.env`. Se uma versão nova do sistema tiver chaves que o arquivo ainda não tem, elas são acrescentadas no fim, com o valor padrão. A lista de chaves fica em `Modelo-Env`, no `deploy/iis/config.ps1`.
+
 ## Atualizar um buffet já instalado
 
 Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Iniciar. Também dá para rodar o setup e escolher **Atualizar**. Funciona como o `atualizar.ps1`:

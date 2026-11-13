@@ -168,32 +168,23 @@ if (Test-Path $envProd) {
     if ($texto -match '(?m)^DATABASE_URL=.*$') { $texto = [regex]::Replace($texto, '(?m)^DATABASE_URL=.*$', $novaUrl) } else { $texto += "`r`n" + $novaUrl + "`r`n" }
     Gravar-TextoUtf8 $envProd $texto
     Escrever-Ok 'DATABASE_URL atualizado no .env existente (o resto foi mantido)'
+    $acrescentadas = Completar-Env $envProd
+    if ($acrescentadas -gt 0) { Escrever-Ok ([string]$acrescentadas + ' chave(s) que faltavam acrescentadas no fim, com o valor padrao') }
 } else {
     $ip = if ($Ip) { $Ip } else { Obter-IpLan }
+    # Todas as chaves vao para o arquivo; as que nao sao geradas aqui ficam vazias ou com o padrao, prontas para preencher.
+    $valores = @{
+        DATABASE_URL = 'postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd
+        JWT_SECRET   = Novo-Segredo 32
+        FRONTEND_URL = 'https://' + $ip
+    }
     # Buffet novo (banco limpo) nao herda a nuvem do desenvolvimento: os dados dele iriam para o Supabase da Pulyn.
     $nuvemUrl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_URL' } else { $null }
     $nuvemSsl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_SSL' } else { $null }
-    if (-not $nuvemSsl) { $nuvemSsl = 'true' }
-    # Atencao: cada elemento com "+" precisa de parenteses (a virgula tem precedencia sobre o +).
-    $linhas = @(
-        ('# Producao (IIS). Gerado por 02-banco-producao.ps1 em ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')),
-        'NODE_ENV=production',
-        ('PORT=' + $PortaBackend),
-        'HOST=127.0.0.1',
-        'DB_DRIVER=postgres',
-        ('DATABASE_URL=postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd),
-        'DB_SSL=false',
-        ('JWT_SECRET=' + (Novo-Segredo 32)),
-        ('FRONTEND_URL=https://' + $ip),
-        '',
-        '# Sincronizacao com a nuvem: so UM backend deve sincronizar com o Supabase.',
-        '# Deixe 0 ate desligar a sincronizacao do ambiente de desenvolvimento (veja README-IIS.md).',
-        'SYNC_ENABLED=0',
-        'SYNC_INTERVALO_MS=15000'
-    )
-    if ($nuvemUrl) { $linhas += 'SYNC_NUVEM_URL=' + $nuvemUrl; $linhas += 'SYNC_NUVEM_SSL=' + $nuvemSsl }
-    Gravar-TextoUtf8 $envProd (($linhas -join "`r`n") + "`r`n")
-    Escrever-Ok ('criado ' + $envProd)
+    if ($nuvemUrl) { $valores.SYNC_NUVEM_URL = $nuvemUrl }
+    if ($nuvemSsl) { $valores.SYNC_NUVEM_SSL = $nuvemSsl }
+    Gravar-TextoUtf8 $envProd (Montar-Env $valores ('# Producao (IIS). Gerado por 02-banco-producao.ps1 em ' + (Get-Date -Format 'dd/MM/yyyy HH:mm')))
+    Escrever-Ok ('criado ' + $envProd + ' (todas as chaves; e-mail e nuvem ficam vazios, para preencher depois)')
     Escrever-Aviso ('FRONTEND_URL ficou https://' + $ip + ' (IP atual desta maquina). Se o IP mudar, ajuste aqui.')
 }
 # Restringe o arquivo (tem senha do banco e segredo dos tokens): Administradores, SYSTEM e quem rodou este script.

@@ -25,7 +25,7 @@ O Web NFC só funciona em HTTPS confiável. Copie `C:\Pulyn\certs\PulynCA.cer` p
 
 ## Atualizar uma versão
 
-Atualize o repositório (git pull / branch desejada) e rode `atualizar.ps1` como administrador. Ele faz backup do banco e republica. O `.env` de produção nunca é sobrescrito.
+Atualize o repositório (git pull / branch desejada) e rode `atualizar.ps1` como administrador. Ele faz backup do banco e republica. O `.env` de produção nunca é sobrescrito: só ganha no fim as chaves novas que faltarem, com o valor padrão (lista em `Modelo-Env`, no `config.ps1`).
 
 ## Pontos de atenção
 

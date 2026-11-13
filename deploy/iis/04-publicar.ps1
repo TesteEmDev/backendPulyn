@@ -24,6 +24,9 @@ $envProd = Join-Path $Backend '.env'
 if (-not (Test-Path $envProd)) { throw ('Nao achei ' + $envProd + ': rode 02-banco-producao.ps1.') }
 $jwt = Ler-Env $envProd 'JWT_SECRET'
 if (-not $jwt -or $jwt -eq 'sua-chave-secreta-super-segura-2026') { throw 'JWT_SECRET ausente ou padrao no .env de producao.' }
+# .env de versoes antigas: acrescenta no fim as chaves que faltam (vazias ou com o padrao), sem mudar as que existem.
+$acrescentadas = Completar-Env $envProd
+if ($acrescentadas -gt 0) { Escrever-Ok ([string]$acrescentadas + ' chave(s) nova(s) acrescentada(s) no fim do .env, com o valor padrao') }
 $cert = Get-ChildItem Cert:\LocalMachine\My | Where-Object { $_.Subject -eq ('CN=' + $NomeCertSrv) -and $_.NotAfter -gt (Get-Date) } |
         Sort-Object NotAfter -Descending | Select-Object -First 1
 if (-not $cert) { throw 'Certificado do servidor nao encontrado: rode 03-certificado.ps1.' }
