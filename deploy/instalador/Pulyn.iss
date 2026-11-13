@@ -287,10 +287,20 @@ end;
 function LerVersaoInstalada: string;
 var
   Linhas: TArrayOfString;
+  Data: string;
 begin
   Result := '';
   if LoadStringsFromFile('C:\Pulyn\pacote\VERSAO.txt', Linhas) and (GetArrayLength(Linhas) > 0) then
     Result := Trim(Linhas[0]);
+  // Formato antigo da atualizacao ("Pulyn GitHub main 2026-11-13 10:11"): mostra so a data.
+  if Pos('Pulyn GitHub ', Result) = 1 then
+  begin
+    Data := Copy(Result, Length(Result) - 15, 16);
+    if (Length(Data) = 16) and (Data[5] = '-') and (Data[8] = '-') and (Data[11] = ' ') then
+      Result := 'Pulyn atualizado em ' + Copy(Data, 9, 2) + '/' + Copy(Data, 6, 2) + '/' + Copy(Data, 1, 4) + ' ' + Copy(Data, 12, 5)
+    else
+      StringChangeEx(Result, ' GitHub', '', True);
+  end;
 end;
 
 function IpValido(Ip: string): Boolean;
@@ -570,7 +580,7 @@ begin
   else if Modo = MODO_ATUALIZAR then
   begin
     Result := 'ATUALIZAR o Pulyn';
-    if VersaoInstalada <> '' then Result := Result + NewLine + NewLine + 'Instalada: ' + VersaoInstalada;
+    if VersaoInstalada <> '' then Result := Result + NewLine + NewLine + 'Versão instalada: ' + VersaoInstalada;
     Result := Result + NewLine + NewLine +
       'O que acontece:' + NewLine +
       '- baixa só o que mudou (na primeira vez, o sistema todo);' + NewLine +
