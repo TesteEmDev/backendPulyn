@@ -31,7 +31,7 @@ if (-not ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal
     Start-Process powershell.exe -Verb RunAs -ArgumentList $argumentos
     exit 0
 }
-try { $Host.UI.RawUI.WindowTitle = 'Pulyn - atualizacao pelo GitHub' } catch { }
+try { $Host.UI.RawUI.WindowTitle = 'Pulyn - atualizacao' } catch { }
 
 foreach ($p in $Raiz, $Logs) { if (-not (Test-Path $p)) { New-Item -ItemType Directory -Path $p | Out-Null } }
 $log = Join-Path $Logs ('atualizacao-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
@@ -60,14 +60,14 @@ function Sincronizar($git, $pasta, $url) {
     $arvoreAntes = $null
     if (-not (Test-Path (Join-Path $pasta '.git'))) {
         if (Test-Path $pasta) { Remove-Item $pasta -Recurse -Force }
-        Write-Host ('    baixando ' + $url + ' (primeira vez)...')
+        Write-Host ('    baixando o ' + (Split-Path $pasta -Leaf) + ' (primeira vez)...')
         & $git clone --quiet --depth 1 --single-branch --branch $Branch $url $pasta
-        Conferir-Saida ('Nao consegui baixar ' + $url + ' (confira a internet)')
+        Conferir-Saida 'Nao consegui baixar a versao nova (confira a internet)'
     } else {
         $antes = (& $git -C $pasta rev-parse HEAD).Trim()
         $arvoreAntes = (& $git -C $pasta rev-parse 'HEAD^{tree}').Trim()
         & $git -C $pasta fetch --quiet --depth 1 origin $Branch
-        Conferir-Saida ('Nao consegui buscar as mudancas de ' + $url + ' (confira a internet)')
+        Conferir-Saida 'Nao consegui buscar a versao nova (confira a internet)'
         & $git -C $pasta reset --quiet --hard FETCH_HEAD
         Conferir-Saida 'git reset falhou'
         # Tira arquivos soltos que nao estao no GitHub (node_modules fica: ele e ignorado pelo git).
@@ -91,7 +91,7 @@ function Resumo($git, $pasta, $nome, $r) {
 
 try {
     Write-Host ''
-    Write-Host ('ATUALIZACAO do Pulyn pelo GitHub (branch ' + $Branch + '): baixa so o que mudou e publica.') -ForegroundColor Cyan
+    Write-Host 'ATUALIZACAO do Pulyn: baixa so o que mudou e publica.' -ForegroundColor Cyan
     Write-Host 'O banco, as senhas e o certificado ficam como estao.' -ForegroundColor Cyan
     Write-Host ('Registro: ' + $log)
     if (-not (Test-Path (Join-Path $Backend '.env'))) { throw 'O Pulyn nao esta instalado neste computador (falta C:\Pulyn\backend\.env). Use a Primeira instalacao do setup.' }
@@ -99,14 +99,14 @@ try {
     Proximo-Passo 'Preparando o Git'
     $git = Achar-Git
     if (-not $git) {
-        if (-not $MinGitZip -or -not (Test-Path $MinGitZip)) { throw 'O Git nao esta instalado. Rode o setup do Pulyn e escolha "Atualizar pela internet" (ele instala o Git).' }
+        if (-not $MinGitZip -or -not (Test-Path $MinGitZip)) { throw 'O Git nao esta instalado. Rode o setup do Pulyn e escolha "Atualizar" (ele instala o Git).' }
         Expand-Archive -Path $MinGitZip -DestinationPath (Join-Path $Raiz 'git') -Force
         $git = Achar-Git
         if (-not $git) { throw 'Nao consegui instalar o Git em C:\Pulyn\git.' }
     }
     Escrever-Ok ((& $git --version) + ' em ' + $git)
 
-    Proximo-Passo 'Buscando as mudancas no GitHub'
+    Proximo-Passo 'Buscando a versao nova'
     if (-not (Test-Path $fonte)) { New-Item -ItemType Directory -Path $fonte | Out-Null }
     $back = Sincronizar $git (Join-Path $fonte 'BackEnd') $RepoBackUrl
     $front = Sincronizar $git (Join-Path $fonte 'FrontEnd') $RepoFrontUrl
@@ -116,12 +116,12 @@ try {
     $semMudanca = (-not $back.Mudou) -and (-not $front.Mudou)
     if ($semMudanca -and -not $Forcar) {
         Write-Host ''
-        Write-Host 'O Pulyn ja esta na versao mais nova do GitHub. Nada foi alterado.' -ForegroundColor Green
+        Write-Host 'O Pulyn ja esta na versao mais nova. Nada foi alterado.' -ForegroundColor Green
         throw 'SEM_MUDANCAS'
     }
 
     $atualizarRepo = Join-Path $fonte 'BackEnd\deploy\iis\atualizar.ps1'
-    if (-not (Test-Path $atualizarRepo)) { throw ('A branch ' + $Branch + ' do GitHub nao tem deploy\iis\atualizar.ps1.') }
+    if (-not (Test-Path $atualizarRepo)) { throw ('A versao baixada (branch ' + $Branch + ') nao tem deploy\iis\atualizar.ps1.') }
 
     Proximo-Passo 'Dependencias das telas'
     $repoFront = Join-Path $fonte 'FrontEnd'
@@ -149,7 +149,7 @@ try {
     $pacote = Join-Path $Raiz 'pacote'
     if (-not (Test-Path $pacote)) { New-Item -ItemType Directory -Path $pacote | Out-Null }
     Gravar-TextoUtf8 (Join-Path $pacote 'VERSAO.txt') (
-        'Pulyn GitHub ' + $Branch + ' ' + (Get-Date -Format 'yyyy-MM-dd HH:mm') + "`r`n" +
+        'Pulyn atualizado em ' + (Get-Date -Format 'dd/MM/yyyy HH:mm') + "`r`n" +
         "Origem GitHub`r`n" +
         'BackEnd ' + $Branch + ' @ ' + $back.Depois.Substring(0, 7) + "`r`n" +
         'FrontEnd ' + $Branch + ' @ ' + $front.Depois.Substring(0, 7) + "`r`n")
@@ -157,7 +157,7 @@ try {
     $sucesso = $true
     Write-Host ''
     Write-Host '==================================================================' -ForegroundColor Green
-    Write-Host ' Pulyn atualizado com a versao do GitHub.' -ForegroundColor Green
+    Write-Host ' Pulyn atualizado para a versao mais nova.' -ForegroundColor Green
     Write-Host '==================================================================' -ForegroundColor Green
     Write-Host 'Tablets, celulares e placas continuam funcionando sem mudar nada.'
 } catch {

@@ -34,7 +34,7 @@ O arquivo sai em `BackEnd\deploy\instalador\saida\`. O `C:\Pulyn\pacote\VERSAO.t
 O assistente usa o visual do Pulyn: fundo escuro, logo e mascote. As imagens ficam em `imagens/`. Na segunda tela você escolhe o que fazer:
 
 - **Primeira instalação.** Só aparece liberada se o Pulyn ainda não estiver instalado.
-- **Atualizar pela internet (GitHub)** e **Atualizar com este instalador (sem internet).** Só aparecem liberadas se o Pulyn já estiver instalado.
+- **Atualizar.** Só aparece liberada se o Pulyn já estiver instalado. Sempre baixa a versão mais nova pela internet; o sistema que veio dentro do setup.exe só é usado na primeira instalação.
 - **Desinstalar.** Aparece liberada se existir alguma coisa do Pulyn no computador.
 
 A tela mostra a situação do computador e a versão instalada.
@@ -58,7 +58,7 @@ O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 
 ## Atualizar um buffet já instalado
 
-**Pela internet (recomendado).** Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Iniciar. Também dá para rodar o setup e escolher **Atualizar pela internet (GitHub)**. Funciona como o `atualizar.ps1`:
+Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Iniciar. Também dá para rodar o setup e escolher **Atualizar**. Funciona como o `atualizar.ps1`:
 1. Faz `git pull` da `main` dos dois repositórios em `C:\Pulyn\fonte`. Baixa só o que mudou; na primeira vez, baixa o código todo.
 2. Se o conteúdo não mudou, avisa e para, sem mexer no sistema. Para publicar mesmo assim, use `-Forcar`.
 3. Instala as dependências das telas, só se o `package-lock.json` mudou. Na primeira vez isso leva alguns minutos.
@@ -66,9 +66,7 @@ O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 
 O Git portátil fica em `C:\Pulyn\git`. Precisa de internet. O registro fica em `C:\Pulyn\logs\atualizacao-*.log`. Para usar outra branch: `C:\Pulyn\scripts\atualizar-github.ps1 -Branch <nome>`.
 
-**Com o setup, sem internet.** Rode o setup.exe da versão nova e escolha **Atualizar com este instalador**. Ele publica a versão que veio dentro do arquivo.
-
-Nos dois casos, o banco, o `.env`, as senhas e o certificado continuam os mesmos, e o Node.js, o PostgreSQL e o IIS não são reinstalados.
+O banco, o `.env`, as senhas e o certificado continuam os mesmos, e o Node.js, o PostgreSQL e o IIS não são reinstalados.
 
 ## Desinstalar
 
