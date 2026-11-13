@@ -2,7 +2,7 @@
 # Os scripts sao ASCII de proposito: o Windows PowerShell 5.1 le arquivos sem BOM como ANSI.
 $ErrorActionPreference = 'Stop'
 
-$Raiz         = 'C:\Pulyn'
+$Raiz         = if ($env:PULYN_RAIZ) { $env:PULYN_RAIZ } else { 'C:\Pulyn' }   # PULYN_RAIZ: so para ensaios
 $Backend      = Join-Path $Raiz 'backend'       # codigo do backend + .env de producao
 $Site         = Join-Path $Raiz 'site'          # build do frontend + web.config
 $Servico      = Join-Path $Raiz 'servico'       # executavel do servico do Windows (WinSW)

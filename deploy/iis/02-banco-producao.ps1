@@ -5,7 +5,11 @@
 # O banco de producao fica no PostgreSQL DESTA maquina (localhost). Os dados saem do servidor do DATABASE_URL do .env de
 # desenvolvimento: se ele for outra maquina da rede, o script le de la (so leitura) e grava aqui, usando o usuario
 # administrador do PostgreSQL local (-AdminLocal, padrao postgres) - a senha e pedida, ou vem de PULYN_PG_ADMIN_SENHA.
-param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432)
+#
+# -BancoLimpo: instalacao de um buffet novo. NAO copia o desenvolvimento: cria o banco so com a estrutura (banco-base.sql),
+# cadastra a empresa da Pulyn e o usuario master (-EmailMaster; a senha vem de PULYN_MASTER_SENHA ou e pedida) e gera o
+# .env sem sincronizacao com a nuvem. Nao precisa do .env de desenvolvimento.
+param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$EmailMaster, [string]$Ip)
 . "$PSScriptRoot\config.ps1"
 Exigir-Repo
 
@@ -13,22 +17,40 @@ $psql = Join-Path $PgBin 'psql.exe'
 $pgDump = Join-Path $PgBin 'pg_dump.exe'
 $pgRestore = Join-Path $PgBin 'pg_restore.exe'
 
-Escrever-Passo 'Credenciais do PostgreSQL (do .env de desenvolvimento)'
-$envDev = Join-Path $RepoBackend '.env'
-$urlDev = Ler-Env $envDev 'DATABASE_URL'
-$dev = if ($urlDev) { Ler-UrlPostgres $urlDev } else { $null }
-if (-not $dev) { throw ('Nao achei DATABASE_URL em ' + $envDev + '.') }
-if ($dev.Banco -ne $BancoOrigem) { Escrever-Aviso ('o banco do .env de desenvolvimento e "' + $dev.Banco + '", e a origem da copia sera "' + $BancoOrigem + '".') }
-$connOrigem = @('-h', $dev.Servidor, '-p', $dev.Porta, '-U', $dev.Usuario)
-Escrever-Ok ('origem dos dados: ' + $dev.Usuario + '@' + $dev.Servidor + ':' + $dev.Porta)
+if ($BancoLimpo) {
+    $arquivoBase = Join-Path $PSScriptRoot 'banco-base.sql'
+    if (-not (Test-Path $arquivoBase)) { throw ('Nao achei ' + $arquivoBase + ' (gere com gerar-banco-base.ps1).') }
+    if (-not $EmailMaster) { $EmailMaster = Read-Host '    E-mail do usuario master' }
+    $senhaMaster = $env:PULYN_MASTER_SENHA
+    if (-not $senhaMaster) {
+        $s1 = [Net.NetworkCredential]::new('', (Read-Host '    Senha do usuario master (minimo 6 caracteres)' -AsSecureString)).Password
+        $s2 = [Net.NetworkCredential]::new('', (Read-Host '    Repita a senha do master' -AsSecureString)).Password
+        if ($s1 -cne $s2) { throw 'As senhas do master nao conferem.' }
+        $senhaMaster = $s1
+    }
+    if ($senhaMaster.Length -lt 6) { throw 'A senha do master precisa ter pelo menos 6 caracteres.' }
+    $envDev = $null
+    $dev = $null
+    $connOrigem = $null
+} else {
+    Escrever-Passo 'Credenciais do PostgreSQL (do .env de desenvolvimento)'
+    $envDev = Join-Path $RepoBackend '.env'
+    $urlDev = Ler-Env $envDev 'DATABASE_URL'
+    $dev = if ($urlDev) { Ler-UrlPostgres $urlDev } else { $null }
+    if (-not $dev) { throw ('Nao achei DATABASE_URL em ' + $envDev + '.') }
+    if ($dev.Banco -ne $BancoOrigem) { Escrever-Aviso ('o banco do .env de desenvolvimento e "' + $dev.Banco + '", e a origem da copia sera "' + $BancoOrigem + '".') }
+    $connOrigem = @('-h', $dev.Servidor, '-p', $dev.Porta, '-U', $dev.Usuario)
+    Escrever-Ok ('origem dos dados: ' + $dev.Usuario + '@' + $dev.Servidor + ':' + $dev.Porta)
+}
 
 # O servidor do desenvolvimento e esta maquina? Se nao, o banco de producao e criado aqui com o administrador local.
 $enderecosLocais = @('localhost', '127.0.0.1', '::1') + @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | ForEach-Object { $_.IPAddress })
-if ($enderecosLocais -contains $dev.Servidor) {
+if ((-not $BancoLimpo) -and ($enderecosLocais -contains $dev.Servidor)) {
     $destino = $dev
     $connDestino = $connOrigem
 } else {
-    Escrever-Passo ('O banco de desenvolvimento esta em ' + $dev.Servidor + '. O de producao sera criado no PostgreSQL desta maquina')
+    if ($BancoLimpo) { Escrever-Passo 'O banco sera criado no PostgreSQL desta maquina' }
+    else { Escrever-Passo ('O banco de desenvolvimento esta em ' + $dev.Servidor + '. O de producao sera criado no PostgreSQL desta maquina') }
     $senhaAdmin = $env:PULYN_PG_ADMIN_SENHA
     if (-not $senhaAdmin) {
         $seguro = Read-Host ('    Senha do usuario "' + $AdminLocal + '" do PostgreSQL local') -AsSecureString
@@ -90,6 +112,27 @@ if ($usuarioExiste) {
 Rodar-Sql 'postgres' ('create database "' + $BancoProd + '" owner ' + $UsuarioApp + ' encoding ''UTF8'';')
 Escrever-Ok 'banco criado'
 
+if ($BancoLimpo) {
+    Escrever-Passo 'Criando a estrutura do banco (sem dados)'
+    # Aplica como pulyn_app (dono do banco), numa transacao so: se algo falhar, o banco fica vazio e da para rodar com -Recriar.
+    $env:PGPASSWORD = $senhaApp
+    try {
+        & $psql -h localhost -p ([string]$destino.Porta) -U $UsuarioApp -d $BancoProd -v ON_ERROR_STOP=1 -q -1 -f $arquivoBase | Out-Null
+        Conferir-Saida 'Falha ao criar a estrutura do banco (rode de novo com -Recriar)'
+        $qtdTabelas = & $psql -h localhost -p ([string]$destino.Porta) -U $UsuarioApp -d $BancoProd -At -c "select count(*) from information_schema.tables where table_schema = 'public'"
+    } finally { $env:PGPASSWORD = $null }
+    Escrever-Ok ([string]$qtdTabelas + ' tabelas criadas')
+
+    Escrever-Passo 'Usuario master'
+    $env:DATABASE_URL = 'postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd
+    $env:MASTER_EMAIL = $EmailMaster
+    $env:MASTER_SENHA = $senhaMaster
+    try {
+        & node (Join-Path $PSScriptRoot 'criar-master.js')
+        Conferir-Saida 'Nao consegui criar o usuario master'
+    } finally { Remove-Item Env:\DATABASE_URL, Env:\MASTER_EMAIL, Env:\MASTER_SENHA -ErrorAction SilentlyContinue }
+    $senhaMaster = $null
+} else {
 Escrever-Passo ('Copiando os dados de ' + $BancoOrigem)
 $dump = Join-Path $Backups ($BancoOrigem + '-copia-' + $carimbo + '.dump')
 Usar-Origem
@@ -109,6 +152,7 @@ $b = @(Consultar $BancoProd $sqlContagem)
 $dif = Compare-Object $a $b
 if ($dif) { $dif | ForEach-Object { Write-Host ('    ' + $_.SideIndicator + ' ' + $_.InputObject) }; throw 'A contagem de linhas difere entre origem e producao.' }
 Escrever-Ok ([string]$a.Count + ' tabelas com a mesma quantidade de linhas')
+}
 
 Escrever-Passo 'Arquivo .env de producao'
 $envProd = Join-Path $Backend '.env'
@@ -120,9 +164,10 @@ if (Test-Path $envProd) {
     Gravar-TextoUtf8 $envProd $texto
     Escrever-Ok 'DATABASE_URL atualizado no .env existente (o resto foi mantido)'
 } else {
-    $ip = Obter-IpLan
-    $nuvemUrl = Ler-Env $envDev 'SYNC_NUVEM_URL'
-    $nuvemSsl = Ler-Env $envDev 'SYNC_NUVEM_SSL'
+    $ip = if ($Ip) { $Ip } else { Obter-IpLan }
+    # Buffet novo (banco limpo) nao herda a nuvem do desenvolvimento: os dados dele iriam para o Supabase da Pulyn.
+    $nuvemUrl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_URL' } else { $null }
+    $nuvemSsl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_SSL' } else { $null }
     if (-not $nuvemSsl) { $nuvemSsl = 'true' }
     # Atencao: cada elemento com "+" precisa de parenteses (a virgula tem precedencia sobre o +).
     $linhas = @(
