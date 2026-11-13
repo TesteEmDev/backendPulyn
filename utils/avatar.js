@@ -18,9 +18,11 @@ function isAdventurerAvatarId(value) {
   return typeof value === 'string' && ADVENTURER_AVATAR_SET.has(value);
 }
 
-// Avatar montado pela criança no Kiosk/recepção: "pulyn1-" + 13 posições de peças/cores + 2 de flags (22 caracteres).
-// O desenho é refeito no front a partir do código; aqui só se confere o formato (o front valida cada posição ao ler).
-const AVATAR_MONTADO_REGEX = /^pulyn1-[0-9a-z]{15}$/;
+// Avatar montado pela criança no Kiosk/recepção (gerador: pacote @pulyn/avatar): "pulyn1-" + 15 letras/dígitos (posição de cada
+// peça, cor e detalhes). Códigos novos levam mais 4 (óculos, colar, brinco e cor dos acessórios) e quem escolheu uma cor de fundo
+// fora da paleta leva mais 6 dígitos hexadecimais no fim: 22, 26, 28 ou 32 caracteres. Os antigos, sem os acessórios, continuam valendo.
+// O desenho é refeito a partir do código; aqui só se confere o formato (a coluna guarda 64 caracteres).
+const AVATAR_MONTADO_REGEX = /^pulyn1-[A-Za-z0-9]{15}(?:[A-Za-z0-9]{4})?(?:[0-9a-f]{6})?$/;
 
 function isAvatarMontado(value) {
   return typeof value === 'string' && AVATAR_MONTADO_REGEX.test(value);
