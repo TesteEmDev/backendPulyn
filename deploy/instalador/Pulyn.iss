@@ -24,6 +24,12 @@ AppName=Pulyn
 AppVersion={#Versao}
 AppVerName=Pulyn {#Versao}
 AppPublisher=Pulyn
+; Propriedades do arquivo (Detalhes). O "Editor" da janela de administrador do Windows so muda com assinatura digital.
+VersionInfoCompany=Pulyn
+VersionInfoProductName=Pulyn
+VersionInfoDescription=Instalador do Pulyn
+VersionInfoCopyright=Pulyn
+VersionInfoProductTextVersion={#Versao}
 DefaultDirName=C:\Pulyn\pacote
 DisableDirPage=yes
 DisableProgramGroupPage=yes
