@@ -11,9 +11,10 @@ const { decodeAvatar, renderAvatarSvg, AVATAR_STYLE_VERSION } = require('@pulyn/
 const TAMANHOS = Object.freeze([64, 96, 128, 192, 256, 384]); // largura em pixels (a imagem é quadrada)
 const TAMANHO_PADRAO = 128;
 
-// Só o nome exato de um avatar montado entra: "pulyn1-" + 15 letras/dígitos + .png ou .svg.
+// Só o nome exato de um avatar montado entra: "pulyn1-" + 15 letras/dígitos, mais 4 dos acessórios e 6 da cor de fundo
+// própria quando houver (22, 26, 28 ou 32 caracteres), + .png ou .svg. Cada posição é conferida depois, ao decodificar.
 // Qualquer outro nome (os adventurer-*.svg prontos, por exemplo) é de quem chamou, não daqui.
-const ARQUIVO = /^(pulyn1-[0-9a-z]{15})\.(png|svg)$/;
+const ARQUIVO = /^(pulyn1-[0-9a-z]{15}(?:[0-9a-z]{4})?(?:[0-9a-f]{6})?)\.(png|svg)$/;
 
 function interpretarArquivo(nome) {
   const achou = typeof nome === 'string' ? ARQUIVO.exec(nome) : null;
