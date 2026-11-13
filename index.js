@@ -33,6 +33,8 @@ const masterRoutes = require('./routes/master');
 const checkpointsRoutes = require('./routes/checkpoints');
 const checkpointsMasterRoutes = require('./routes/checkpointsMaster');
 const checkpointsRecebimentoRoutes = require('./routes/checkpointsRecebimento');
+const pulseirasMasterRoutes = require('./routes/pulseirasMaster');
+const pulseirasRecebimentoRoutes = require('./routes/pulseirasRecebimento');
 const { identificarPorMac } = require('./utils/dispositivoMac');
 const comandosCheckpoint = require('./utils/comandosCheckpoint');
 const leiturasRoutes = require('./routes/leituras');
@@ -75,6 +77,9 @@ const { ensureBombaSchema } = require('./migrations/bomba');
 const { ensureRefemSchema } = require('./migrations/refem');
 const { ensureCodigoBuffetSchema } = require('./migrations/codigoBuffet');
 const { ensureCheckpointTransferSchema } = require('./migrations/checkpointTransferencia');
+const { garantirJogosDeTodasAsEmpresas, padronizarJogos } = require('./utils/jogosDoPlano');
+const { criarEmissor, enviarParaCanal, middlewareDeAviso, iniciarVigiaDeCheckpoints } = require('./utils/feedDados');
+const { statusEfetivo: statusEfetivoDoCheckpoint } = require('./utils/statusCheckpoint');
 const { ensureCheckpointIdNumericoSchema } = require('./migrations/checkpointIdNumerico');
 const { ensurePulseiraPorEmpresaSchema } = require('./migrations/pulseiraPorEmpresa');
 const { ensureUhfSchema } = require('./migrations/uhf');
@@ -94,6 +99,8 @@ const { ensureCheckpointPurposeSchema } = require('./migrations/checkpointPurpos
 const { ensureCheckpointMapPositionSchema } = require('./migrations/checkpointMapPosition');
 const { ensureMonsterHuntSchema } = require('./migrations/monster');
 const { ensureGameWinnerBonusesSchema } = require('./migrations/gameWinnerBonuses');
+const { ensureEventCheckpointHistorySchema } = require('./migrations/eventCheckpointHistory');
+const { ensurePulseiraTransferenciaSchema } = require('./migrations/pulseiraTransferencia');
 const { ensureAvatarSchema } = require('./migrations/avatar');
 const { ensureCompanyMapSchema, migrateExistingEventMapDataToCompanies } = require('./migrations/companyMap');
 const { ensureZoneConquestSchema } = require('./migrations/zoneConquest');
@@ -186,7 +193,7 @@ const interval = setInterval(() => {
 //       `UPDATE pontoVerificacao 
 //        SET status = 'offline' 
 //        WHERE status = 'online'
-//        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+//        AND LOWER(COALESCE(proposito, 'game')) = 'game'
 //        AND (last_seen IS NULL OR last_seen < @fiveMinutesAgo)`,
 //       { fiveMinutesAgo }
 //     );
@@ -225,6 +232,14 @@ global.broadcastToEvent = (eventoId, message) => {
   });
 };
 
+// Sessões do master: recebem as pulseiras lidas pelo leitor de estoque dele (routes/leituras.js, /reception)
+global.broadcastToMasters = (message) => {
+  const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
+  wss.clients.forEach((cliente) => {
+    if (cliente.readyState === 1 && cliente.user?.role === 'master') cliente.send(msgStr);
+  });
+};
+
 // Controle operacional do evento, isolado por empresa.
 global.broadcastToCompany = (empresaId, message) => {
   const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
@@ -235,6 +250,10 @@ global.broadcastToCompany = (empresaId, message) => {
     }
   });
 };
+
+// Canal de dados: avisa as telas, na hora, quando algum dado muda (utils/feedDados.js)
+const emitirDados = criarEmissor((topicos, empresas) => enviarParaCanal(wss, topicos, empresas));
+global.avisarDados = (topicos, empresas = []) => emitirDados(topicos, empresas);
 
 // ✨ NOVO: Função de broadcast para todos (manter para compatibilidade)
 global.broadcastAll = (message) => {
@@ -272,6 +291,9 @@ app.use(poolMonitoringMiddleware);
 setupPoolMonitoringEndpoints(app);
 
 const KIOSK_ROLES = new Set(['kiosk', 'score_kiosk']);
+
+// Depois de qualquer alteração bem-sucedida, as telas interessadas são avisadas (sem F5)
+app.use('/api', middlewareDeAviso(wss));
 
 app.use('/api', (req, res, next) => {
   if (/^\/(auth|kiosk|score-kiosk|event-control|leituras|uhf\/lote)(\/|$)/i.test(req.path) || !req.headers.authorization) {
@@ -321,6 +343,22 @@ wss.on('connection', async (ws, req) => {
       ws.close(1008, 'Token WebSocket inválido');
       return;
     }
+  }
+
+  // Canal de dados: só recebe avisos "o assunto X mudou" (nunca dados) e não envia nada ao servidor
+  if (url.searchParams.get('scope') === 'dados') {
+    if (!wsUser || KIOSK_ROLES.has(wsUser.role)) {
+      ws.close(1008, 'Token obrigatório para o canal de dados');
+      return;
+    }
+    ws.canalDados = true;
+    ws.companyId = wsUser.empresaId;
+    ws.user = wsUser;
+    ws.eventoId = 'canal-dados';
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+    ws.send(JSON.stringify({ type: 'DADOS_CONECTADO' }));
+    return;
   }
 
   if (controlScope && !wsUser) {
@@ -715,7 +753,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     
     if (gameType === TREASURE_GAME_TYPE) {
       console.log(`🎮 [INICIAR-JOGO] Entrando em branch TREASURE`);
-      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId, { quantidade: treasureQuantidade });
+      treasureStart = await startTreasureGame(eventoId, selectedGame.brincadeiraId, { quantidade: treasureQuantidade, checkpointFinalId: String(req.body.checkpointFinalId || '').trim() || null });
       await stopMonsterGame(eventoId);
       await stopZoneConquestGame(eventoId);
       console.log(`   ✓ Caça ao Tesouro iniciado com checkpoint alvo aleatório`);
@@ -780,6 +818,8 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
     // 🆕 Atualizar variável global de sessão atual
     currentSessionId = sessionId;
     currentSessionGameType = gameType;
+    // As rotas de leitura gravam a partida em leitura.sessaoId lendo global.currentSessionId
+    global.currentSessionId = sessionId;
     console.log(`   🔐 [SESSÃO] Variável global setada: currentSessionId=${currentSessionId}, gameType=${currentSessionGameType}`);
 
     // Cada novo início começa sem domínio visual da partida anterior.
@@ -791,7 +831,7 @@ app.post('/api/debug/start-game', verifyToken, requireRole('admin', 'game_master
         territorioCooldownAte = NULL,
         ultimoConquistadoEm = NULL
       WHERE LOWER(eventoId) = LOWER(@eventoId)
-        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(proposito, 'game')) = 'game'
     `, { eventoId });
     console.log(`   ✓ Territórios do evento limpos para uma nova partida`);
     
@@ -1045,6 +1085,12 @@ async function stopGameForEvento(eventoId) {
       throw error;
     }
 
+    // Avisa o telão JÁ, antes do trabalho demorado abaixo (bônus, partidas, domínios, sessões). Sem isso ele ficava vendo o jogo
+    // se desmontar aos poucos (o mapa aparecia) e só trocava para o resultado no fim de tudo.
+    if (typeof global.broadcastToEvent === 'function') {
+      global.broadcastToEvent(eventoId, { type: 'GAME_STOPPING', payload: { eventoId } });
+    }
+
     // Parar com Caça ao Tesouro/Monstro em andamento: se já existe uma equipe
     // vencedora (a mais rápida / a primeira a derrotar o monstro), ela leva o
     // bônus antes de a partida ser encerrada. Uma falha aqui não impede a parada.
@@ -1071,7 +1117,7 @@ async function stopGameForEvento(eventoId) {
         territorioCooldownAte = NULL,
         ultimoConquistadoEm = NULL
       WHERE eventoId = @eventoId
-        AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+        AND LOWER(COALESCE(proposito, 'game')) = 'game'
     `, { eventoId });
     console.log(`   ✓ Domínios dos checkpoints encerrados`);
     
@@ -1116,6 +1162,7 @@ async function stopGameForEvento(eventoId) {
     // 🆕 Limpar variável global de sessão
     currentSessionId = null;
     currentSessionGameType = null;
+    global.currentSessionId = null;
     
     // ✨ NOVO: Para Zone Conquest, limpar os states da partida
     if (gameStatus.gameType === 'zone_conquest') {
@@ -1370,8 +1417,8 @@ app.post('/api/debug/reset-territory/:checkpointId', verifyToken, requireRole('a
 app.post('/api/debug/reset-all-territories', verifyToken, requireRole('admin', 'master'), async (req, res) => {
   try {
     const territoryScope = isMaster(req)
-      ? " WHERE LOWER(COALESCE(proposito, 'game')) <> 'reception'"
-      : " WHERE empresaId = @empresaId AND LOWER(COALESCE(proposito, 'game')) <> 'reception'";
+      ? " WHERE LOWER(COALESCE(proposito, 'game')) = 'game'"
+      : " WHERE empresaId = @empresaId AND LOWER(COALESCE(proposito, 'game')) = 'game'";
     await query(
       `UPDATE pontoVerificacao SET
         territorioTravadoAte = NULL,
@@ -1424,7 +1471,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
        WHERE checkpointId IN (
          SELECT checkpointId FROM pontoVerificacao
          WHERE eventoId = @eventoId
-           AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+           AND LOWER(COALESCE(proposito, 'game')) = 'game'
        )`,
       { eventoId }
     );
@@ -1482,7 +1529,7 @@ app.post('/api/debug/reset-scores/:eventoId', verifyToken, requireRole('admin', 
         territorioCooldownAte = NULL,
         territorioDonoTimeId = NULL
        WHERE eventoId = @eventoId
-         AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+         AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
       { eventoId }
     );
     console.log(`   ✓ Territories resetados`);
@@ -1932,6 +1979,7 @@ app.use('/api/times', timesRoutes);
 app.use('/api/criancas', criancasRoutes);
 
 // Pulseiras
+app.use('/api/pulseiras/recebimento', pulseirasRecebimentoRoutes);   // antes das rotas /:codigo de pulseiras
 app.use('/api/pulseiras', pulseiraRoutes);
 
 // Checkpoints
@@ -1947,6 +1995,7 @@ app.use('/api/reports', reportsRoutes);
 
 // Checkpoints cadastrados pelo super admin e transferidos aos buffets (antes de /api/master para não ser engolida por ele)
 app.use('/api/master/checkpoints', checkpointsMasterRoutes);
+app.use('/api/master/pulseiras', pulseirasMasterRoutes);
 
 // Master Dashboard
 app.use('/api/master', masterRoutes);
@@ -2063,6 +2112,8 @@ async function startServer() {
     await ensureCheckpointMapPositionSchema();
     await ensureMonsterHuntSchema();
     await ensureGameWinnerBonusesSchema();
+    await ensureEventCheckpointHistorySchema();
+    await ensurePulseiraTransferenciaSchema();
     await ensureAvatarSchema();
     await ensureCompanyMapSchema();
     await migrateExistingEventMapDataToCompanies();
@@ -2072,8 +2123,19 @@ async function startServer() {
     await ensureZoneConquestIndividualSchema();
     await addTerritoryOwnerCriancaIdColumn();
     await addColorToParticipantStates();
+    // Cada cliente recebe os jogos do plano dele (só cria o que falta)
+    try {
+      const criados = await garantirJogosDeTodasAsEmpresas();
+      if (criados) console.log(`🎮 ${criados} jogo(s) do plano entregue(s) aos clientes`);
+      const padronizados = await padronizarJogos();
+      if (padronizados) console.log(`🎮 ${padronizados} jogo(s) com nome, descrição e regras padronizados`);
+    } catch (err) {
+      console.warn(`⚠️ Não foi possível entregar os jogos do plano: ${err.message}`);
+    }
     // Início e encerramento automáticos dos eventos (autoInicio/autoFim): varredura a cada 15 s
     eventLifecycleInterval = startLifecycleScheduler({ stopGame: stopGameForEvento });
+    // Checkpoint que fica online/offline pelo tempo também avisa as telas
+    iniciarVigiaDeCheckpoints({ allQuery, statusEfetivo: statusEfetivoDoCheckpoint, avisar: global.avisarDados });
     console.log('✅ Schema de famílias, estado do jogo, mapa dos checkpoints, planta dos eventos, finalidade dos checkpoints, Caça ao Monstro, Zonas do Mapa, Zone Conquest (TEAM/INDIVIDUAL), Leituras, Territory Owner e Color verificados antes de iniciar o servidor.\n');
   } catch (err) {
     console.error('❌ Não foi possível preparar o schema de famílias. Servidor não iniciado:', err);

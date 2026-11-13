@@ -11,7 +11,7 @@ const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole, isMaster } = require('../utils/middleware');
 const {
   validarLote, baldeDe, momentoDoLote, gerarChave, hashChave, chaveConfere, codigoDoEpc, epcDoCodigo,
-  CICLO_MS, CICLOS_POR_LOTE, PORTAS,
+  PORTAS,
 } = require('../utils/uhfLote');
 const { ajustarCalibracao } = require('../utils/uhfPosicao');
 const {
@@ -45,7 +45,9 @@ function moduleIdValido(valor) {
 }
 
 function configDoLeitor(leitor) {
-  return { cicloMs: CICLO_MS, janelaCiclos: CICLOS_POR_LOTE, potenciaDbm: Number(leitor.potenciaDbm), rssiMin: Number(leitor.rssiMin) };
+  // Ciclo e janela (intervalo entre lotes) não vão na resposta: quem define é o próprio leitor, pelo app Middleware Manager.
+  // O firmware só aplica o que vier na resposta; sem estes campos ele mantém o valor configurado.
+  return { potenciaDbm: Number(leitor.potenciaDbm), rssiMin: Number(leitor.rssiMin) };
 }
 
 // ---------- firmware ----------

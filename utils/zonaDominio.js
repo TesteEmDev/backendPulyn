@@ -45,7 +45,7 @@ async function checkpointsDoJogo(eventoId, brincadeiraId) {
   if (ids.length === 0) return [];
   const linhas = await allQuery(
     `SELECT checkpointId, codigo, nome, territorioDonoTimeId FROM pontoVerificacao
-     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'`,
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) = 'game'`,
     { eventoId }
   );
   const porId = new Map(linhas.map((l) => [String(l.checkpointId).toLowerCase(), l]));

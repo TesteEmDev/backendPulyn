@@ -1,8 +1,8 @@
 # backup-banco.ps1 - copia de seguranca do banco de producao (formato do pg_dump, restaura com pg_restore).
 #   .\backup-banco.ps1              faz um backup agora em C:\Pulyn\backups e apaga os de mais de 14 dias
-#   .\backup-banco.ps1 -Agendar     (Administrador) cria a tarefa diaria as 03:00 do Windows
+#   .\backup-banco.ps1 -Agendar     (Administrador) cria a tarefa diaria as 03:00 do Windows (outro horario: -Hora 12:00)
 # Importante: o backup fica NA MESMA MAQUINA do banco. Copie a pasta para outro disco/computador de vez em quando.
-param([int]$Dias = 14, [switch]$Agendar)
+param([int]$Dias = 14, [switch]$Agendar, [string]$Hora = '03:00')
 . "$PSScriptRoot\config.ps1"
 
 if ($Agendar) {
@@ -10,9 +10,9 @@ if ($Agendar) {
     $copia = Join-Path $Scripts 'backup-banco.ps1'
     if (-not (Test-Path $copia)) { throw ('Rode 04-publicar.ps1 antes (ele copia os scripts para ' + $Scripts + ').') }
     $acao = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ('-NoProfile -ExecutionPolicy Bypass -File "' + $copia + '" -Dias ' + $Dias)
-    $gatilho = New-ScheduledTaskTrigger -Daily -At '03:00'
+    $gatilho = New-ScheduledTaskTrigger -Daily -At $Hora
     Register-ScheduledTask -TaskName 'Pulyn - backup do banco' -Action $acao -Trigger $gatilho -User 'SYSTEM' -RunLevel Highest -Force | Out-Null
-    Escrever-Ok 'tarefa diaria criada (03:00)'
+    Escrever-Ok ('tarefa diaria criada (' + $Hora + ')')
     return
 }
 

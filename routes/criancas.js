@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
-const { query, queryOne, allQuery } = require('../database');
+const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { isAvatarValido, gerarAvatarMontado } = require('../utils/avatar');
@@ -9,6 +9,8 @@ const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../ut
 const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const { createQRCodeForChild, generateQRCode, generateParentTrackingUrl } = require('../utils/qrcode');
+const { validarEdicaoPerfil } = require('../utils/preCadastroFamilia');
+const { perfilTemParticipacao, editarPerfilSemParticipacao, excluirPerfil } = require('../utils/perfilCrianca');
 const { criarPerfil, buscarPerfil, registrarVolta, atualizarDadosDoPerfil, recalcularUltimoEvento, pontosDoPerfil, copiarVinculosParaParticipacao } = require('../utils/perfilCrianca');
 
 router.use(verifyToken, (req, res, next) => {
@@ -38,6 +40,67 @@ router.get('/', verifyToken, async (req, res) => {
     res.json(crianca);
   } catch (err) {
     console.error('❌ Erro ao listar crianças de todos os evento:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cadastros permanentes (perfis) do buffet, com o último evento de cada criança e quantas participações ela tem.
+// Quem tem 0 participações foi cadastrada sem evento (check-in sem evento aberto ou pré-cadastro do app).
+router.get('/cadastros', async (req, res) => {
+  try {
+    const rows = await allQuery(`
+      SELECT TOP 5000
+        p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, p.nomeResponsavel, p.parentescoResponsavel,
+        CAST(p.dataNascimento AS text) AS dataNascimento, p.criadoEm,
+        p.ultimoEventoId, e.nome AS ultimoEventoNome, e.data AS ultimoEventoData,
+        CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS participacoes
+      FROM perfilCrianca p
+      LEFT JOIN evento e ON e.eventoId = p.ultimoEventoId
+      WHERE p.empresaId = @empresaId
+      ORDER BY p.criadoEm DESC
+    `, { empresaId: req.user?.empresaId });
+    res.json(rows.map((row) => ({
+      ...row,
+      // Com a data de nascimento a idade é a de hoje
+      idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
+    })));
+  } catch (err) {
+    console.error('❌ Erro ao listar cadastros das crianças:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Recepção: edita/exclui um cadastro que ainda não entrou em nenhum evento (só do próprio buffet).
+async function perfilEditavelDaRecepcao(req, res) {
+  const perfil = await buscarPerfil(req.params.perfilCriancaId, req.user?.empresaId);
+  if (!perfil) { res.status(404).json({ error: 'Cadastro da criança não encontrado' }); return null; }
+  if (await perfilTemParticipacao(perfil.perfilCriancaId)) {
+    res.status(409).json({ error: 'Esta criança já entrou em um evento: edite ou exclua pela lista do evento' });
+    return null;
+  }
+  return perfil.perfilCriancaId;
+}
+
+router.put('/perfil/:perfilCriancaId', async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaRecepcao(req, res);
+    if (!perfilCriancaId) return;
+    const dados = validarEdicaoPerfil(req.body, { comResponsavel: true });
+    if (!dados.ok) return res.status(400).json({ error: dados.error });
+    await editarPerfilSemParticipacao(perfilCriancaId, dados.value);
+    res.json({ perfilCriancaId, ...dados.value });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/perfil/:perfilCriancaId', async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaRecepcao(req, res);
+    if (!perfilCriancaId) return;
+    await withTransaction(async () => { await excluirPerfil(perfilCriancaId); });
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
@@ -92,6 +155,33 @@ router.get('/evento/:eventoId/avatares-em-uso', async (req, res) => {
   }
 });
 
+// Check-in sem evento aberto: guarda só o cadastro permanente da criança (perfil), sem time nem pulseira.
+// Ela se vincula ao evento depois, pelo autoatendimento (Kiosk). O buffet é sempre o do token.
+router.post('/perfil', async (req, res) => {
+  try {
+    const empresaId = req.user.empresaId;
+    if (!empresaId) return res.status(400).json({ error: 'Sua conta não está ligada a um buffet' });
+    const nome = String(req.body.nome || '').trim();
+    if (!nome) return res.status(400).json({ error: 'Nome da criança é obrigatório' });
+    if (nome.length > 100) return res.status(400).json({ error: 'Nome excede o limite de 100 caracteres' });
+    const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
+    if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
+    const avatar = req.body.avatar ? String(req.body.avatar) : null;
+    if (avatar && !isAvatarValido(avatar)) return res.status(400).json({ error: 'Avatar inválido' });
+
+    const apelido = String(req.body.apelido || '').trim().slice(0, 100) || null;
+    const nomeResponsavel = String(req.body.nomeResponsavel || '').trim().slice(0, 200) || null;
+    const parentescoResponsavel = String(req.body.parentescoResponsavel || '').trim().slice(0, 50) || null;
+    const perfilCriancaId = await criarPerfil({
+      empresaId, eventoId: null, nome, apelido, idade: idadeNaData(nascimento.data), avatar,
+      dataNascimento: nascimento.data, nomeResponsavel, parentescoResponsavel,
+    });
+    res.status(201).json({ perfilCriancaId, nome, apelido, dataNascimento: nascimento.data, nomeResponsavel, parentescoResponsavel, avatar });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Criar criança
 router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
   try {
@@ -99,11 +189,14 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada (versões antigas)
     let dataNascimento = null;
     if (req.body.dataNascimento) {
-      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
       if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
       dataNascimento = nascimento.data;
     }
     const age = dataNascimento ? idadeNaData(dataNascimento) : req.body.age;
+    // Nome do pai/responsavel (opcional): fica no cadastro permanente da crianca
+    const nomeResponsavel = String(req.body.nomeResponsavel || '').trim().slice(0, 200) || null;
+    const parentescoResponsavel = String(req.body.parentescoResponsavel || '').trim().slice(0, 50) || null;
     const normalizedBraceletCode = braceletCode ? normalizeUid(braceletCode) : null;
     // Avatar escolhido (opcional): sem ele, entra um livre; em uso por outro participante do evento, a recusa avisa (409)
     const avatarPedido = avatar ? String(avatar) : null;
@@ -204,9 +297,9 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const corValue = escolhaCor.cor;
 
     if (perfilDaCrianca) {
-      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento });
+      await registrarVolta({ perfilCriancaId: perfilId, eventoId, apelido: apelido || perfil.apelido, idade: age, avatar: avatarValue, dataNascimento, nomeResponsavel, parentescoResponsavel });
     } else {
-      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento });
+      perfilId = await criarPerfil({ empresaId, eventoId, nome, apelido, idade: age, avatar: avatarValue, dataNascimento, nomeResponsavel, parentescoResponsavel });
     }
 
     // ✅ CORRIGIDO: Incluir empresaId na INSERT
@@ -231,7 +324,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
       { timeId }
     );
     
-    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
+    res.json({ id, perfilCriancaId: perfilId, nome: nomeFinal, apelido, age, dataNascimento, nomeResponsavel, parentescoResponsavel, avatar: avatarValue, color: corValue, braceletCode: normalizedBraceletCode, timeId, scores: 0 });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -270,7 +363,7 @@ router.put('/evento/:eventoId/crianca/:criancaId', verifyToken, async (req, res)
     // Data de nascimento (no lugar da idade): a idade é calculada dela; sem ela vale a `age` enviada
     let dataNascimento = null;
     if (req.body.dataNascimento) {
-      const nascimento = normalizarDataNascimento(req.body.dataNascimento);
+      const nascimento = normalizarDataNascimento(req.body.dataNascimento, new Date(), { limiteIdade: null });
       if (nascimento.erro) return res.status(400).json({ error: nascimento.erro });
       dataNascimento = nascimento.data;
     }

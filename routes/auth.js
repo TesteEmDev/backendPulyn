@@ -20,7 +20,9 @@ const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-super-segura-202
 const VALID_ROLES = new Set(['admin', 'reception', 'game_master', 'display', 'family', 'master', 'kiosk', 'score_kiosk']);
 
 // Token da conta na área `role`. `papeis` é a lista de áreas que a conta pode usar (vai junto para o front).
-function assinarToken(login, role, papeis, expiresIn = '24h') {
+// `semConta`: sessão que não é uma conta (telão: o id é o do buffet). Ela não leva `tv`, porque a verificação do token
+// com `tv` procura essa conta no login e recusaria a sessão (401 "Sessão encerrada").
+function assinarToken(login, role, papeis, expiresIn = '24h', { semConta = false } = {}) {
   return jwt.sign(
     {
       id: login.loginId,
@@ -30,7 +32,8 @@ function assinarToken(login, role, papeis, expiresIn = '24h') {
       role,
       papeis,
       plan: login.plano,   // o painel usa para mostrar os jogos do plano (o backend confere no banco)
-      tv: Number(login.tokenVersao || 0)   // versão da sessão: trocar a senha ou excluir a conta derruba este token
+      ...(semConta ? {} : { tv: Number(login.tokenVersao || 0) }),
+      ...(login.senhaTemporaria ? { ts: true } : {})   // versão da sessão: trocar a senha ou excluir a conta derruba este token
     },
     JWT_SECRET,
     { expiresIn }
@@ -60,7 +63,7 @@ router.post('/login', async (req, res) => {
 
     console.log('🔍 Buscando usuário:', email);
     const login = await queryOne(
-      `SELECT l.loginId, l.email, l.senha, l.status, l.perfil, l.perfisExtras, l.nomeFamilia, l.tokenVersao,
+      `SELECT l.loginId, l.email, l.senha, l.status, l.perfil, l.perfisExtras, l.nomeFamilia, l.tokenVersao, l.senhaTemporaria,
               e.empresaId as empresaId, e.nome as empresa_nome, e.[plano]
        FROM login l
        JOIN empresa e ON l.empresaId = e.empresaId
@@ -124,7 +127,9 @@ router.post('/login', async (req, res) => {
         papeis,
         redirect,
         plan: login.plano,
-        empresaId: login.empresaId
+        empresaId: login.empresaId,
+        // Senha definida pelo master: a tela leva direto à troca, e o servidor só aceita trocar a senha até lá
+        trocarSenha: Boolean(login.senhaTemporaria)
       }
     });
 
@@ -143,7 +148,7 @@ const tentativasDeTelao = criarLimitador({ max: 15, janelaMs: 10 * 60 * 1000 });
 function sessaoDeTelao(empresa) {
   const token = assinarToken(
     { loginId: empresa.empresaId, email: 'telao', empresaId: empresa.empresaId, empresa_nome: empresa.nome, plano: empresa.plano },
-    'display', ['display'], TELAO_TOKEN_VALIDADE
+    'display', ['display'], TELAO_TOKEN_VALIDADE, { semConta: true }
   );
   return {
     success: true,
@@ -453,18 +458,21 @@ router.post('/alterar-senha', verifyToken, async (req, res) => {
     const erroSenha = validarSenhaNova(novaSenha);
     if (erroSenha) return res.status(400).json({ error: erroSenha });
 
-    const conta = await queryOne('SELECT loginId, senha, tokenVersao FROM login WHERE loginId = @id', { id: req.user.id });
+    const conta = await queryOne('SELECT loginId, senha, tokenVersao, senhaTemporaria FROM login WHERE loginId = @id', { id: req.user.id });
     if (!conta) return res.status(401).json({ error: 'Sessão inválida. Entre de novo.' });
     if (!verificarSenha(senhaAtual, conta.senha)) return res.status(403).json({ error: 'A senha atual está incorreta' });
+    if (conta.senhaTemporaria && senhaAtual === novaSenha) {
+      return res.status(400).json({ error: 'Escolha uma senha diferente da provisória' });
+    }
 
     const versao = Number(conta.tokenVersao || 0) + 1;
     await query(
-      'UPDATE login SET senha = @senha, tokenVersao = @versao WHERE loginId = @id',
+      'UPDATE login SET senha = @senha, tokenVersao = @versao, senhaTemporaria = false WHERE loginId = @id',
       { senha: hashSenha(novaSenha), versao, id: conta.loginId }
     );
 
-    // Mesmo payload da sessão atual, com a versão nova.
-    const { iat, exp, ...payload } = req.user;
+    // Mesmo payload da sessão atual, com a versão nova (e sem a marca de senha provisória).
+    const { iat, exp, ts, ...payload } = req.user;
     const token = jwt.sign({ ...payload, tv: versao }, JWT_SECRET, { expiresIn: '24h' });
     console.log(`🔑 Senha alterada: loginId ${conta.loginId}; outras sessões encerradas`);
     res.json({ success: true, token, message: 'Senha alterada. As outras sessões foram encerradas.' });
@@ -817,3 +825,4 @@ router.delete('/conta', verifyToken, async (req, res) => {
 });
 
 module.exports = router;
+module.exports.assinarToken = assinarToken;   // para os testes

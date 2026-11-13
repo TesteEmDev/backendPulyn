@@ -33,6 +33,28 @@ function nomeParaExibir(nome) {
   return `${partes[0]} ${partes[partes.length - 1][0].toUpperCase()}.`;
 }
 
+// Nome com privacidade: o primeiro nome inteiro e as demais palavras só com a inicial.
+// "Guilherme Gomes Cavalcanti" -> "Guilherme G. C."; "José da Silva" -> "José S." (da/de/do... não contam).
+const LIGACOES = new Set(['da', 'de', 'do', 'das', 'dos', 'e']);
+function nomeAbreviado(nome) {
+  const partes = String(nome || '').trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return '';
+  const iniciais = partes.slice(1)
+    .filter((parte) => !LIGACOES.has(parte.toLowerCase()))
+    .map((parte) => `${parte[0].toUpperCase()}.`);
+  return [partes[0], ...iniciais].join(' ');
+}
+
+// Dois nomes de responsável "batem" quando são iguais (sem acento/maiúscula) ou quando todas as palavras do mais curto
+// estão no mais longo ("Carlos Almeida" x "Carlos Almeida Silva"): a recepção e o pai nem sempre digitam o nome completo.
+function responsaveisParecidos(a, b) {
+  const palavrasA = normalizarBusca(a).split(' ').filter(Boolean);
+  const palavrasB = normalizarBusca(b).split(' ').filter(Boolean);
+  if (!palavrasA.length || !palavrasB.length) return false;
+  const [curto, longo] = palavrasA.length <= palavrasB.length ? [palavrasA, palavrasB] : [palavrasB, palavrasA];
+  return curto.every((palavra) => longo.includes(palavra));
+}
+
 function idadeValida(idade) {
   const valor = Number.parseInt(idade, 10);
   return Number.isFinite(valor) ? Math.max(0, valor) : null;
@@ -51,12 +73,12 @@ function idadeDeNascimento(dataISO, hoje = new Date()) {
 }
 
 // Cria o perfil de uma criança nova e já aponta o último evento para o evento atual.
-async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, dataNascimento }) {
+async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, dataNascimento, nomeResponsavel = null, parentescoResponsavel = null }) {
   if (!String(nome || '').trim()) throw new Error('Nome da criança é obrigatório');
   const perfilCriancaId = uuidv4();
   await query(
-    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, dataNascimento)
-     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId, @dataNascimento)`,
+    `INSERT INTO perfilCrianca (perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, dataNascimento, nomeResponsavel, parentescoResponsavel)
+     VALUES (@perfilCriancaId, @empresaId, @nome, @apelido, @idade, @avatar, @eventoId, @dataNascimento, @nomeResponsavel, @parentescoResponsavel)`,
     {
       perfilCriancaId,
       empresaId,
@@ -66,6 +88,8 @@ async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, 
       avatar: avatar || null,
       eventoId: eventoId || null,
       dataNascimento: dataNascimento || null,
+      nomeResponsavel: String(nomeResponsavel || '').trim() || null,
+      parentescoResponsavel: String(parentescoResponsavel || '').trim() || null,
     }
   );
   return perfilCriancaId;
@@ -75,14 +99,14 @@ async function criarPerfil({ empresaId, eventoId, nome, apelido, idade, avatar, 
 async function buscarPerfil(perfilCriancaId, empresaId) {
   if (!perfilCriancaId) return null;
   return (await queryOne(
-    `SELECT perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, CAST(dataNascimento AS text) AS dataNascimento
+    `SELECT perfilCriancaId, empresaId, nome, apelido, idade, avatar, ultimoEventoId, CAST(dataNascimento AS text) AS dataNascimento, nomeResponsavel, parentescoResponsavel
      FROM perfilCrianca WHERE perfilCriancaId = @perfilCriancaId AND empresaId = @empresaId`,
     { perfilCriancaId, empresaId }
   )) || null;
 }
 
 // A criança voltou: marca o evento atual como o último e atualiza o que mudou (idade, apelido, avatar).
-async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avatar, dataNascimento = null }) {
+async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avatar, dataNascimento = null, nomeResponsavel = null, parentescoResponsavel = null }) {
   await query(
     `UPDATE perfilCrianca
      SET ultimoEventoId = @eventoId,
@@ -90,11 +114,15 @@ async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avata
          idade = COALESCE(@idade, idade),
          avatar = COALESCE(@avatar, avatar),
          dataNascimento = COALESCE(@dataNascimento, dataNascimento),
+         nomeResponsavel = COALESCE(@nomeResponsavel, nomeResponsavel),
+         parentescoResponsavel = COALESCE(@parentescoResponsavel, parentescoResponsavel),
          atualizadoEm = CURRENT_TIMESTAMP
      WHERE perfilCriancaId = @perfilCriancaId`,
     {
       perfilCriancaId,
       eventoId,
+      nomeResponsavel: String(nomeResponsavel || '').trim() || null,
+      parentescoResponsavel: String(parentescoResponsavel || '').trim() || null,
       apelido: String(apelido || '').trim() || null,
       idade: idadeValida(idade),
       avatar: avatar || null,
@@ -104,7 +132,7 @@ async function registrarVolta({ perfilCriancaId, eventoId, apelido, idade, avata
 }
 
 // Quando alguém edita uma participação, o cadastro permanente acompanha.
-async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, avatar, dataNascimento = null }) {
+async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, avatar, dataNascimento = null, nomeResponsavel = null, parentescoResponsavel = null }) {
   if (!perfilCriancaId) return;
   await query(
     `UPDATE perfilCrianca
@@ -113,10 +141,14 @@ async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, a
          idade = COALESCE(@idade, idade),
          avatar = COALESCE(@avatar, avatar),
          dataNascimento = COALESCE(@dataNascimento, dataNascimento),
+         nomeResponsavel = COALESCE(@nomeResponsavel, nomeResponsavel),
+         parentescoResponsavel = COALESCE(@parentescoResponsavel, parentescoResponsavel),
          atualizadoEm = CURRENT_TIMESTAMP
      WHERE perfilCriancaId = @perfilCriancaId`,
     {
       perfilCriancaId,
+      nomeResponsavel: String(nomeResponsavel || '').trim() || null,
+      parentescoResponsavel: String(parentescoResponsavel || '').trim() || null,
       nome: String(nome || '').trim() || null,
       apelido: String(apelido || '').trim() || null,
       idade: idadeValida(idade),
@@ -124,6 +156,38 @@ async function atualizarDadosDoPerfil(perfilCriancaId, { nome, apelido, idade, a
       dataNascimento: dataNascimento || null,
     }
   );
+}
+
+// Cadastro que nunca entrou em um evento ("não aceito"): só esses podem ser editados ou excluídos por aqui.
+async function perfilTemParticipacao(perfilCriancaId) {
+  const linha = await queryOne('SELECT COUNT(*) AS total FROM crianca WHERE perfilCriancaId = @perfilCriancaId', { perfilCriancaId });
+  return Number(linha?.total) > 0;
+}
+
+// Edita os dados de um cadastro sem participação (grava exatamente o que veio, inclusive apagando o apelido).
+async function editarPerfilSemParticipacao(perfilCriancaId, dados) {
+  const comResponsavel = Object.prototype.hasOwnProperty.call(dados, 'nomeResponsavel');
+  await query(
+    `UPDATE perfilCrianca
+     SET nome = @nome, apelido = @apelido, idade = @idade, dataNascimento = @dataNascimento,
+         ${comResponsavel ? 'nomeResponsavel = @nomeResponsavel, parentescoResponsavel = @parentescoResponsavel,' : ''}
+         atualizadoEm = CURRENT_TIMESTAMP
+     WHERE perfilCriancaId = @perfilCriancaId`,
+    {
+      perfilCriancaId,
+      nome: dados.nome,
+      apelido: dados.apelido,
+      idade: dados.idade,
+      dataNascimento: dados.dataNascimento,
+      ...(comResponsavel ? { nomeResponsavel: dados.nomeResponsavel, parentescoResponsavel: dados.parentescoResponsavel } : {}),
+    }
+  );
+}
+
+// Exclui o cadastro (e os vínculos de pré-cadastro dele). Chame só depois de confirmar que não tem participação.
+async function excluirPerfil(perfilCriancaId) {
+  await query('DELETE FROM perfilVinculoFamiliar WHERE perfilCriancaId = @perfilCriancaId', { perfilCriancaId });
+  await query('DELETE FROM perfilCrianca WHERE perfilCriancaId = @perfilCriancaId', { perfilCriancaId });
 }
 
 // Depois de remover uma participação, o "último evento" volta a ser o evento mais recente que sobrou (ou vazio).
@@ -143,27 +207,37 @@ async function recalcularUltimoEvento(perfilCriancaId) {
 }
 
 // Busca para o Kiosk: só devolve o necessário para a criança se reconhecer (nome abreviado, apelido, idade, avatar).
-async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, limite = 8 }) {
+// Entram os cadastros que ainda não estão neste evento e também os que a recepção cadastrou no check-in e ainda estão
+// sem pulseira (`jaNoEvento`): o Kiosk só vincula a pulseira a essa participação. Quem já tem pulseira no evento não aparece.
+async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, dataNascimento, nomeResponsavel, limite = 8 }) {
   const busca = normalizarBusca(termo);
   if (busca.length < 2) return [];
+  // Privacidade: só aparece quem tem o nome E a data de nascimento informados (nunca cadastros de outras pessoas)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dataNascimento || ''))) return [];
+  // ...e o nome do pai/responsável (cadastro sem esse nome não é achado por aqui)
+  if (normalizarBusca(nomeResponsavel).length < 2) return [];
   const rows = await allQuery(
-    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento
+    `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, p.nomeResponsavel, CAST(p.dataNascimento AS text) AS dataNascimento,
+            part.criancaId AS participacaoId, part.avatar AS avatarNoEvento, part.apelido AS apelidoNoEvento, part.cor AS corNoEvento
      FROM perfilCrianca p
+     LEFT JOIN crianca part ON part.perfilCriancaId = p.perfilCriancaId AND part.eventoId = @eventoId
      WHERE p.empresaId = @empresaId
+       AND CAST(p.dataNascimento AS text) = @dataNascimento
        AND (${semAcentosSql('p.apelido')} LIKE @padrao OR ${semAcentosSql('p.nome')} LIKE @padrao)
-       AND NOT EXISTS (
-         SELECT 1 FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId AND c.eventoId = @eventoId
-       )
+       AND (part.criancaId IS NULL OR part.codigoPulseira IS NULL)
      ORDER BY p.atualizadoEm DESC`,
-    { empresaId, eventoId, padrao: `%${busca}%`, limite }
+    { empresaId, eventoId, dataNascimento, padrao: `%${busca}%`, limite: 50 }
   );
-  return rows.map((row) => ({
+  return rows.filter((row) => responsaveisParecidos(row.nomeResponsavel, nomeResponsavel)).slice(0, limite).map((row) => ({
     perfilCriancaId: row.perfilCriancaId,
     nomeExibicao: nomeParaExibir(row.nome),
-    apelido: row.apelido || '',
+    apelido: row.apelidoNoEvento || row.apelido || '',
     // Com a data de nascimento a idade é a de hoje (a idade gravada é a do último cadastro)
     idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
-    avatar: row.avatar,
+    avatar: row.avatarNoEvento || row.avatar,
+    jaNoEvento: Boolean(row.participacaoId),
+    // Cor que a criança já tem neste evento (o Kiosk a mantém, a menos que ela escolha outra)
+    cor: row.corNoEvento || null,
   }));
 }
 
@@ -243,12 +317,18 @@ module.exports = {
   buscarPerfil,
   registrarVolta,
   atualizarDadosDoPerfil,
+  perfilTemParticipacao,
+  editarPerfilSemParticipacao,
+  excluirPerfil,
   recalcularUltimoEvento,
   buscarPerfisParaKiosk,
   pontosDoPerfil,
   copiarVinculosParaParticipacao,
   vinculosParaNovaParticipacao,
   nomeParaExibir,
+  nomeAbreviado,
   idadeValida,
   normalizarBusca,
+  semAcentosSql,
+  responsaveisParecidos,
 };

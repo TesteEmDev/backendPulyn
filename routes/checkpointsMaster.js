@@ -5,7 +5,7 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const {
-  STATUS, PROPOSITOS, normalizarMac,
+  STATUS, PROPOSITOS, normalizarMac, normalizarEpc,
   podeTransferir, podeExcluir,
 } = require('../utils/checkpointTransferencia');
 
@@ -19,6 +19,7 @@ router.use(verifyToken, requireRole('master'));
 const COLUNAS = `
   p.id, p.numCheck, p.macAddress, p.nome, p.tipo, p.proposito, p.status, p.ultimoVisto,
   p.statusTransferencia, p.empresaId, p.empresaDestinoId, p.eventoId, p.transferidoEm, p.criadoEm,
+  p.devolvidoEm, p.devolvidoMotivo, p.devolvidoPorNome, p.epc,
   e.nome AS empresaNome, d.nome AS empresaDestinoNome`;
 const JUNCOES = `
   FROM pontoVerificacao p
@@ -41,6 +42,14 @@ async function macEmUso(mac, ignorarId = null) {
   return queryOne(
     'SELECT id, nome FROM pontoVerificacao WHERE macAddress = @mac AND (@ignorarId::int IS NULL OR id <> @ignorarId::int)',
     { mac, ignorarId }
+  );
+}
+
+// O EPC também é único no sistema inteiro.
+async function epcEmUso(epc, ignorarId = null) {
+  return queryOne(
+    'SELECT id, nome FROM pontoVerificacao WHERE epc = @epc AND (@ignorarId::int IS NULL OR id <> @ignorarId::int)',
+    { epc, ignorarId }
   );
 }
 
@@ -89,7 +98,7 @@ router.post('/', async (req, res) => {
     if (informouNumero(req.body)) return res.status(400).json({ error: ERRO_NUMERO_DO_BUFFET });
 
     const proposito = String(req.body.proposito || 'game').trim().toLowerCase();
-    if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game ou reception' });
+    if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game, reception ou score' });
 
     const tipo = String(req.body.tipo || 'NFC').trim();
     if (tipo.length > 20) return res.status(400).json({ error: 'O tipo deve ter até 20 caracteres' });
@@ -100,14 +109,21 @@ router.post('/', async (req, res) => {
     const existente = await macEmUso(mac);
     if (existente) return res.status(409).json({ error: `O MAC ${mac} já está cadastrado (checkpoint ${existente.id})` });
 
+    const epc = normalizarEpc(req.body.epc);
+    if (!epc.ok) return res.status(400).json({ error: epc.erro });
+    if (epc.valor) {
+      const epcExistente = await epcEmUso(epc.valor);
+      if (epcExistente) return res.status(409).json({ error: `O EPC ${epc.valor} já está cadastrado (checkpoint ${epcExistente.id})` });
+    }
+
     // Sem id nem chave no INSERT: o banco gera o id (autoincremento) e o gatilho copia o mesmo número para o
     // checkpointId (migrations/checkpointIdNumerico.js). O nome padrão leva o id, que só existe depois do INSERT.
     const id = await withTransaction(async (tx) => {
       const { id: novoId } = await tx.queryOne(
-        `INSERT INTO pontoVerificacao (nome, tipo, proposito, macAddress, statusTransferencia, empresaId, eventoId)
-         VALUES (@nome, @tipo, @proposito, @mac, @estoque, NULL, NULL)
+        `INSERT INTO pontoVerificacao (nome, tipo, proposito, macAddress, epc, statusTransferencia, empresaId, eventoId)
+         VALUES (@nome, @tipo, @proposito, @mac, @epc, @estoque, NULL, NULL)
          RETURNING id`,
-        { nome: nomeInformado || 'Checkpoint', tipo, proposito, mac, estoque: STATUS.ESTOQUE }
+        { nome: nomeInformado || 'Checkpoint', tipo, proposito, mac, epc: epc.valor, estoque: STATUS.ESTOQUE }
       );
       if (!nomeInformado) await tx.query('UPDATE pontoVerificacao SET nome = @nome WHERE id = @id', { nome: `Checkpoint ${novoId}`, id: novoId });
       return Number(novoId);
@@ -141,6 +157,16 @@ router.patch('/:id', async (req, res) => {
       campos.push('macAddress = @mac');
       params.mac = mac;
     }
+    if (req.body.epc !== undefined) {
+      const epc = normalizarEpc(req.body.epc);
+      if (!epc.ok) return res.status(400).json({ error: epc.erro });
+      if (epc.valor) {
+        const epcExistente = await epcEmUso(epc.valor, id);
+        if (epcExistente) return res.status(409).json({ error: `O EPC ${epc.valor} já está cadastrado (checkpoint ${epcExistente.id})` });
+      }
+      campos.push('epc = @epc');
+      params.epc = epc.valor;
+    }
     if (req.body.nome !== undefined) {
       const nome = String(req.body.nome).trim();
       if (!nome || nome.length > 100) return res.status(400).json({ error: 'O nome deve ter de 1 a 100 caracteres' });
@@ -155,7 +181,7 @@ router.patch('/:id', async (req, res) => {
     }
     if (req.body.proposito !== undefined) {
       const proposito = String(req.body.proposito).trim().toLowerCase();
-      if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game ou reception' });
+      if (!PROPOSITOS.includes(proposito)) return res.status(400).json({ error: 'Finalidade inválida: use game, reception ou score' });
       campos.push('proposito = @proposito');
       params.proposito = proposito;
     }
@@ -193,7 +219,8 @@ router.post('/:id/transferir', async (req, res) => {
     // A condição no WHERE evita transferir duas vezes se dois pedidos chegarem juntos.
     const atualizado = await queryOne(
       `UPDATE pontoVerificacao
-       SET statusTransferencia = @aceito, empresaId = @empresaId, empresaDestinoId = NULL, transferidoEm = now(), atualizadoEm = now()
+       SET statusTransferencia = @aceito, empresaId = @empresaId, empresaDestinoId = NULL, transferidoEm = now(), atualizadoEm = now(),
+           devolvidoEm = NULL, devolvidoMotivo = NULL, devolvidoPorNome = NULL
        WHERE id = @id AND statusTransferencia = @estoque
        RETURNING id`,
       { id, empresaId, aceito: STATUS.ACEITO, estoque: STATUS.ESTOQUE }
@@ -204,6 +231,40 @@ router.post('/:id/transferir', async (req, res) => {
     res.json(await buscar(id));
   } catch (err) {
     console.error('❌ [MASTER-CHECKPOINTS] Erro ao transferir:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Transfere vários checkpoints do estoque para o mesmo buffet de uma vez. Os que já não estão em estoque são ignorados.
+router.post('/transferir-lote', async (req, res) => {
+  try {
+    const ids = [...new Set((Array.isArray(req.body.ids) ? req.body.ids : []).map(Number))];
+    if (ids.length === 0 || ids.some((id) => !Number.isInteger(id) || id < 1)) {
+      return res.status(400).json({ error: 'Escolha ao menos um checkpoint' });
+    }
+    if (ids.length > 500) return res.status(400).json({ error: 'Envie no máximo 500 checkpoints por vez' });
+
+    const empresaId = String(req.body.empresaId || '').trim();
+    if (!empresaId) return res.status(400).json({ error: 'Informe o buffet (empresaId) de destino' });
+    const empresa = await queryOne('SELECT empresaId, nome FROM empresa WHERE empresaId = @empresaId', { empresaId });
+    if (!empresa) return res.status(404).json({ error: 'Buffet de destino não encontrado' });
+
+    const params = { empresaId, aceito: STATUS.ACEITO, estoque: STATUS.ESTOQUE };
+    const marcadores = ids.map((id, i) => { params[`i${i}`] = id; return `@i${i}::int`; }).join(', ');
+    // A condição no WHERE evita transferir duas vezes se dois pedidos chegarem juntos
+    const r = await query(
+      `UPDATE pontoVerificacao
+       SET statusTransferencia = @aceito, empresaId = @empresaId, empresaDestinoId = NULL, transferidoEm = now(), atualizadoEm = now(),
+           devolvidoEm = NULL, devolvidoMotivo = NULL, devolvidoPorNome = NULL
+       WHERE statusTransferencia = @estoque AND id IN (${marcadores})
+       RETURNING id`,
+      params
+    );
+    const transferidos = (r.recordset || []).map((linha) => Number(linha.id));
+    console.log(`📤 [MASTER-CHECKPOINTS] ${transferidos.length} checkpoint(s) transferido(s) para "${empresa.nome}"`);
+    res.json({ transferidos, ignorados: ids.filter((id) => !transferidos.includes(id)), empresaNome: empresa.nome });
+  } catch (err) {
+    console.error('❌ [MASTER-CHECKPOINTS] Erro ao transferir em lote:', err);
     res.status(500).json({ error: err.message });
   }
 });

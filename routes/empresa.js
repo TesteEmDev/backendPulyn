@@ -27,6 +27,12 @@ router.get('/me', async (req, res) => {
 // Atualiza só os campos enviados. cnpj vazio remove o CNPJ; cnpj ausente não mexe nele.
 router.put('/me', async (req, res) => {
   try {
+    // Nome, CNPJ, endereço, telefone e e-mail vêm do cadastro feito pelo master e não mudam por aqui
+    const fixos = ['name', 'cnpj', 'address', 'phone', 'email'].filter((campo) => req.body && campo in req.body);
+    if (fixos.length > 0) {
+      return res.status(403).json({ error: 'Os dados do cadastro (nome, CNPJ, endereço, telefone e e-mail) só podem ser alterados pelo master.' });
+    }
+
     const parsed = parseUnitProfile(req.body);
     if (parsed.error) return res.status(400).json({ error: parsed.error });
 

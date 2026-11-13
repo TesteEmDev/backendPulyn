@@ -7,6 +7,7 @@ const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { processParallelScan } = require('../utils/parallelGame');
+const { controleAtivo, MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE } = require('../utils/pulseiraControle');
 const {
   getActiveSession,
   processTreasureScan,
@@ -190,6 +191,77 @@ function rememberReceptionReading(reading) {
   global.receptionReadingQueues.set(eventKey, queue.slice(-50));
 }
 
+// Leitura de um checkpoint de PONTUAÇÃO (P1, P2...): vai para as telas de consulta de pontuação do número dele. Como a de
+// recepção, o leitor se identifica pelo checkpoint e nenhuma regra de jogo é executada.
+function lembrarLeituraDePontuacao(leitura) {
+  if (!global.scoreKioskReadingQueues) global.scoreKioskReadingQueues = new Map();
+  const chave = String(leitura.eventoId || '').trim().toLowerCase();
+  if (!chave) return;
+  const fila = global.scoreKioskReadingQueues.get(chave) || [];
+  fila.push(leitura);
+  global.scoreKioskReadingQueues.set(chave, fila.slice(-50));
+}
+
+router.post('/score', async (req, res) => {
+  try {
+    const { checkpointId, uid } = req.body;
+    const normalizedUid = normalizeUid(uid);
+    const now = new Date();
+    if (!checkpointId || !normalizedUid) {
+      return res.status(400).json({ error: 'checkpointId e uid são obrigatórios' });
+    }
+
+    const checkpoint = await queryOne(
+      `SELECT checkpointId, numCheck, empresaId, eventoId FROM pontoVerificacao
+       WHERE checkpointId = @id AND LOWER(COALESCE(proposito, 'game')) = 'score'`,
+      { id: checkpointId }
+    );
+    if (!checkpoint || !checkpoint.empresaId) {
+      return res.status(404).json({ error: 'Checkpoint de pontuação não encontrado' });
+    }
+
+    // Só vale pulseira fornecida a este cliente (ver utils/pulseiraControle.js)
+    if (controleAtivo()) {
+      const daEmpresa = await queryOne(
+        `SELECT codigo FROM pulseira WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
+        { uid: normalizedUid, empresaId: checkpoint.empresaId }
+      );
+      if (!daEmpresa) {
+        return res.json({ ok: true, registered: false, ignored: true, braceletCode: normalizedUid, message: MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE });
+      }
+    }
+
+    const eventosAbertos = await allQuery(
+      `SELECT eventoId FROM evento
+       WHERE LOWER(empresaId) = LOWER(@empresaId)
+         AND LOWER(COALESCE(status, 'scheduled')) NOT IN ('completed', 'cancelled', 'canceled', 'finished')`,
+      { empresaId: checkpoint.empresaId }
+    );
+    const eventos = eventosAbertos.length ? eventosAbertos.map((e) => e.eventoId) : [checkpoint.eventoId].filter(Boolean);
+
+    const readingId = uuidv4();
+    for (const eventoId of eventos) {
+      const leitura = {
+        readingId,
+        braceletCode: normalizedUid,
+        timestamp: now.toISOString(),
+        receivedAt: now.getTime(),
+        checkpointId: checkpoint.checkpointId,
+        // P1, P2...: cada tela de pontuação só atende ao leitor de pontuação do número dela
+        numCheck: checkpoint.numCheck || null,
+        eventoId,
+        source: 'score-kiosk',
+      };
+      lembrarLeituraDePontuacao(leitura);
+      broadcast({ type: 'NFC_READING_DETECTED', payload: leitura });
+    }
+    return res.json({ ok: true, braceletCode: normalizedUid, message: 'Leitura enviada para a tela de pontuação' });
+  } catch (err) {
+    console.error('❌ Erro na leitura de pontuação:', err);
+    return res.status(err.statusCode || 500).json({ error: err.message });
+  }
+});
+
 router.post('/reception', async (req, res) => {
   try {
     const { checkpointId, uid } = req.body;
@@ -207,7 +279,7 @@ router.post('/reception', async (req, res) => {
     // Checkpoint e pulseira vêm em UMA consulta (antes eram duas, em sequência):
     // cada ida ao banco remoto soma na demora entre passar a pulseira e a luz acender.
     const checkpoint = await queryOne(
-      `SELECT c.checkpointId, c.empresaId, c.eventoId, c.proposito,
+      `SELECT c.checkpointId, c.numCheck, c.empresaId, c.eventoId, c.proposito,
               p.codigo AS pulseira_code, p.status AS pulseira_status
        FROM pontoVerificacao c
        LEFT JOIN pulseira p
@@ -222,9 +294,51 @@ router.post('/reception', async (req, res) => {
       return res.status(404).json({ error: 'Checkpoint de recepção não encontrado' });
     }
 
+    // Leitor de recepção ainda em estoque (sem buffet): é o leitor do master, que monta a lista de pulseiras a enviar
+    if (!checkpoint.empresaId) {
+      if (typeof global.broadcastToMasters === 'function') {
+        global.broadcastToMasters({
+          type: 'MASTER_BRACELET_READ',
+          payload: { braceletCode: normalizedUid, checkpointId: checkpoint.checkpointId, timestamp: now.toISOString() },
+        });
+      }
+      return res.json({ ok: true, registered: false, braceletCode: normalizedUid, message: 'Pulseira lida para o estoque do master' });
+    }
+
     const pulseira = checkpoint.pulseira_code
       ? { codigo: checkpoint.pulseira_code, status: checkpoint.pulseira_status }
       : null;
+
+    // Pulseira que o master enviou a este cliente e que ainda espera o aceite: o admin a confere passando no leitor
+    let aguardandoAceite = false;
+    if (!pulseira && controleAtivo()) {
+      aguardandoAceite = Boolean(await queryOne(
+        `SELECT codigo FROM pulseira
+         WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaDestinoId) = LOWER(@empresaId) AND statusTransferencia = 'pendente'`,
+        { uid: normalizedUid, empresaId: checkpoint.empresaId }
+      ));
+    }
+
+    // O admin do buffet confere as pulseiras recebidas do master passando-as no leitor, mesmo sem evento aberto
+    if ((pulseira || aguardandoAceite || !controleAtivo()) && typeof global.broadcastToCompany === 'function') {
+      global.broadcastToCompany(checkpoint.empresaId, {
+        type: 'RECEPTION_BRACELET_READ',
+        payload: { braceletCode: normalizedUid, checkpointId: checkpoint.checkpointId, timestamp: now.toISOString() },
+      });
+    }
+
+    // Pulseira que o master não forneceu a este cliente: o leitor a ignora (não chega ao check-in nem ao autoatendimento)
+    if (!pulseira && controleAtivo()) {
+      return res.json({
+        ok: true,
+        registered: false,
+        ignored: true,
+        braceletCode: normalizedUid,
+        message: aguardandoAceite
+          ? 'Pulseira enviada pelo master: aceite-a no painel do admin para usar'
+          : MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE,
+      });
+    }
 
     const registered = Boolean(pulseira);
     // Eventos que podem estar cadastrando pulseira agora. O evento do próprio
@@ -248,6 +362,8 @@ router.post('/reception', async (req, res) => {
         timestamp: now.toISOString(),
         receivedAt: now.getTime(),
         checkpointId: checkpoint.checkpointId,
+        // R1, R2...: cada tela de autoatendimento só atende ao leitor de recepção do número dela
+        numCheck: checkpoint.numCheck || null,
         eventoId: targetEventId,
         source: 'reception',
       };
@@ -296,6 +412,9 @@ router.post('/', async (req, res) => {
     if (String(checkpoint.proposito || 'game').trim().toLowerCase() === 'reception') {
       return res.status(409).json({ ok: false, error: 'Use a rota de recepção para este checkpoint' });
     }
+    if (String(checkpoint.proposito || 'game').trim().toLowerCase() === 'score') {
+      return res.status(409).json({ ok: false, error: 'Este checkpoint é de pontuação: ele não participa dos jogos' });
+    }
 
     const processedReading = await findProcessedReading(readingId, checkpoint);
     if (processedReading) {
@@ -314,7 +433,28 @@ router.post('/', async (req, res) => {
       }
     };
 
-    // A leitura é enviada também quando a pulseira ainda não existe no banco,
+    // A pulseira precisa existir, pertencer à mesma empresa e estar ativa.
+    // Isso evita processar uma criança cujo vínculo foi removido ou bloqueado.
+    const pulseira = await queryOne(
+      `SELECT codigo, empresaId, status, criancaId
+       FROM pulseira
+       WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
+      { uid: normalizedUid, empresaId: checkpoint.empresaId }
+    );
+
+    // Pulseira que o master não forneceu a este cliente: o leitor a ignora, sem avisar nenhuma tela
+    if (!pulseira && controleAtivo()) {
+      return res.json({
+        ok: true,
+        registered: false,
+        braceletExists: false,
+        ignored: true,
+        braceletCode: normalizedUid,
+        message: MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE,
+      });
+    }
+
+    // Com o controle desligado, a leitura é enviada também quando a pulseira ainda não existe no banco,
     // pois as telas de recepção precisam poder cadastrá-la pelo NFC.
     broadcast(broadcastData);
 
@@ -343,15 +483,6 @@ router.post('/', async (req, res) => {
       }
     }
     
-    // A pulseira precisa existir, pertencer à mesma empresa e estar ativa.
-    // Isso evita processar uma criança cujo vínculo foi removido ou bloqueado.
-    const pulseira = await queryOne(
-      `SELECT codigo, empresaId, status, criancaId
-       FROM pulseira
-       WHERE ${uidSqlExpression('codigo')} = @uid AND LOWER(empresaId) = LOWER(@empresaId)`,
-      { uid: normalizedUid, empresaId: checkpoint.empresaId }
-    );
-
     if (!pulseira) {
       return res.json({
         ok: true,
@@ -1253,6 +1384,78 @@ router.get('/:eventoId/zone-conquest/status', verifyToken, async (req, res) => {
 
 // Histórico de conquista do evento usado pelos telões. A consulta é sempre
 // limitada ao tenant do usuário e ao evento selecionado pela recepção.
+// Partida em andamento do evento; sem ela, a última que terminou. '' quando o evento nunca teve partida.
+async function partidaAtualDoEvento(eventoId) {
+  const sessao = await queryOne(
+    `SELECT id FROM "sessaoJogo"
+     WHERE LOWER(eventoId) = LOWER(@eventoId)
+     ORDER BY (status = 'active') DESC, iniciadoEm DESC
+     LIMIT 1`,
+    { eventoId }
+  );
+  return sessao?.id || '';
+}
+
+// Pontos ganhos na partida (não o total do evento): por equipe e por participante.
+// ?sessionId=<id> ou atual (a em andamento, ou a última que terminou). Usado pela pontuação do telão.
+router.get('/evento/:eventoId/pontos-da-partida', verifyToken, async (req, res) => {
+  try {
+    const eventoId = String(req.params.eventoId || '').trim();
+    const empresaId = await empresaParaEvento(req.user, eventoId);
+    const master = isMaster(req) ? 1 : 0;
+    const evento = await queryOne(
+      'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
+      { eventoId }
+    );
+    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
+    if (!master && String(evento.empresaId).toLowerCase() !== String(empresaId).toLowerCase()) {
+      return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
+    }
+
+    let sessionId = String(req.query.sessionId || 'atual').trim();
+    if (sessionId.toLowerCase() === 'atual') sessionId = await partidaAtualDoEvento(evento.eventoId);
+    if (!sessionId) return res.json({ sessionId: null, equipes: [], participantes: [] });
+
+    const linhas = await allQuery(`
+      SELECT c.criancaId AS "criancaId",
+             COALESCE(NULLIF(c.apelido, ''), c.nome) AS nome,
+             c.avatar AS avatar,
+             t.timeId AS "timeId",
+             t.nome AS "timeNome",
+             t.cor AS "timeCor",
+             COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
+      FROM leitura l
+      JOIN crianca c ON c.criancaId = l.criancaId
+      LEFT JOIN "time" t ON t.timeId = c.timeId
+      WHERE l.sessaoId = @sessionId
+        AND l.autorizado = 1
+        AND LOWER(c.eventoId) = LOWER(@eventoId)
+        AND (l.empresaId = @empresaId OR @master = 1)
+      GROUP BY c.criancaId, c.apelido, c.nome, c.avatar, t.timeId, t.nome, t.cor
+    `, { sessionId, eventoId: evento.eventoId, empresaId, master });
+
+    const porEquipe = new Map();
+    const participantes = linhas.map((linha) => {
+      const pontos = Number(linha.pontos) || 0;
+      if (linha.timeId) {
+        const atual = porEquipe.get(linha.timeId) || { id: linha.timeId, nome: linha.timeNome, cor: linha.timeCor, pontos: 0 };
+        atual.pontos += pontos;
+        porEquipe.set(linha.timeId, atual);
+      }
+      return { id: linha.criancaId, nome: linha.nome, cor: linha.timeCor || null, avatar: linha.avatar || null, pontos };
+    }).sort((a, b) => b.pontos - a.pontos);
+
+    res.json({
+      sessionId,
+      equipes: [...porEquipe.values()].sort((a, b) => b.pontos - a.pontos),
+      participantes,
+    });
+  } catch (error) {
+    console.error('❌ Erro ao somar os pontos da partida:', error);
+    res.status(500).json({ error: 'Não foi possível somar os pontos da partida' });
+  }
+});
+
 router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
   try {
     const eventoId = String(req.params.eventoId || '').trim();
@@ -1261,7 +1464,8 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
     const empresaId = await empresaParaEvento(req.user, eventoId);
     const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 100, 1), 200);
     const master = isMaster(req) ? 1 : 0;
-    const sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
+    let sessionId = String(req.query.sessionId || '').trim(); // 🆕 Adicionar filtro por sessionId
+    const pedidoAtual = sessionId.toLowerCase() === 'atual';
 
     const evento = await queryOne(
       'SELECT eventoId, empresaId FROM evento WHERE LOWER(eventoId) = LOWER(@eventoId)',
@@ -1272,10 +1476,15 @@ router.get('/evento/:eventoId/historico', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: evento não pertence a esta empresa' });
     }
 
+    // sessionId=atual: a partida em andamento do evento (ou a última que terminou), para o telão que abriu no meio do jogo
+    if (sessionId.toLowerCase() === 'atual') sessionId = await partidaAtualDoEvento(evento.eventoId);
+
     // 🆕 Se sessionId foi fornecido, buscar de leitura com filtro de session_id
     // Caso contrário, buscar de pontuacao (compatibilidade com dados antigos)
     let history;
-    if (sessionId) {
+    if (pedidoAtual && !sessionId) {
+      history = [];
+    } else if (sessionId) {
       console.log(`   🔍 [HISTORICO] Filtrando por session_id=${sessionId}`);
       history = await allQuery(`
         SELECT TOP (@limit)

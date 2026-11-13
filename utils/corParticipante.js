@@ -13,16 +13,19 @@ const CORES_PARTICIPANTE = Object.freeze([
 
 const MENSAGEM_COR_EM_USO = 'Esta cor já foi escolhida por outro participante do evento. Escolha outra.';
 
-// Devolve a cor da paleta (em maiúsculas) ou null quando não é uma delas.
+// A cor do participante é a cor de fundo do avatar dele (que pode ser personalizada): vale qualquer #RRGGBB.
+// Devolve a cor em maiúsculas ou null quando não é uma cor válida.
 function normalizarCor(valor) {
   const cor = String(valor ?? '').trim().toUpperCase();
-  return CORES_PARTICIPANTE.includes(cor) ? cor : null;
+  return /^#[0-9A-F]{6}$/.test(cor) ? cor : null;
 }
 
-// Mesma regra dos avatares: pedido em uso = conflito; sem pedido, uma cor livre; todas em uso, a menos usada.
+// Cor pedida (a do fundo do avatar): vale sempre, mesmo que outro participante tenha uma igual, porque o avatar já é único.
+// Sem pedido (cadastro antigo, avatar pronto): uma cor livre da paleta; todas em uso, a menos usada.
 function escolherCor({ pedido = null, emUso = [], aleatorio = Math.random }) {
-  const escolha = escolherAvatar({ pedido, emUso, ids: CORES_PARTICIPANTE, aleatorio });
-  return escolha.conflito ? escolha : { cor: escolha.avatar };
+  if (pedido) return { cor: pedido };
+  const escolha = escolherAvatar({ emUso, ids: CORES_PARTICIPANTE, aleatorio });
+  return { cor: escolha.avatar };
 }
 
 // Cores dos participantes do evento (menos a de `excetoCriancaId`). `db` é o banco ou a transação.

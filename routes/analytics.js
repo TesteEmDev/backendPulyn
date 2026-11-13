@@ -80,7 +80,7 @@ router.get('/metrics', verifyToken, requireMaster('Acesso negado: apenas master 
           SUM(CASE WHEN LOWER(COALESCE(k.status, '')) = 'online' THEN 1 ELSE 0 END) AS online
         FROM pontoVerificacao k
         JOIN evento e ON e.eventoId = k.eventoId
-        WHERE LOWER(COALESCE(k.proposito, 'game')) <> 'reception'
+        WHERE LOWER(COALESCE(k.proposito, 'game')) = 'game'
           AND ${CUSTOMER_EVENTS}
       `),
       queryOne(`
@@ -199,7 +199,7 @@ router.get('/pontoVerificacao-over-time', verifyToken, requireMaster('Acesso neg
       SELECT k.criadoEm
       FROM pontoVerificacao k
       JOIN evento e ON e.eventoId = k.eventoId
-      WHERE LOWER(COALESCE(k.proposito, 'game')) <> 'reception'
+      WHERE LOWER(COALESCE(k.proposito, 'game')) = 'game'
         AND ${CUSTOMER_EVENTS}
     `);
 

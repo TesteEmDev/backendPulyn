@@ -15,6 +15,8 @@ Os scripts ficam em `backendPulyn\deploy\iis`. Se o PowerShell bloquear scripts,
 | 3 | `03-certificado.ps1` | sim | pendente. Cria a CA própria e o certificado do servidor (com o IP da máquina). |
 | 4 | `04-publicar.ps1` | sim | pendente. Build do frontend, cópia do backend, serviço `PulynBackend`, site IIS, firewall (só sub-rede local) e testes. |
 
+**Banco de desenvolvimento em outra máquina da rede:** o `02-banco-producao.ps1` lê os dados de lá (só leitura) e cria o `AdvPulyn` no PostgreSQL **desta** máquina, usando o usuário `postgres` local (ele pede a senha, ou use a variável `PULYN_PG_ADMIN_SENHA`). Para a leitura funcionar, o servidor de desenvolvimento precisa liberar esta máquina no `pg_hba.conf`, com uma linha como `host  AdvPulynDev  <usuario do .env>  <IP desta máquina>/32  scram-sha-256` (depois, `pg_ctl reload` ou reiniciar o serviço lá). Erro "nenhuma entrada em pg_hba.conf" significa que falta essa linha.
+
 Depois: `status.ps1` mostra o estado de tudo; `backup-banco.ps1 -Agendar` (administrador) cria o backup diário às 03:00.
 
 ## Tablets e celulares (necessário para NFC)

@@ -40,6 +40,9 @@ async function ensureMonsterHuntSchema() {
         criadoEm timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    // Monstro sorteado para a equipe nesta partida (utils/sorteioMonstros.js); partidas antigas ficam sem
+    await query('ALTER TABLE monsterCacaEstadoTime ADD COLUMN IF NOT EXISTS monstroTipo varchar(20)');
+    await query('ALTER TABLE monsterCacaEstadoTime ADD COLUMN IF NOT EXISTS monstroCor varchar(20)');
     await query('CREATE UNIQUE INDEX IF NOT EXISTS uq_monster_hunt_team_state ON monsterCacaEstadoTime (partidaId, timeId)');
     await query('CREATE INDEX IF NOT EXISTS idx_monster_hunt_team_states_evento ON monsterCacaEstadoTime (empresaId, eventoId, partidaId)');
     await query(`

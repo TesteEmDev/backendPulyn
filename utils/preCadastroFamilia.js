@@ -2,7 +2,8 @@
 //
 // O cadastro nasce num evento aberto escolhido pelo pai; o buffet dele é o do evento, nunca o que o app manda.
 // Sem evento não há buffet, e sem buffet a recepção não enxerga o cadastro (isolamento entre empresas).
-const { idadeValida, idadeDeNascimento } = require('./perfilCrianca');
+const { idadeValida, idadeDeNascimento, responsaveisParecidos } = require('./perfilCrianca');
+const { normalizarDataNascimento, idadeNaData } = require('./nascimento');
 
 const EVENTOS_FECHADOS = new Set(['completed', 'cancelled', 'canceled', 'finished']);
 
@@ -12,9 +13,6 @@ function eventoAberto(evento) {
 
 // Devolve { ok, error, value } com os campos já limpos. Os mesmos limites do check-in da recepção.
 function validarPreCadastro(body = {}) {
-  const eventoId = String(body.eventoId || '').trim();
-  if (!eventoId) return { ok: false, error: 'Escolha o evento' };
-
   const nome = String(body.nome || '').trim();
   if (!nome) return { ok: false, error: 'Nome da criança é obrigatório' };
   if (nome.length > 100) return { ok: false, error: 'Nome excede o limite de 100 caracteres' };
@@ -28,13 +26,33 @@ function validarPreCadastro(body = {}) {
   if (dataNascimento) {
     idade = idadeDeNascimento(dataNascimento);
     if (idade === null) return { ok: false, error: 'Data de nascimento inválida' };
-    if (idade > 17) return { ok: false, error: 'A criança precisa ter até 17 anos' };
   } else {
     idade = idadeValida(body.idade ?? body.age);
     if (idade === null) return { ok: false, error: 'Informe a data de nascimento da criança' };
   }
 
-  return { ok: true, value: { eventoId, nome, apelido: apelido || null, idade, dataNascimento } };
+  return { ok: true, value: { nome, apelido: apelido || null, idade, dataNascimento } };
 }
 
-module.exports = { eventoAberto, validarPreCadastro };
+// Edição de um cadastro que ainda não entrou em nenhum evento. Mesmos limites do cadastro; sem limite de idade.
+// `comResponsavel`: a recepção também edita o nome e o parentesco do responsável (a família não).
+function validarEdicaoPerfil(body = {}, { comResponsavel = false } = {}) {
+  const nome = String(body.nome || '').trim();
+  if (!nome) return { ok: false, error: 'Nome da criança é obrigatório' };
+  if (nome.length > 100) return { ok: false, error: 'Nome excede o limite de 100 caracteres' };
+
+  const apelido = String(body.apelido || '').trim();
+  if (apelido.length > 100) return { ok: false, error: 'Apelido excede o limite de 100 caracteres' };
+
+  const nascimento = normalizarDataNascimento(body.dataNascimento, new Date(), { limiteIdade: null });
+  if (nascimento.erro) return { ok: false, error: nascimento.erro };
+
+  const value = { nome, apelido: apelido || null, dataNascimento: nascimento.data, idade: idadeNaData(nascimento.data) };
+  if (comResponsavel) {
+    value.nomeResponsavel = String(body.nomeResponsavel || '').trim().slice(0, 200) || null;
+    value.parentescoResponsavel = String(body.parentescoResponsavel || '').trim().slice(0, 50) || null;
+  }
+  return { ok: true, value };
+}
+
+module.exports = { eventoAberto, validarPreCadastro, validarEdicaoPerfil, responsaveisParecidos };

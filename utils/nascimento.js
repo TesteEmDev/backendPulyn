@@ -21,7 +21,9 @@ function diaExiste(ano, mes, dia) {
 }
 
 // Aceita 'AAAA-MM-DD', 'DD/MM/AAAA' e 'DDMMAAAA'. Devolve { data: 'AAAA-MM-DD' } ou { erro }.
-function normalizarDataNascimento(valor, agora = new Date()) {
+// `limiteIdade`: idade máxima aceita (padrão IDADE_MAXIMA, usada no cadastro pelos pais). O check-in da recepção e o
+// autoatendimento passam `null` e aceitam qualquer idade.
+function normalizarDataNascimento(valor, agora = new Date(), { limiteIdade = IDADE_MAXIMA } = {}) {
   const texto = String(valor ?? '').trim();
   let ano; let mes; let dia;
   let casou = /^(\d{4})-(\d{2})-(\d{2})$/.exec(texto);
@@ -38,7 +40,7 @@ function normalizarDataNascimento(valor, agora = new Date()) {
   if (noFuturo) return { erro: 'A data de nascimento não pode ser no futuro.' };
 
   const data = `${String(ano).padStart(4, '0')}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-  if (idadeNaData(data, agora) > IDADE_MAXIMA) return { erro: `A data de nascimento indica mais de ${IDADE_MAXIMA} anos.` };
+  if (limiteIdade !== null && idadeNaData(data, agora) > limiteIdade) return { erro: `A data de nascimento indica mais de ${limiteIdade} anos.` };
   return { data };
 }
 

@@ -221,7 +221,7 @@ async function buscarUltimoRoundFinalizado(partidaId) {
 async function locaisDoJogo(eventoId, brincadeiraId) {
   const doEvento = await allQuery(
     `SELECT checkpointId FROM pontoVerificacao
-     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) = 'game'
      ORDER BY criadoEm ASC, nome ASC`,
     { eventoId }
   );
@@ -763,7 +763,7 @@ async function calcularEstado(eventoId) {
   // Locais da bomba (A, B...) com o nome do checkpoint cadastrado.
   const checkpointsDoEvento = await allQuery(
     `SELECT checkpointId, nome, status FROM pontoVerificacao
-     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) <> 'reception'
+     WHERE LOWER(eventoId) = LOWER(@eventoId) AND LOWER(COALESCE(proposito, 'game')) = 'game'
      ORDER BY criadoEm ASC, nome ASC`,
     { eventoId }
   );

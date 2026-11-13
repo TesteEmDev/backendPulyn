@@ -4,8 +4,8 @@ const router = express.Router();
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { planInviteRegistration, describeRegistrationResult } = require('../utils/familyInviteRules');
-const { criarPerfil } = require('../utils/perfilCrianca');
-const { eventoAberto, validarPreCadastro } = require('../utils/preCadastroFamilia');
+const { criarPerfil, normalizarBusca, semAcentosSql, nomeAbreviado, perfilTemParticipacao, editarPerfilSemParticipacao, excluirPerfil } = require('../utils/perfilCrianca');
+const { validarPreCadastro, validarEdicaoPerfil, responsaveisParecidos } = require('../utils/preCadastroFamilia');
 const { getAvatarForCreate } = require('../utils/avatar');
 const { avaliarConviteParaEntrar, montarEventosDaFamilia, conviteDoEvento } = require('../utils/eventosFamilia');
 const { gerarCodigo, normalizarCodigo, ehCodigoCurto, formatoValido, exibirCodigo } = require('../utils/codigoConvite');
@@ -814,7 +814,18 @@ router.get('/eventos', verifyToken, async (req, res) => {
       WHERE l.loginId = @loginId AND l.status IN ('approved', 'pending')
     `, { loginId: req.user.id });
 
-    res.json({ eventos: montarEventosDaFamilia(porConvite, porCrianca) });
+    // Pré-cadastro que a recepção já cadastrou no evento, ainda sem vínculo: o evento tem de aparecer para o app
+    // poder vincular a pulseira nele (mesma regra de acesso de eventoDaFamilia).
+    const porPerfil = await allQuery(`
+      SELECT DISTINCT c.eventoId, e.nome, e.data, e.status, emp.nome AS "buffetNome"
+      FROM perfilVinculoFamiliar pv
+      JOIN crianca c ON c.perfilCriancaId = pv.perfilCriancaId
+      JOIN evento e ON e.eventoId = c.eventoId
+      LEFT JOIN empresa emp ON emp.empresaId = e.empresaId
+      WHERE pv.loginId = @loginId
+    `, { loginId: req.user.id });
+
+    res.json({ eventos: montarEventosDaFamilia(porConvite, porCrianca, porPerfil) });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao listar eventos da família:', err.message);
     res.status(500).json({ error: err.message });
@@ -827,7 +838,7 @@ router.get('/perfis', verifyToken, async (req, res) => {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
 
     const perfis = await allQuery(`
-      SELECT p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, emp.nome AS buffetNome
+      SELECT p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, CAST(p.dataNascimento AS text) AS dataNascimento, emp.nome AS buffetNome
       FROM perfilVinculoFamiliar pv
       JOIN perfilCrianca p ON p.perfilCriancaId = pv.perfilCriancaId
       JOIN empresa emp ON emp.empresaId = pv.empresaId
@@ -842,26 +853,125 @@ router.get('/perfis', verifyToken, async (req, res) => {
   }
 });
 
-// Pré-cadastro: cria o cadastro da criança no buffet do evento escolhido e liga o responsável a ele.
-// O buffet vem do evento no banco, nunca do corpo da requisição.
+// Todas as crianças do responsável (uma linha por criança, não por evento): as que já têm pulseira, as que estão num
+// evento sem pulseira e as pré-cadastradas que ainda aguardam o buffet.
+router.get('/todas-criancas', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+
+    const rows = await allQuery(`
+      SELECT p.perfilCriancaId, p.nome, p.apelido, p.avatar, p.idade, CAST(p.dataNascimento AS text) AS dataNascimento,
+             e.nome AS ultimoEventoNome, e.data AS ultimoEventoData, emp.nome AS buffetNome,
+             CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS participacoes,
+             CAST((SELECT COALESCE(SUM(c.pontos), 0) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId) AS INTEGER) AS pontosTotais,
+             CAST((SELECT COUNT(*) FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId AND vf.status IN ('approved', 'pending')) AS INTEGER) AS vinculosEvento,
+             CAST((SELECT COUNT(*) FROM crianca c WHERE c.perfilCriancaId = p.perfilCriancaId AND c.codigoPulseira IS NOT NULL) AS INTEGER) AS comPulseira
+      FROM perfilCrianca p
+      LEFT JOIN evento e ON e.eventoId = p.ultimoEventoId
+      LEFT JOIN empresa emp ON emp.empresaId = p.empresaId
+      WHERE p.perfilCriancaId IN (
+              SELECT perfilCriancaId FROM perfilVinculoFamiliar WHERE loginId = @loginId
+              UNION
+              SELECT perfilCriancaId FROM vinculoFamiliar
+              WHERE loginId = @loginId AND status IN ('approved', 'pending') AND perfilCriancaId IS NOT NULL)
+      ORDER BY p.nome ASC
+    `, { loginId: req.user.id });
+
+    res.json({
+      total: rows.length,
+      criancas: rows.map((row) => ({
+        ...row,
+        idade: row.dataNascimento ? idadeNaData(row.dataNascimento) : row.idade,
+        // com_pulseira: tem pulseira em algum evento; no_evento: já esteve num evento mas sem pulseira; aguardando: só cadastro
+        situacao: row.comPulseira > 0 ? 'com_pulseira' : row.participacoes > 0 ? 'no_evento' : 'aguardando',
+      })),
+    });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao listar todas as crianças:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Procura, em TODOS os buffets (a criança pode ter ido a outro antes), um cadastro com o mesmo nome da criança, a mesma
+// data de nascimento e um nome de responsável que bata com o nome da conta de quem pergunta. Cadastros que o próprio
+// responsável já tem ligados a ele não contam. Devolve o cadastro encontrado ou null.
+async function buscarCadastroParecido(req) {
+  const nome = normalizarBusca(req.body?.nome);
+  const dataNascimento = String(req.body?.dataNascimento || '').trim();
+  if (!nome || !/^\d{4}-\d{2}-\d{2}$/.test(dataNascimento)) return null;
+
+  const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
+  if (!responsavel?.nomeFamilia) return null;
+
+  const candidatos = await allQuery(
+    `SELECT p.perfilCriancaId, p.empresaId, p.nome, p.nomeResponsavel, p.criadoEm
+     FROM perfilCrianca p
+     WHERE CAST(p.dataNascimento AS text) = @dataNascimento
+       AND ${semAcentosSql('p.nome')} = @nome
+       AND p.nomeResponsavel IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM perfilVinculoFamiliar pv WHERE pv.perfilCriancaId = p.perfilCriancaId AND pv.loginId = @loginId)
+       AND NOT EXISTS (SELECT 1 FROM vinculoFamiliar vf WHERE vf.perfilCriancaId = p.perfilCriancaId AND vf.loginId = @loginId)
+     ORDER BY p.criadoEm DESC`,
+    { dataNascimento, nome, loginId: req.user.id }
+  );
+  const parecido = candidatos.find((linha) => responsaveisParecidos(linha.nomeResponsavel, responsavel.nomeFamilia)) || null;
+  // Sem nomes no log: só o motivo, para entender por que um aviso esperado não apareceu
+  console.log(`🔎 [FAMILIAS] Cadastro parecido: ${candidatos.length} candidato(s) com mesmo nome e nascimento em todos os buffets; ${parecido ? 'responsável bate' : 'nenhum responsável bate'}`);
+  return parecido;
+}
+
+// Antes de salvar o pré-cadastro: já existe um cadastro parecido? Só devolve se existe, quando foi criado e os nomes
+// abreviados ("Guilherme G. C."), nunca o nome completo, o id nem o buffet. Só avisa; quem decide é o pai.
+router.post('/perfis/verificar', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+    const parecido = await buscarCadastroParecido(req);
+    res.json(parecido
+      ? { existe: true, criadoEm: parecido.criadoEm, crianca: nomeAbreviado(parecido.nome), responsavel: nomeAbreviado(parecido.nomeResponsavel) }
+      : { existe: false });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao verificar cadastro parecido:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// O pai confirmou que o cadastro parecido é do filho dele: liga a conta a esse cadastro (em vez de criar outro).
+// O servidor refaz a busca com os mesmos critérios: o app nunca escolhe o cadastro por id. Vale só para o cadastro
+// permanente da criança; o histórico de eventos anteriores não é aberto por isso (a participação em eventos novos
+// vincula sozinha, como em qualquer cadastro).
+router.post('/perfis/vincular', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
+    const parecido = await buscarCadastroParecido(req);
+    if (!parecido) return res.status(404).json({ error: 'Cadastro não encontrado. Confira o nome e a data de nascimento.' });
+    await query(
+      `INSERT INTO perfilVinculoFamiliar (vinculoId, loginId, perfilCriancaId, empresaId, relacionamento)
+       VALUES (@vinculoId, @loginId, @perfilCriancaId, @empresaId, 'responsável')`,
+      { vinculoId: crypto.randomUUID(), loginId: req.user.id, perfilCriancaId: parecido.perfilCriancaId, empresaId: parecido.empresaId }
+    );
+    res.status(201).json({ perfilCriancaId: parecido.perfilCriancaId, nome: nomeAbreviado(parecido.nome) });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao vincular cadastro existente:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pré-cadastro: cria o cadastro da criança no buffet da conta do responsável e liga o responsável a ele.
+// Não depende de evento: a criança se vincula ao evento depois, pelo autoatendimento (Kiosk).
+// O buffet vem da conta no banco, nunca do corpo da requisição.
 router.post('/perfis', verifyToken, async (req, res) => {
   try {
     if (req.user.role !== 'family') return res.status(403).json({ error: 'Acesso exclusivo para famílias' });
 
     const dados = validarPreCadastro(req.body);
     if (!dados.ok) return res.status(400).json({ error: dados.error });
-    const { eventoId, nome, apelido, idade, dataNascimento } = dados.value;
-
-    const evento = await queryOne(
-      'SELECT eventoId, empresaId, status FROM evento WHERE eventoId = @eventoId',
-      { eventoId }
-    );
-    if (!evento) return res.status(404).json({ error: 'Evento não encontrado' });
-    if (!eventoAberto(evento)) return res.status(409).json({ error: 'Este evento não está aberto para cadastro' });
+    const { nome, apelido, idade, dataNascimento } = dados.value;
+    const empresaId = req.user.empresaId;
+    if (!empresaId) return res.status(400).json({ error: 'Sua conta não está ligada a um buffet' });
 
     const perfilCriancaId = await withTransaction(async () => {
       const perfilId = await criarPerfil({
-        empresaId: evento.empresaId,
+        empresaId,
         eventoId: null,
         nome,
         apelido,
@@ -876,7 +986,7 @@ router.post('/perfis', verifyToken, async (req, res) => {
           vinculoId: crypto.randomUUID(),
           loginId: req.user.id,
           perfilCriancaId: perfilId,
-          empresaId: evento.empresaId,
+          empresaId,
         }
       );
       return perfilId;
@@ -885,6 +995,48 @@ router.post('/perfis', verifyToken, async (req, res) => {
     res.status(201).json({ perfilCriancaId, nome, apelido, idade, dataNascimento });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao pré-cadastrar criança:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Só edita/exclui o cadastro que o próprio responsável fez e que ainda não entrou em nenhum evento ("não aceito").
+async function perfilEditavelDaFamilia(req, res) {
+  if (req.user.role !== 'family') { res.status(403).json({ error: 'Acesso exclusivo para famílias' }); return null; }
+  const { perfilCriancaId } = req.params;
+  const vinculo = await queryOne(
+    'SELECT 1 AS ok FROM perfilVinculoFamiliar WHERE loginId = @loginId AND perfilCriancaId = @perfilCriancaId',
+    { loginId: req.user.id, perfilCriancaId }
+  );
+  if (!vinculo) { res.status(404).json({ error: 'Cadastro não encontrado' }); return null; }
+  if (await perfilTemParticipacao(perfilCriancaId)) {
+    res.status(409).json({ error: 'Esta criança já entrou em um evento e não pode mais ser alterada por aqui' });
+    return null;
+  }
+  return perfilCriancaId;
+}
+
+router.put('/perfis/:perfilCriancaId', verifyToken, async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaFamilia(req, res);
+    if (!perfilCriancaId) return;
+    const dados = validarEdicaoPerfil(req.body);
+    if (!dados.ok) return res.status(400).json({ error: dados.error });
+    await editarPerfilSemParticipacao(perfilCriancaId, dados.value);
+    res.json({ perfilCriancaId, ...dados.value });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao editar pré-cadastro:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/perfis/:perfilCriancaId', verifyToken, async (req, res) => {
+  try {
+    const perfilCriancaId = await perfilEditavelDaFamilia(req, res);
+    if (!perfilCriancaId) return;
+    await withTransaction(async () => { await excluirPerfil(perfilCriancaId); });
+    res.json({ success: true });
+  } catch (err) {
+    console.error('❌ [FAMILIAS] Erro ao excluir pré-cadastro:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -933,7 +1085,7 @@ router.get('/active-event', verifyToken, async (req, res) => {
       LEFT JOIN brincadeira b ON b.brincadeiraId = e.brincadeiraAtivaId
       LEFT JOIN crianca c ON c.eventoId = e.eventoId
       LEFT JOIN "time" t ON t.eventoId = e.eventoId
-      LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.eventoId AND cp.proposito != 'reception'
+      LEFT JOIN pontoVerificacao cp ON cp.eventoId = e.eventoId AND LOWER(COALESCE(cp.proposito, 'game')) = 'game'
       WHERE e.eventoId = @eventoId
       GROUP BY e.eventoId, e.nome, e.data, e.status, e.empresaId,
                e.tipoJogoAtivo, e.brincadeiraAtivaId,
