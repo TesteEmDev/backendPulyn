@@ -88,8 +88,11 @@ if ($existe -and $Recriar) {
     Escrever-Ok $seg
     Write-Host ''
     Write-Host ('    Isto vai APAGAR o banco "' + $BancoProd + '" (os dados de producao atuais) e refazer a copia.') -ForegroundColor Yellow
-    $conf = Read-Host ('    Digite APAGAR ' + $BancoProd + ' para confirmar')
-    if ($conf -cne ('APAGAR ' + $BancoProd)) { Write-Host 'Cancelado, nada foi apagado.'; return }
+    # O instalador (setup.exe) ja perguntou na tela dele (PULYN_RECRIAR_CONFIRMADO=1); rodando a mao, pede para digitar.
+    if ($env:PULYN_RECRIAR_CONFIRMADO -ne '1') {
+        $conf = Read-Host ('    Digite APAGAR ' + $BancoProd + ' para confirmar')
+        if ($conf -cne ('APAGAR ' + $BancoProd)) { Write-Host 'Cancelado, nada foi apagado.'; return }
+    }
     Rodar-Sql 'postgres' ('select pg_terminate_backend(pid) from pg_stat_activity where datname = ''' + $BancoProd + ''' and pid <> pg_backend_pid(); drop database "' + $BancoProd + '";')
     Escrever-Ok 'banco antigo removido'
 }

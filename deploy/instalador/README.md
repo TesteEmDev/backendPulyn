@@ -50,7 +50,7 @@ Para ver as telas sem instalar nada (não pede administrador e não executa nada
    - o **IP** da máquina (já vem preenchido);
    - a **senha do postgres**: se o PostgreSQL ainda não estiver instalado, é a senha que será criada; se já estiver, é a senha que ele já usa;
    - o **ID da empresa** do buffet e a **conexão da nuvem** dele (`postgresql://usuario:senha@servidor:porta/banco`).
-4. Uma janela do PowerShell mostra cada etapa. No fim aparece o endereço `https://IP/`.
+4. O andamento de cada etapa aparece dentro do próprio instalador (nenhuma janela de PowerShell abre). No fim aparece o endereço `https://IP/`.
 
 O buffet **não tem usuário master**: quem cria e administra tudo é o dono, pela nuvem. A conexão da nuvem é de um usuário próprio do buffet, criado com `debug/preparar-acesso-buffet-nuvem.js`, que só enxerga os dados da empresa dele (Row Level Security). Não coloque no instalador uma conexão de administrador da nuvem.
 
