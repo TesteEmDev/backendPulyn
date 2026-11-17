@@ -176,7 +176,7 @@ router.get('/profiles', async (req, res) => {
       empresaId: req.user.empresaId,
       eventoId: eventId,
       termo: req.query.busca,
-      // AAAA-MM-DD: sem a data de nascimento a busca não devolve ninguém
+      // AAAA-MM-DD, opcional (kiosk antigo ainda envia): não é mais exigida; nome da criança e do responsável bastam
       dataNascimento: String(req.query.dataNascimento || '').trim(),
       nomeResponsavel: String(req.query.nomeResponsavel || '').trim().slice(0, 200),
     });

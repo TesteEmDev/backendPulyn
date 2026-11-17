@@ -212,21 +212,25 @@ async function recalcularUltimoEvento(perfilCriancaId) {
 async function buscarPerfisParaKiosk({ empresaId, termo, eventoId, dataNascimento, nomeResponsavel, limite = 8 }) {
   const busca = normalizarBusca(termo);
   if (busca.length < 2) return [];
-  // Privacidade: só aparece quem tem o nome E a data de nascimento informados (nunca cadastros de outras pessoas)
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dataNascimento || ''))) return [];
-  // ...e o nome do pai/responsável (cadastro sem esse nome não é achado por aqui)
+  // Privacidade: só aparece quem tem o nome da criança E o nome do pai/responsável informados (nunca cadastros de outras
+  // pessoas). Cadastro sem responsável gravado não é achado por aqui.
   if (normalizarBusca(nomeResponsavel).length < 2) return [];
+  // A data de nascimento não é mais exigida. Kiosk antigo que ainda a envia continua filtrando por ela.
+  const nascimento = /^\d{4}-\d{2}-\d{2}$/.test(String(dataNascimento || '')) ? String(dataNascimento) : null;
+  // Sem a data a busca é mais ampla: traz mais candidatos e o responsável (comparação por palavras) decide no fim.
+  const candidatos = 300;
   const rows = await allQuery(
     `SELECT TOP (@limite) p.perfilCriancaId, p.nome, p.apelido, p.idade, p.avatar, p.nomeResponsavel, CAST(p.dataNascimento AS text) AS dataNascimento,
             part.criancaId AS participacaoId, part.avatar AS avatarNoEvento, part.apelido AS apelidoNoEvento, part.cor AS corNoEvento
      FROM perfilCrianca p
      LEFT JOIN crianca part ON part.perfilCriancaId = p.perfilCriancaId AND part.eventoId = @eventoId
      WHERE p.empresaId = @empresaId
-       AND CAST(p.dataNascimento AS text) = @dataNascimento
+       AND p.nomeResponsavel IS NOT NULL
+       ${nascimento ? 'AND CAST(p.dataNascimento AS text) = @dataNascimento' : ''}
        AND (${semAcentosSql('p.apelido')} LIKE @padrao OR ${semAcentosSql('p.nome')} LIKE @padrao)
        AND (part.criancaId IS NULL OR part.codigoPulseira IS NULL)
      ORDER BY p.atualizadoEm DESC`,
-    { empresaId, eventoId, dataNascimento, padrao: `%${busca}%`, limite: 50 }
+    { empresaId, eventoId, padrao: `%${busca}%`, limite: candidatos, ...(nascimento ? { dataNascimento: nascimento } : {}) }
   );
   return rows.filter((row) => responsaveisParecidos(row.nomeResponsavel, nomeResponsavel)).slice(0, limite).map((row) => ({
     perfilCriancaId: row.perfilCriancaId,
