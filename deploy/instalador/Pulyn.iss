@@ -250,6 +250,10 @@ begin
   PaginaPg.Add('Senha do postgres:', True);
   if not PgInstalado then
     PaginaPg.Add('Repita a senha:', True);
+  // Senha sugerida (pode ser trocada na tela). Se o PostgreSQL ja existe, e a senha que ele ja deveria ter.
+  PaginaPg.Values[0] := 'D200pax@';
+  if not PgInstalado then
+    PaginaPg.Values[1] := 'D200pax@';
 
   PaginaMaster := CreateInputQueryPage(PaginaPg.ID, 'Usuário master',
     'Acesso de administrador geral do Pulyn',
