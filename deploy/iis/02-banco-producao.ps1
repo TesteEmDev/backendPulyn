@@ -180,10 +180,11 @@ if (Test-Path $envProd) {
         '# Sincronizacao com a nuvem: so UM backend deve sincronizar com o Supabase.',
         $(if ($sincronizar) { '# Buffet com empresa definida: so os dados da empresa descem e sobem (usuario proprio na nuvem).' } else { '# Deixe 0 ate desligar a sincronizacao do ambiente de desenvolvimento (veja README-IIS.md).' }),
         ('SYNC_ENABLED=' + $(if ($sincronizar) { '1' } else { '0' })),
-        'SYNC_INTERVALO_MS=15000'
+        'SYNC_INTERVALO_MS=15000',
+        ('SYNC_NUVEM_URL=' + $(if ($nuvemUrl) { $nuvemUrl } else { '' })),
+        ('SYNC_NUVEM_SSL=' + $nuvemSsl),
+        ('SYNC_EMPRESA_ID=' + $(if ($sincronizar) { $empresaId } else { '' }))
     )
-    if ($nuvemUrl) { $linhas += 'SYNC_NUVEM_URL=' + $nuvemUrl; $linhas += 'SYNC_NUVEM_SSL=' + $nuvemSsl }
-    if ($sincronizar) { $linhas += 'SYNC_EMPRESA_ID=' + $empresaId }
     Gravar-TextoUtf8 $envProd (($linhas -join "`r`n") + "`r`n")
     Escrever-Ok ('criado ' + $envProd)
     Escrever-Aviso ('FRONTEND_URL ficou https://' + $ip + ' (IP atual desta maquina). Se o IP mudar, ajuste aqui.')
