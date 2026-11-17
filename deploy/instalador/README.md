@@ -49,10 +49,20 @@ Para ver as telas sem instalar nada (não pede administrador e não executa nada
 3. O assistente pede três coisas:
    - o **IP** da máquina (já vem preenchido);
    - a **senha do postgres**: se o PostgreSQL ainda não estiver instalado, é a senha que será criada; se já estiver, é a senha que ele já usa;
-   - o **e-mail e a senha do usuário master**.
+   - o **ID da empresa** do buffet e a **conexão da nuvem** dele (`postgresql://usuario:senha@servidor:porta/banco`).
 4. Uma janela do PowerShell mostra cada etapa. No fim aparece o endereço `https://IP/`.
 
-O banco começa vazio, só com a estrutura e o usuário master. Não há dados de teste nem sincronização com a nuvem (`SYNC_ENABLED=0`). Depois da instalação, siga o guia a partir da seção 5 (cadastrar o buffet, tablets e placas).
+O buffet **não tem usuário master**: quem cria e administra tudo é o dono, pela nuvem. A conexão da nuvem é de um usuário próprio do buffet, criado com `debug/preparar-acesso-buffet-nuvem.js`, que só enxerga os dados da empresa dele (Row Level Security). Não coloque no instalador uma conexão de administrador da nuvem.
+
+O que o instalador faz com isso:
+1. Antes de mexer no IIS, confere a conexão e se a empresa existe na nuvem (`deploy/iis/carga-empresa.js --conferir`). Se estiver errado, para ali.
+2. Cria o banco só com a estrutura (`banco-base.sql`), sem usuário master.
+3. Copia da nuvem tudo o que é da empresa (eventos, crianças, pulseiras, usuários etc.) e confere a quantidade de linhas tabela por tabela.
+4. Grava no `.env`: `SYNC_ENABLED=1`, `SYNC_NUVEM_URL`, `SYNC_NUVEM_SSL=true` e `SYNC_EMPRESA_ID`. O backend passa a sincronizar nos dois sentidos, só com a empresa.
+
+Limite que vale saber: com `SYNC_EMPRESA_ID` definido, o sincronizador só trata as tabelas que têm a coluna `empresaId`. As que não têm (por exemplo `zona`, `eventoBrincadeira`, `conquista`, `pulseiraMovimento`) não descem nem sobem. A carga mostra a lista delas no final.
+
+A estrutura da nuvem precisa ser a mesma do `banco-base.sql`: se faltar tabela ou coluna na nuvem, a instalação para e mostra o que falta. Gere o `banco-base.sql` de novo quando o banco ganhar tabelas.
 
 O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 

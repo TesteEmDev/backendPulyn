@@ -2,7 +2,8 @@
 ; Nao compile direto: use gerar-instalador.ps1, que monta a pasta "montagem" (sistema compilado + instaladores) e chama o ISCC.
 ;
 ; A segunda tela pergunta o que fazer:
-;   Primeira instalacao: pede IP, senha do postgres e usuario master; copia o pacote para C:\Pulyn\pacote e roda
+;   Primeira instalacao: pede IP, senha do postgres, ID da empresa e conexao da nuvem (os dados da empresa vem da nuvem;
+;                        nao ha usuario master no buffet); copia o pacote para C:\Pulyn\pacote e roda
 ;                        BackEnd\deploy\iis\instalar-tudo.ps1 -Modo Instalar
 ;   Atualizar pela internet: roda atualizar-github.ps1 (git pull da main do GitHub, so o que mudou, backup e publicacao)
 ;   Atualizar com este instalador: copia o pacote e roda instalar-tudo.ps1 -Modo Atualizar (sem internet)
@@ -92,7 +93,7 @@ var
   PaginaModo: TInputOptionWizardPage;
   PaginaIp: TInputQueryWizardPage;
   PaginaPg: TInputQueryWizardPage;
-  PaginaMaster: TInputQueryWizardPage;
+  PaginaEmpresa: TInputQueryWizardPage;
   PaginaRemover: TInputOptionWizardPage;
   JaInstalado: Boolean;
   TemRestos: Boolean;
@@ -186,13 +187,21 @@ begin
   Result := Partes = 4;
 end;
 
-function EmailValido(Email: string): Boolean;
+// Conexao do PostgreSQL da nuvem: postgresql://usuario:senha@servidor:porta/banco (sem espacos nem aspas).
+function ConexaoNuvemValida(Url: string): Boolean;
 var
-  Arroba: Integer;
+  Inicio: string;
 begin
-  Arroba := Pos('@', Email);
-  Result := (Arroba > 1) and (Pos('.', Copy(Email, Arroba + 1, Length(Email))) > 1) and (Pos(' ', Email) = 0)
-    and (Pos('"', Email) = 0) and (Pos('''', Email) = 0);
+  Inicio := Lowercase(Copy(Url, 1, 13));
+  Result := ((Copy(Inicio, 1, 13) = 'postgresql://') or (Copy(Inicio, 1, 11) = 'postgres://'))
+    and (Pos(' ', Url) = 0) and (Pos('"', Url) = 0) and (Pos('''', Url) = 0) and (Pos('@', Url) > 0);
+end;
+
+// ID da empresa: sem espacos, aspas nem barras (vai para o .env e para consultas).
+function IdEmpresaValido(Id: string): Boolean;
+begin
+  Result := (Length(Id) > 0) and (Pos(' ', Id) = 0) and (Pos('"', Id) = 0) and (Pos('''', Id) = 0)
+    and (Pos('\', Id) = 0) and (Pos('/', Id) = 0);
 end;
 
 procedure InitializeWizard;
@@ -255,15 +264,15 @@ begin
   if not PgInstalado then
     PaginaPg.Values[1] := 'D200pax@';
 
-  PaginaMaster := CreateInputQueryPage(PaginaPg.ID, 'Usuário master',
-    'Acesso de administrador geral do Pulyn',
-    'Com este usuário você entra no sistema, cadastra o buffet em Master > Clientes e cria o administrador do buffet.');
-  PaginaMaster.Add('E-mail do master:', False);
-  PaginaMaster.Add('Senha (mínimo 6 caracteres):', True);
-  PaginaMaster.Add('Repita a senha:', True);
+  PaginaEmpresa := CreateInputQueryPage(PaginaPg.ID, 'Empresa do buffet',
+    'De qual empresa são os dados deste computador?',
+    'Os dados da empresa (eventos, crianças, pulseiras, usuários) são copiados da nuvem agora, e a sincronização já fica ligada. ' +
+    'Use o ID da empresa e a conexão da nuvem preparada para este buffet.');
+  PaginaEmpresa.Add('ID da empresa:', False);
+  PaginaEmpresa.Add('Conexão da nuvem (postgresql://...):', True);
 
   // ---- 3. desinstalar
-  PaginaRemover := CreateInputOptionPage(PaginaMaster.ID, 'Desinstalar o Pulyn',
+  PaginaRemover := CreateInputOptionPage(PaginaEmpresa.ID, 'Desinstalar o Pulyn',
     'O que será removido deste computador',
     'Serão removidos: o serviço PulynBackend, o site Pulyn no IIS, os certificados do Pulyn, as regras de firewall, o backup automático e os arquivos em C:\Pulyn.' + #13#10#13#10 +
     'Continuam instalados: Node.js, PostgreSQL e o IIS (podem servir a outros sites), e a pasta C:\Pulyn\backups.' + #13#10#13#10 +
@@ -276,7 +285,7 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if (PageID = PaginaIp.ID) or (PageID = PaginaPg.ID) or (PageID = PaginaMaster.ID) then
+  if (PageID = PaginaIp.ID) or (PageID = PaginaPg.ID) or (PageID = PaginaEmpresa.ID) then
     Result := Modo <> MODO_INSTALAR
   else if PageID = PaginaRemover.ID then
     Result := Modo <> MODO_DESINSTALAR;
@@ -320,22 +329,18 @@ begin
       Result := False;
     end;
   end
-  else if CurPageID = PaginaMaster.ID then
+  else if CurPageID = PaginaEmpresa.ID then
   begin
-    PaginaMaster.Values[0] := Trim(PaginaMaster.Values[0]);
-    if not EmailValido(PaginaMaster.Values[0]) then
+    PaginaEmpresa.Values[0] := Trim(PaginaEmpresa.Values[0]);
+    PaginaEmpresa.Values[1] := Trim(PaginaEmpresa.Values[1]);
+    if not IdEmpresaValido(PaginaEmpresa.Values[0]) then
     begin
-      MsgBox('Digite um e-mail válido para o master.', mbError, MB_OK);
+      MsgBox('Digite o ID da empresa (sem espaços, aspas ou barras).', mbError, MB_OK);
       Result := False;
     end
-    else if Length(PaginaMaster.Values[1]) < 6 then
+    else if not ConexaoNuvemValida(PaginaEmpresa.Values[1]) then
     begin
-      MsgBox('A senha do master precisa ter pelo menos 6 caracteres.', mbError, MB_OK);
-      Result := False;
-    end
-    else if PaginaMaster.Values[1] <> PaginaMaster.Values[2] then
-    begin
-      MsgBox('As senhas do master não conferem.', mbError, MB_OK);
+      MsgBox('A conexão da nuvem deve começar com postgresql:// e não pode ter espaços nem aspas.', mbError, MB_OK);
       Result := False;
     end;
   end
@@ -383,7 +388,7 @@ begin
         'O Pulyn está no ar em https://' + PaginaIp.Values[0] + #13#10#13#10 +
         'Próximos passos:' + #13#10 +
         '1. Instale o certificado C:\Pulyn\certs\PulynCA.cer em cada tablet e celular.' + #13#10 +
-        '2. Entre com o usuário master e cadastre o buffet em Master > Clientes.' + #13#10 +
+        '2. Entre com o usuário da empresa (ele veio da nuvem). A sincronização com a nuvem já está ligada.' + #13#10 +
         '3. Configure as placas pelo portal delas, com o servidor https://' + PaginaIp.Values[0];
   end;
 end;
@@ -422,7 +427,7 @@ begin
   else
     Result := 'PRIMEIRA INSTALAÇÃO do Pulyn {#Versao}' + NewLine + NewLine +
       'Endereço do sistema: https://' + PaginaIp.Values[0] + NewLine +
-      'Usuário master: ' + PaginaMaster.Values[0] + NewLine + NewLine +
+      'Empresa: ' + PaginaEmpresa.Values[0] + ' (dados copiados da nuvem)' + NewLine + NewLine +
       'Uma janela do PowerShell vai mostrar cada etapa. Pode levar de 5 a 20 minutos.';
 end;
 
@@ -483,15 +488,17 @@ begin
   begin
     // As senhas vao por variavel de ambiente (herdada pelo PowerShell), nunca pela linha de comando.
     SetEnvironmentVariable('PULYN_PG_ADMIN_SENHA', PaginaPg.Values[0]);
-    SetEnvironmentVariable('PULYN_MASTER_SENHA', PaginaMaster.Values[1]);
-    Parametros := Parametros + ' -Modo Instalar -Ip ' + PaginaIp.Values[0] + ' -EmailMaster "' + PaginaMaster.Values[0] + '"';
+    SetEnvironmentVariable('PULYN_EMPRESA_ID', PaginaEmpresa.Values[0]);
+    SetEnvironmentVariable('PULYN_NUVEM_URL', PaginaEmpresa.Values[1]);
+    Parametros := Parametros + ' -Modo Instalar -Ip ' + PaginaIp.Values[0];
   end
   else
     Parametros := Parametros + ' -Modo Atualizar';
   if not Exec(PowerShell, Parametros, '', SW_SHOW, ewWaitUntilTerminated, CodigoResultado) then
     CodigoResultado := -1;
   SetEnvironmentVariable('PULYN_PG_ADMIN_SENHA', '');
-  SetEnvironmentVariable('PULYN_MASTER_SENHA', '');
+  SetEnvironmentVariable('PULYN_EMPRESA_ID', '');
+  SetEnvironmentVariable('PULYN_NUVEM_URL', '');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

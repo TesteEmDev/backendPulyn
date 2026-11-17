@@ -7,9 +7,10 @@
 # administrador do PostgreSQL local (-AdminLocal, padrao postgres) - a senha e pedida, ou vem de PULYN_PG_ADMIN_SENHA.
 #
 # -BancoLimpo: instalacao de um buffet novo. NAO copia o desenvolvimento: cria o banco so com a estrutura (banco-base.sql),
-# cadastra a empresa da Pulyn e o usuario master (-EmailMaster; a senha vem de PULYN_MASTER_SENHA ou e pedida) e gera o
-# .env sem sincronizacao com a nuvem. Nao precisa do .env de desenvolvimento.
-param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$EmailMaster, [string]$Ip)
+# copia da NUVEM os dados da empresa do buffet (carga-empresa.js) e gera o .env ja com a sincronizacao ligada. Nao cria
+# usuario master (quem administra o sistema e o dono, pela nuvem). Nao precisa do .env de desenvolvimento.
+# Entradas (variaveis de ambiente, nunca na linha de comando): PULYN_EMPRESA_ID e PULYN_NUVEM_URL (conexao do usuario do buffet).
+param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$Ip)
 . "$PSScriptRoot\config.ps1"
 Exigir-Repo
 
@@ -20,15 +21,9 @@ $pgRestore = Join-Path $PgBin 'pg_restore.exe'
 if ($BancoLimpo) {
     $arquivoBase = Join-Path $PSScriptRoot 'banco-base.sql'
     if (-not (Test-Path $arquivoBase)) { throw ('Nao achei ' + $arquivoBase + ' (gere com gerar-banco-base.ps1).') }
-    if (-not $EmailMaster) { $EmailMaster = Read-Host '    E-mail do usuario master' }
-    $senhaMaster = $env:PULYN_MASTER_SENHA
-    if (-not $senhaMaster) {
-        $s1 = [Net.NetworkCredential]::new('', (Read-Host '    Senha do usuario master (minimo 6 caracteres)' -AsSecureString)).Password
-        $s2 = [Net.NetworkCredential]::new('', (Read-Host '    Repita a senha do master' -AsSecureString)).Password
-        if ($s1 -cne $s2) { throw 'As senhas do master nao conferem.' }
-        $senhaMaster = $s1
-    }
-    if ($senhaMaster.Length -lt 6) { throw 'A senha do master precisa ter pelo menos 6 caracteres.' }
+    $empresaId = $env:PULYN_EMPRESA_ID
+    $nuvemUrlEmpresa = $env:PULYN_NUVEM_URL
+    if (-not $empresaId -or -not $nuvemUrlEmpresa) { throw 'Falta o ID da empresa e a conexao da nuvem (PULYN_EMPRESA_ID e PULYN_NUVEM_URL).' }
     $envDev = $null
     $dev = $null
     $connOrigem = $null
@@ -123,15 +118,14 @@ if ($BancoLimpo) {
     } finally { $env:PGPASSWORD = $null }
     Escrever-Ok ([string]$qtdTabelas + ' tabelas criadas')
 
-    Escrever-Passo 'Usuario master'
+    Escrever-Passo ('Copiando da nuvem os dados da empresa ' + $empresaId)
     $env:DATABASE_URL = 'postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd
-    $env:MASTER_EMAIL = $EmailMaster
-    $env:MASTER_SENHA = $senhaMaster
+    $env:SYNC_NUVEM_URL = $nuvemUrlEmpresa
+    $env:SYNC_EMPRESA_ID = $empresaId
     try {
-        & node (Join-Path $PSScriptRoot 'criar-master.js')
-        Conferir-Saida 'Nao consegui criar o usuario master'
-    } finally { Remove-Item Env:\DATABASE_URL, Env:\MASTER_EMAIL, Env:\MASTER_SENHA -ErrorAction SilentlyContinue }
-    $senhaMaster = $null
+        & node (Join-Path $PSScriptRoot 'carga-empresa.js')
+        Conferir-Saida 'Nao consegui copiar os dados da empresa da nuvem (rode o instalador de novo depois de corrigir)'
+    } finally { Remove-Item Env:\DATABASE_URL, Env:\SYNC_NUVEM_URL, Env:\SYNC_EMPRESA_ID -ErrorAction SilentlyContinue }
 } else {
 Escrever-Passo ('Copiando os dados de ' + $BancoOrigem)
 $dump = Join-Path $Backups ($BancoOrigem + '-copia-' + $carimbo + '.dump')
@@ -165,10 +159,12 @@ if (Test-Path $envProd) {
     Escrever-Ok 'DATABASE_URL atualizado no .env existente (o resto foi mantido)'
 } else {
     $ip = if ($Ip) { $Ip } else { Obter-IpLan }
-    # Buffet novo (banco limpo) nao herda a nuvem do desenvolvimento: os dados dele iriam para o Supabase da Pulyn.
-    $nuvemUrl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_URL' } else { $null }
+    # Buffet novo (banco limpo): usa a conexao e a empresa informadas no instalador (usuario proprio na nuvem, que so enxerga a
+    # empresa dele). Nao herda a nuvem do desenvolvimento.
+    $nuvemUrl = if ($BancoLimpo) { $nuvemUrlEmpresa } elseif ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_URL' } else { $null }
     $nuvemSsl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_SSL' } else { $null }
     if (-not $nuvemSsl) { $nuvemSsl = 'true' }
+    $sincronizar = [bool]($BancoLimpo -and $nuvemUrl -and $empresaId)
     # Atencao: cada elemento com "+" precisa de parenteses (a virgula tem precedencia sobre o +).
     $linhas = @(
         ('# Producao (IIS). Gerado por 02-banco-producao.ps1 em ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')),
@@ -182,11 +178,12 @@ if (Test-Path $envProd) {
         ('FRONTEND_URL=https://' + $ip),
         '',
         '# Sincronizacao com a nuvem: so UM backend deve sincronizar com o Supabase.',
-        '# Deixe 0 ate desligar a sincronizacao do ambiente de desenvolvimento (veja README-IIS.md).',
-        'SYNC_ENABLED=0',
+        $(if ($sincronizar) { '# Buffet com empresa definida: so os dados da empresa descem e sobem (usuario proprio na nuvem).' } else { '# Deixe 0 ate desligar a sincronizacao do ambiente de desenvolvimento (veja README-IIS.md).' }),
+        ('SYNC_ENABLED=' + $(if ($sincronizar) { '1' } else { '0' })),
         'SYNC_INTERVALO_MS=15000'
     )
     if ($nuvemUrl) { $linhas += 'SYNC_NUVEM_URL=' + $nuvemUrl; $linhas += 'SYNC_NUVEM_SSL=' + $nuvemSsl }
+    if ($sincronizar) { $linhas += 'SYNC_EMPRESA_ID=' + $empresaId }
     Gravar-TextoUtf8 $envProd (($linhas -join "`r`n") + "`r`n")
     Escrever-Ok ('criado ' + $envProd)
     Escrever-Aviso ('FRONTEND_URL ficou https://' + $ip + ' (IP atual desta maquina). Se o IP mudar, ajuste aqui.')
