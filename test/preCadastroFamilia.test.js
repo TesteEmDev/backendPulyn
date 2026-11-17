@@ -82,3 +82,14 @@ test('edição do cadastro: nome e data obrigatórios, idade vem da data, respon
   assert.equal('nomeResponsavel' in r.value, false);
   assert.equal(validarEdicaoPerfil({ nome: 'Ana', dataNascimento: '1990-01-01', nomeResponsavel: ' Carlos ', parentescoResponsavel: 'Pai' }, { comResponsavel: true }).value.nomeResponsavel, 'Carlos');
 });
+
+// O Kiosk só acha o cadastro quando o responsável gravado no perfil bate com o digitado: cadastro sem responsável
+// (como o do app antes de gravar o nome da conta) nunca é encontrado.
+test('responsável: o nome da conta bate com o que o pai digita no Kiosk; sem nome gravado nunca bate', () => {
+  const { responsaveisParecidos } = require('../utils/preCadastroFamilia');
+  assert.equal(responsaveisParecidos('Carlos Almeida', 'carlos  almeida'), true);
+  assert.equal(responsaveisParecidos('Carlos Almeida Silva', 'Carlos Almeida'), true);
+  assert.equal(responsaveisParecidos('Carlos Almeida', 'Maria Souza'), false);
+  assert.equal(responsaveisParecidos(null, 'Carlos Almeida'), false);
+  assert.equal(responsaveisParecidos('', 'Carlos Almeida'), false);
+});
