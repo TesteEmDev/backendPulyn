@@ -969,6 +969,12 @@ router.post('/perfis', verifyToken, async (req, res) => {
     const empresaId = req.user.empresaId;
     if (!empresaId) return res.status(400).json({ error: 'Sua conta não está ligada a um buffet' });
 
+    // O Kiosk só acha o cadastro se o nome do responsável digitado bater com o gravado no perfil (buscarPerfisParaKiosk):
+    // sem ele o cadastro do app nunca aparece lá. O responsável é o dono da conta, e é o mesmo nome que
+    // buscarCadastroParecido já usa para reconhecer cadastros dele.
+    const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
+    const nomeResponsavel = String(responsavel?.nomeFamilia || '').trim().slice(0, 200) || null;
+
     const perfilCriancaId = await withTransaction(async () => {
       const perfilId = await criarPerfil({
         empresaId,
@@ -978,6 +984,7 @@ router.post('/perfis', verifyToken, async (req, res) => {
         idade,
         avatar: getAvatarForCreate(null),
         dataNascimento,
+        nomeResponsavel,
       });
       await query(
         `INSERT INTO perfilVinculoFamiliar (vinculoId, loginId, perfilCriancaId, empresaId, relacionamento)
