@@ -176,6 +176,19 @@ try {
         try { $bancoExiste = & $psql -h localhost -p 5432 -U postgres -d postgres -At -c ("select 1 from pg_database where datname = '" + $BancoProd + "'") 2>$null } catch { $bancoExiste = $null } finally { $env:PGPASSWORD = $null }
         if ($bancoExiste -eq '1') {
             Escrever-Aviso ('o banco ' + $BancoProd + ' ja existe, mas o Pulyn nao terminou de ser instalado. Ele sera recriado vazio.')
+            # Dentro do setup.exe (sem janela de console) a confirmacao e feita na tela do instalador, por arquivos na pasta
+            # PULYN_PERGUNTA_DIR. Rodando a mao, o 02 pede para digitar APAGAR.
+            if ($env:PULYN_PERGUNTA_DIR) {
+                $pergunta = Join-Path $env:PULYN_PERGUNTA_DIR 'pergunta.txt'
+                $resposta = Join-Path $env:PULYN_PERGUNTA_DIR 'resposta.txt'
+                Remove-Item $resposta -ErrorAction SilentlyContinue
+                [IO.File]::WriteAllText($pergunta + '.tmp', 'recriar-banco')
+                Move-Item ($pergunta + '.tmp') $pergunta -Force
+                for ($i = 0; $i -lt 3600 -and -not (Test-Path $resposta); $i++) { Start-Sleep -Milliseconds 500 }
+                $ok = (Test-Path $resposta) -and ((Get-Content $resposta -Raw).Trim() -eq 'S')
+                if (-not $ok) { throw 'Instalacao cancelada: o banco antigo nao foi apagado.' }
+                $env:PULYN_RECRIAR_CONFIRMADO = '1'
+            }
             & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Recriar -Ip $Ip
         } else {
             & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Ip $Ip
