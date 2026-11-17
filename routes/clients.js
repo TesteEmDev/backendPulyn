@@ -92,6 +92,8 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
 
     const details = {
       id: cliente.id,
+      // Id da empresa (é o que vai no SYNC_EMPRESA_ID e no instalador). Null no cadastro legado, que não tem empresa.
+      empresaId: cliente.empresaId || null,
       origin: cliente.origin,
       name: cliente.name,
       cnpj: null,
@@ -233,57 +235,60 @@ router.post('/', verifyToken, async (req, res) => {
     const hashedPassword = Buffer.from(senha).toString('base64');
 
     try {
-      // 1️⃣ Criar EMPRESA
-      await query(
-        `INSERT INTO empresa (empresaId, nome, cnpj, cidade, estado, telefone, plano, status) 
-         VALUES (@id, @nome, @cnpj, @cidade, @estado, @telefone, @plano, @status)`,
-        {
-          id: empresaId,
-          nome: nome,
-          cnpj: cnpj,
-          cidade: cidade,
-          estado: estado,
-          telefone: telefone,
-          plano: plan || 'starter',
-          status: 'active'
-        }
-      );
-      console.log(`✅ Empresa criada: ${nome} (ID: ${empresaId})`);
-      // O cliente já nasce com os jogos do plano dele cadastrados
-      await garantirJogosDaEmpresa(empresaId);
+      // Empresa, login, cliente e jogos do plano entram juntos: se um passo falhar, nada fica pela metade
+      // (antes, uma falha no último deixava empresa e login sem cliente). O empresaId nasce em `empresa` e é o mesmo
+      // gravado em `cliente.empresaId`; é ele que vai no SYNC_EMPRESA_ID da sincronização.
+      await withTransaction(async (tx) => {
+        // 1️⃣ Criar EMPRESA
+        await tx.query(
+          `INSERT INTO empresa (empresaId, nome, cnpj, cidade, estado, telefone, plano, status)
+           VALUES (@id, @nome, @cnpj, @cidade, @estado, @telefone, @plano, @status)`,
+          {
+            id: empresaId,
+            nome: nome,
+            cnpj: cnpj,
+            cidade: cidade,
+            estado: estado,
+            telefone: telefone,
+            plano: plan || 'starter',
+            status: 'active'
+          }
+        );
+        // O cliente já nasce com os jogos do plano dele cadastrados
+        await garantirJogosDaEmpresa(empresaId, tx);
 
-      // 2️⃣ Criar LOGIN
-      await query(
-        `INSERT INTO login (loginId, empresaId, email, senha, status, senhaTemporaria)
-         VALUES (@id, @empresaId, @email, @senha, @status, true)`,
-        {
-          id: loginId,
-          empresaId: empresaId,
-          email: email,
-          senha: hashedPassword,
-          status: 'active'
-        }
-      );
-      console.log(`✅ Login criado: ${email} (ID: ${loginId})`);
+        // 2️⃣ Criar LOGIN
+        await tx.query(
+          `INSERT INTO login (loginId, empresaId, email, senha, status, senhaTemporaria)
+           VALUES (@id, @empresaId, @email, @senha, @status, true)`,
+          {
+            id: loginId,
+            empresaId: empresaId,
+            email: email,
+            senha: hashedPassword,
+            status: 'active'
+          }
+        );
 
-      // 3️⃣ Criar CLIENTE (referência para compatibilidade)
-      await query(
-        `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId, endereco) 
-         VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId, @endereco)`,
-        {
-          id: clienteId,
-          empresaId: empresaId,
-          endereco: endereco,
-          nome: nome,
-          cidade: cidade,
-          estado: estado,
-          email: email,
-          telefone: telefone,
-          plano: plan || 'starter',
-          status: 'active'
-        }
-      );
-      console.log(`✅ Cliente criado: ${nome} (ID: ${clienteId})`);
+        // 3️⃣ Criar CLIENTE (referência para compatibilidade)
+        await tx.query(
+          `INSERT INTO cliente (clienteId, nome, cidade, estado, email, telefone, plano, status, empresaId, endereco)
+           VALUES (@id, @nome, @cidade, @estado, @email, @telefone, @plano, @status, @empresaId, @endereco)`,
+          {
+            id: clienteId,
+            empresaId: empresaId,
+            endereco: endereco,
+            nome: nome,
+            cidade: cidade,
+            estado: estado,
+            email: email,
+            telefone: telefone,
+            plano: plan || 'starter',
+            status: 'active'
+          }
+        );
+      });
+      console.log(`✅ Cliente criado: ${nome} (cliente ${clienteId}, empresa ${empresaId}, login ${loginId})`);
 
       res.json({
         id: clienteId,
