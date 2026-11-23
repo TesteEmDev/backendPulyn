@@ -41,7 +41,7 @@ O assistente usa o visual do Pulyn: fundo escuro, logo e mascote. As imagens fic
 A tela mostra a situação do computador e a versão instalada.
 
 Para ver as telas sem instalar nada (não pede administrador e não executa nada), compile uma prévia:
-`ISCC.exe /DPrevia /DVersao=previa /DMontagem=<pasta com pacote\BackEnd\deploy\iis\{desinstalar,atualizar-github,voltar-versao,config,backup-banco}.ps1 e extras\MinGit.zip> Pulyn.iss`
+`ISCC.exe /DPrevia /DVersao=previa /DMontagem=<pasta com pacote\BackEnd\deploy\iis\{desinstalar,atualizar-github,voltar-versao,configurar-empresa,config,backup-banco}.ps1 e extras\MinGit.zip> Pulyn.iss`
 
 ## Instalar no buffet
 
@@ -90,6 +90,8 @@ A atualização nunca muda nem apaga linhas do `.env`. Se uma versão nova do si
 O Git portátil fica em `C:\Pulyn\git`. Precisa de internet. O registro fica em `C:\Pulyn\logs\atualizacao-*.log`. Para usar outra branch: `C:\Pulyn\scripts\atualizar-github.ps1 -Branch <nome>`.
 
 **Com o setup, sem internet.** Rode o setup.exe da versão nova e escolha **Atualizar com este instalador**. Ele publica a versão que veio dentro do arquivo e, antes, também guarda em `C:\Pulyn\anterior` a versão que estava no ar.
+
+**Trocar a empresa ou a conexão da nuvem.** Nas duas opções de atualizar pelo setup, a tela **Empresa do buffet** aparece com o ID da empresa e a conexão que estão no `.env`. Deixe como está para não mudar nada. Se mudar algum dos dois, antes de atualizar o setup confere na nuvem se a empresa existe, grava `SYNC_EMPRESA_ID`, `SYNC_NUVEM_URL` e `SYNC_ENABLED=1` no `.env` e reinicia o serviço (`configurar-empresa.ps1`). Se a conferência falhar, nada é gravado e a atualização não roda. Trocar de empresa não troca o banco: os dados que já estão no computador continuam, e o setup pede confirmação.
 
 Nos dois casos, o banco, o `.env`, as senhas e o certificado continuam os mesmos, e o Node.js, o PostgreSQL e o IIS não são reinstalados. O `.env` só ganha no fim as chaves novas que faltarem.
 

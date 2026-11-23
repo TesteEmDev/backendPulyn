@@ -80,6 +80,7 @@ Source: "{#Montagem}\pacote\terceiros\*"; DestDir: "{app}\terceiros"; Flags: ign
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\desinstalar.ps1"; Flags: dontcopy solidbreak
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\atualizar-github.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\voltar-versao.ps1"; Flags: dontcopy
+Source: "{#Montagem}\pacote\BackEnd\deploy\iis\configurar-empresa.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\config.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\backup-banco.ps1"; Flags: dontcopy
 ; Git portatil (MinGit) para a atualizacao pela internet
@@ -114,6 +115,11 @@ var
   // Versao guardada pela ultima atualizacao (C:\Pulyn\anterior), para "Voltar a versao anterior"
   TemAnterior: Boolean;
   VersaoAnterior: string;
+  // Empresa e nuvem que ja estao no .env (atualizacao: a tela "Empresa do buffet" vem com elas e da para trocar)
+  EmpresaAtual: string;
+  NuvemAtual: string;
+  SyncLigado: Boolean;
+  EmpresaPreenchida: Boolean;
   CodigoResultado: Integer;
 
 function SetEnvironmentVariable(lpName: string; lpValue: string): Boolean;
@@ -365,6 +371,55 @@ begin
 end;
 
 // ID da empresa: sem espacos, aspas nem barras (vai para o .env e para consultas).
+// Valor de uma chave do .env instalado (C:\Pulyn\backend\.env), ou '' se nao houver. So administradores leem o arquivo.
+function LerChaveEnv(Chave: string): string;
+var
+  Linhas: TArrayOfString;
+  I, Igual: Integer;
+  Linha: string;
+begin
+  Result := '';
+  if not LoadStringsFromFile('C:\Pulyn\backend\.env', Linhas) then Exit;
+  for I := 0 to GetArrayLength(Linhas) - 1 do
+  begin
+    Linha := Trim(Linhas[I]);
+    Igual := Pos('=', Linha);
+    if (Igual > 1) and (Trim(Copy(Linha, 1, Igual - 1)) = Chave) then
+    begin
+      Result := Trim(Copy(Linha, Igual + 1, Length(Linha)));
+      if (Length(Result) >= 2) and ((Result[1] = '"') or (Result[1] = '''')) and (Result[Length(Result)] = Result[1]) then
+        Result := Copy(Result, 2, Length(Result) - 2);
+    end;
+  end;
+end;
+
+// Atualizacao: a pessoa mudou a empresa ou a conexao (ou a sincronizacao ainda nao estava ligada)? Campos vazios = nao mexer.
+function EmpresaMudou: Boolean;
+begin
+  Result := EhAtualizacao and (PaginaEmpresa.Values[0] <> '') and (PaginaEmpresa.Values[1] <> '')
+    and ((PaginaEmpresa.Values[0] <> EmpresaAtual) or (PaginaEmpresa.Values[1] <> NuvemAtual) or not SyncLigado);
+end;
+
+// Linha da empresa no resumo da atualizacao.
+function TextoEmpresa(NewLine: string): string;
+begin
+  if EmpresaMudou then
+  begin
+    Result := NewLine + NewLine + 'Empresa: ' + PaginaEmpresa.Values[0];
+    if PaginaEmpresa.Values[0] <> EmpresaAtual then
+    begin
+      if EmpresaAtual <> '' then Result := Result + ' (troca da ' + EmpresaAtual + ')' else Result := Result + ' (nova)';
+    end
+    else if PaginaEmpresa.Values[1] <> NuvemAtual then
+      Result := Result + ' (conexão da nuvem nova)';
+    Result := Result + NewLine + 'Antes de atualizar: confere na nuvem, grava no .env, liga a sincronização e reinicia o servidor.';
+  end
+  else if EmpresaAtual <> '' then
+    Result := NewLine + NewLine + 'Empresa: ' + EmpresaAtual + ' (sem mudança)'
+  else
+    Result := NewLine + NewLine + 'Empresa: não configurada (sem sincronização com a nuvem)';
+end;
+
 function IdEmpresaValido(Id: string): Boolean;
 begin
   Result := (Length(Id) > 0) and (Pos(' ', Id) = 0) and (Pos('"', Id) = 0) and (Pos('''', Id) = 0)
@@ -394,6 +449,15 @@ begin
   begin
     VersaoAnterior := LerVersao('C:\Pulyn\anterior\VERSAO.txt');
     if VersaoAnterior = '' then VersaoAnterior := 'versão sem identificação';
+  end;
+  EmpresaAtual := '';
+  NuvemAtual := '';
+  SyncLigado := False;
+  if JaInstalado then
+  begin
+    EmpresaAtual := LerChaveEnv('SYNC_EMPRESA_ID');
+    NuvemAtual := LerChaveEnv('SYNC_NUVEM_URL');
+    SyncLigado := LerChaveEnv('SYNC_ENABLED') = '1';
   end;
 
   if JaInstalado then
@@ -493,8 +557,10 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if (PageID = PaginaIp.ID) or (PageID = PaginaPg.ID) or (PageID = PaginaEmpresa.ID) then
+  if (PageID = PaginaIp.ID) or (PageID = PaginaPg.ID) then
     Result := Modo <> MODO_INSTALAR
+  else if PageID = PaginaEmpresa.ID then
+    Result := (Modo <> MODO_INSTALAR) and not EhAtualizacao
   else if PageID = PaginaRemover.ID then
     Result := Modo <> MODO_DESINSTALAR;
 end;
@@ -541,7 +607,10 @@ begin
   begin
     PaginaEmpresa.Values[0] := Trim(PaginaEmpresa.Values[0]);
     PaginaEmpresa.Values[1] := Trim(PaginaEmpresa.Values[1]);
-    if not IdEmpresaValido(PaginaEmpresa.Values[0]) then
+    // Na atualizacao, os dois vazios = deixar o .env como esta.
+    if EhAtualizacao and (PaginaEmpresa.Values[0] = '') and (PaginaEmpresa.Values[1] = '') then
+      Result := True
+    else if not IdEmpresaValido(PaginaEmpresa.Values[0]) then
     begin
       MsgBox('Digite o ID da empresa (sem espaços, aspas ou barras).', mbError, MB_OK);
       Result := False;
@@ -550,7 +619,11 @@ begin
     begin
       MsgBox('A conexão da nuvem deve começar com postgresql:// e não pode ter espaços nem aspas.', mbError, MB_OK);
       Result := False;
-    end;
+    end
+    else if EhAtualizacao and (EmpresaAtual <> '') and (PaginaEmpresa.Values[0] <> EmpresaAtual) then
+      Result := MsgBox('Este computador hoje é da empresa ' + EmpresaAtual + ' e vai passar para a empresa ' + PaginaEmpresa.Values[0] + '.' + #13#10#13#10 +
+        'O banco de dados deste computador NÃO é trocado: ele continua com os dados que já tinha, e a sincronização passa a ' +
+        'usar a empresa nova.' + #13#10#13#10 + 'Confirma a troca?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   end
   else if CurPageID = PaginaRemover.ID then
   begin
@@ -562,6 +635,17 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  // Atualizacao: a tela da empresa vem com o que ja esta no .env (so na primeira vez que aparece).
+  if (CurPageID = PaginaEmpresa.ID) and EhAtualizacao and not EmpresaPreenchida then
+  begin
+    EmpresaPreenchida := True;
+    PaginaEmpresa.Values[0] := EmpresaAtual;
+    PaginaEmpresa.Values[1] := NuvemAtual;
+    PaginaEmpresa.SubCaptionLabel.Caption :=
+      'Estes são o ID da empresa e a conexão da nuvem que este computador usa hoje. Para trocar, mude aqui: antes de atualizar, ' +
+      'o instalador confere na nuvem, grava no .env, liga a sincronização e reinicia o servidor. Os dados do banco não mudam.' + #13#10#13#10 +
+      'Deixe como está para não mudar nada (os dois vazios também não mudam nada).';
+  end;
   if CurPageID = wpReady then
   begin
     if Modo = MODO_DESINSTALAR then
@@ -627,7 +711,7 @@ begin
       '- baixa do GitHub só o que mudou (na primeira vez, o código todo);' + NewLine +
       '- se não houver nada novo, para e avisa;' + NewLine +
       '- backup do banco, compilação das telas e publicação.' + NewLine + NewLine +
-      'Precisa de internet. Dados, senhas e certificado continuam os mesmos.';
+      'Precisa de internet. Dados, senhas e certificado continuam os mesmos.' + TextoEmpresa(NewLine);
   end
   else if Modo = MODO_ATUALIZAR_PACOTE then
   begin
@@ -637,7 +721,7 @@ begin
       'O que acontece:' + NewLine +
       '- backup do banco;' + NewLine +
       '- publicação da versão nova do sistema (servidor e telas).' + NewLine + NewLine +
-      'Não são reinstalados: Node.js, PostgreSQL, IIS. Dados, senhas e certificado continuam os mesmos.';
+      'Não são reinstalados: Node.js, PostgreSQL, IIS. Dados, senhas e certificado continuam os mesmos.' + TextoEmpresa(NewLine);
   end
   else if Modo = MODO_VOLTAR then
   begin
@@ -681,6 +765,22 @@ begin
     Exec(RemoveQuotes(Desinstalador), '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART', '', SW_HIDE, ewWaitUntilTerminated, Codigo);
   if DirExists('C:\Pulyn\pacote') then
     DelTree('C:\Pulyn\pacote', True, True, True);
+end;
+
+// Atualizacao com a empresa ou a conexao trocada: grava no .env antes de atualizar (configurar-empresa.ps1).
+// Devolve False se nao deu certo (a atualizacao nao roda).
+function ConfigurarEmpresa: Boolean;
+begin
+  WizardForm.StatusLabel.Caption := 'Configurando a empresa e a nuvem...';
+  ExtractTemporaryFile('config.ps1');
+  ExtractTemporaryFile('configurar-empresa.ps1');
+  // A conexao tem senha: vai por variavel de ambiente (herdada pelo PowerShell), nunca pela linha de comando.
+  SetEnvironmentVariable('PULYN_EMPRESA_ID', PaginaEmpresa.Values[0]);
+  SetEnvironmentVariable('PULYN_NUVEM_URL', PaginaEmpresa.Values[1]);
+  CodigoResultado := RodarComAndamento('-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\configurar-empresa.ps1') + '" -SemPausa');
+  SetEnvironmentVariable('PULYN_EMPRESA_ID', '');
+  SetEnvironmentVariable('PULYN_NUVEM_URL', '');
+  Result := CodigoResultado = 0;
 end;
 
 procedure AtualizarPeloGithub;
@@ -770,6 +870,9 @@ begin
 #ifdef Previa
   Exit;
 #endif
+  // Empresa ou conexao trocada na tela "Empresa do buffet": grava antes; se falhar, a atualizacao nao roda.
+  if EmpresaMudou then
+    if not ConfigurarEmpresa then Exit;
   if Modo = MODO_DESINSTALAR then
     Desinstalar
   else if Modo = MODO_ATUALIZAR_GITHUB then
