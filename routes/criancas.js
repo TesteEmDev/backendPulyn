@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { verifyToken, isMaster } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { isAvatarValido } = require('../utils/avatar');
+const { isAvatarValido, gerarAvatarMontado } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarDataNascimento, idadeNaData } = require('../utils/nascimento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
@@ -282,6 +282,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
     const escolhaAvatar = escolherAvatar({
       pedido: avatarPedido,
       preferido: perfilDaCrianca?.avatar,
+      gerarNovo: gerarAvatarMontado,
       emUso: await avataresEmUso({ allQuery }, eventoId),
     });
     if (escolhaAvatar.conflito) {
@@ -307,7 +308,7 @@ router.post('/evento/:eventoId/crianca', verifyToken, async (req, res) => {
        VALUES (@id, @eventoId, @empresaId, @timeId, @nome, @apelido, @age, @dataNascimento, @avatar, @cor, @braceletCode, @perfilId)`,
       { id, eventoId, empresaId: empresaId, timeId, nome: nomeFinal, apelido, age: parseInt(age), dataNascimento, avatar: avatarValue, cor: corValue, braceletCode: normalizedBraceletCode, perfilId }
     );
-    await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: id, empresaId });
+    // O pai NÃO é vinculado automaticamente: o vínculo nasce quando ele lê a pulseira no app (POST /family/bracelet/validate).
     
     if (normalizedBraceletCode) {
       await query(

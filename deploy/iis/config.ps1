@@ -24,7 +24,7 @@ $BancoProd    = 'AdvPulyn'
 $BancoOrigem  = 'AdvPulynDev'
 $UsuarioApp   = 'pulyn_app'
 
-$PgBin        = 'C:\Program Files\PostgreSQL\18\bin'
+$PgBin        = if ($env:PULYN_PGBIN) { $env:PULYN_PGBIN } else { 'C:\Program Files\PostgreSQL\18\bin' }   # PULYN_PGBIN: so para ensaios
 $PgServico    = 'postgresql-x64-18'
 
 $NomeCa       = 'Pulyn Local CA'
@@ -59,6 +59,20 @@ function Escrever-Aviso($texto) { Write-Host ('    atencao: ' + $texto) -Foregro
 # Se o comando nativo anterior falhou, interrompe com a mensagem.
 function Conferir-Saida($mensagem) {
     if ($LASTEXITCODE -ne 0) { throw ($mensagem + ' (codigo ' + $LASTEXITCODE + ')') }
+}
+
+# Roda um programa de linha de comando e, se falhar, interrompe mostrando o que ELE escreveu (a mensagem de erro do
+# programa), nao so o codigo de saida. Devolve as linhas de saida quando da certo.
+function Executar-Nativo($exe, [string[]]$argumentos, $mensagem) {
+    $anterior = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'   # no PowerShell 5.1, 2>&1 com 'Stop' vira excecao na primeira linha de erro
+    try { $saida = @(& $exe @argumentos 2>&1 | ForEach-Object { $_.ToString() }) }
+    finally { $ErrorActionPreference = $anterior }
+    if ($LASTEXITCODE -ne 0) {
+        $texto = (($saida | Where-Object { $_ -and $_.Trim() }) -join ' | ')
+        throw ($mensagem + ' (codigo ' + $LASTEXITCODE + ')' + $(if ($texto) { ': ' + $texto } else { '' }))
+    }
+    return $saida
 }
 
 function Novo-Segredo([int]$bytes = 24) {

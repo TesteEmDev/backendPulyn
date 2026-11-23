@@ -3,7 +3,7 @@
 #   1. confere o Windows (precisa ter IIS: Pro, Enterprise ou Server)
 #   2. instala o Node.js e o PostgreSQL 18, se ainda nao estiverem instalados
 #   3. 01-preparar-iis.ps1   (IIS, WebSocket, URL Rewrite, ARR)
-#   4. 02-banco-producao.ps1 -BancoLimpo (banco so com a estrutura + usuario master + .env)
+#   4. 02-banco-producao.ps1 -BancoLimpo (banco so com a estrutura + dados da empresa copiados da nuvem + .env)
 #   5. 03-certificado.ps1    (CA propria e certificado HTTPS com o IP)
 #   6. 04-publicar.ps1 -SemBuild (frontend ja compilado, backend com as dependencias ja inclusas)
 #   7. backup diario as 03:00
@@ -12,27 +12,29 @@
 #
 # Parametros:
 #   -Ip            IP fixo da maquina na rede do buffet (padrao: detectado)
-#   -EmailMaster   e-mail do usuario master (so na instalacao nova)
 #   -Terceiros     pasta com os instaladores (Node .msi, PostgreSQL .exe, URL Rewrite, ARR, WinSW)
 #   -SiteBuild     pasta com o frontend ja compilado
 #   -SemPausa      nao espera Enter no final
-# Senhas (por variavel de ambiente, nunca na linha de comando):
+# Entradas da instalacao nova (por variavel de ambiente, nunca na linha de comando):
 #   PULYN_PG_ADMIN_SENHA  senha do usuario postgres (a que ja existe, ou a que sera criada na instalacao do PostgreSQL)
-#   PULYN_MASTER_SENHA    senha do usuario master
+#   PULYN_EMPRESA_ID      id da empresa do buffet (os dados dela vem da nuvem)
+#   PULYN_NUVEM_URL       conexao (postgresql://...) do usuario desse buffet na nuvem
 #   -Modo          Instalar ou Atualizar (o que a pessoa escolheu no setup). Sem ele, decide sozinho pelo .env.
 #   -MinGitZip     MinGit (.zip): instala o Git em C:\Pulyn\git, usado pelo atalho "Atualizar Pulyn" (atualizar-github.ps1)
 #   -RecriarBanco  se o banco ja existir (instalacao que parou no meio), recria sem pedir a confirmacao digitada: o setup
 #                  ja perguntou na tela dele. Sem esta opcao a confirmacao e pedida no console.
 #   -FixarIp       deixa o -Ip fixo no Windows (fixar-ip.ps1: desliga o DHCP da placa, mantendo mascara, gateway e DNS)
+#   -VersaoNoAr    na atualizacao: copia do VERSAO.txt da versao que estava no ar, feita pelo setup antes de trocar o pacote
+#                  (vai junto com essa versao para C:\Pulyn\anterior, para "Voltar a versao anterior" mostrar qual e)
 param(
     [string]$Ip,
-    [string]$EmailMaster,
     [string]$Terceiros,
     [string]$SiteBuild,
     [ValidateSet('', 'Instalar', 'Atualizar')][string]$Modo = '',
     [string]$MinGitZip,
     [switch]$RecriarBanco,
     [switch]$FixarIp,
+    [string]$VersaoNoAr,
     [switch]$SemPausa
 )
 . "$PSScriptRoot\config.ps1"
@@ -147,6 +149,16 @@ try {
         try { $teste = & $psql -h localhost -p 5432 -U postgres -d postgres -At -c 'select 1' 2>$null } catch { $teste = $null } finally { $env:PGPASSWORD = $null }
         if ($teste -ne '1') { throw 'Nao consegui entrar no PostgreSQL com o usuario postgres. Confira a senha do postgres e rode o instalador de novo.' }
         Escrever-Ok 'senha do postgres conferida'
+
+        # Confere a nuvem tambem agora, antes de mexer no IIS: se a conexao ou o ID da empresa estiverem errados, para aqui.
+        if (-not $env:PULYN_EMPRESA_ID -or -not $env:PULYN_NUVEM_URL) { throw 'Falta o ID da empresa e a conexao da nuvem (PULYN_EMPRESA_ID e PULYN_NUVEM_URL).' }
+        $env:SYNC_NUVEM_URL = $env:PULYN_NUVEM_URL
+        $env:SYNC_EMPRESA_ID = $env:PULYN_EMPRESA_ID
+        try {
+            & node (Join-Path $PSScriptRoot 'carga-empresa.js') --conferir
+            if ($LASTEXITCODE -ne 0) { throw 'Nao consegui conferir a nuvem. Corrija o ID da empresa ou a conexao e rode o instalador de novo.' }
+        } finally { Remove-Item Env:\SYNC_NUVEM_URL, Env:\SYNC_EMPRESA_ID -ErrorAction SilentlyContinue }
+        Escrever-Ok 'nuvem e empresa conferidas'
     }
 
     # Instaladores do IIS e do servico: o 01 e o 04 usam os de C:\Pulyn\instaladores em vez de baixar.
@@ -166,19 +178,42 @@ try {
     if ($atualizacao) {
         Proximo-Passo 'Backup do banco antes de atualizar (os dados nao sao alterados)'
         & "$PSScriptRoot\backup-banco.ps1"
+        # Guarda a versao que esta no ar, como o atualizar.ps1, para poder voltar a ela (voltar-versao.ps1).
+        if (Versao-Completa $Raiz) {
+            Guardar-Publicado $Anterior
+            # O setup ja trocou o pacote (e o VERSAO.txt dele) pela versao nova: usa a copia do VERSAO.txt de antes.
+            $versaoGuardada = Join-Path $Anterior 'VERSAO.txt'
+            if ($VersaoNoAr -and (Test-Path $VersaoNoAr)) { Copy-Item $VersaoNoAr $versaoGuardada -Force }
+            elseif (Test-Path $versaoGuardada) { Remove-Item $versaoGuardada -Force }
+            Escrever-Ok ('versao que estava no ar guardada em ' + $Anterior)
+        }
     } else {
         Proximo-Passo 'Criando o banco de dados'
-        if (-not $EmailMaster) { throw 'Falta o e-mail do usuario master.' }
         # Banco que sobrou de uma instalacao que parou no meio (sem .env): o 02 recria, mas so depois de um backup
         # e de a pessoa digitar a confirmacao.
         $env:PGPASSWORD = $env:PULYN_PG_ADMIN_SENHA
         try { $bancoExiste = & $psql -h localhost -p 5432 -U postgres -d postgres -At -c ("select 1 from pg_database where datname = '" + $BancoProd + "'") 2>$null } catch { $bancoExiste = $null } finally { $env:PGPASSWORD = $null }
         if ($bancoExiste -eq '1') {
             Escrever-Aviso ('o banco ' + $BancoProd + ' ja existe, mas o Pulyn nao terminou de ser instalado. Ele sera recriado vazio.')
-            if ($RecriarBanco) { & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Recriar -Confirmado -EmailMaster $EmailMaster -Ip $Ip }
-            else { & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Recriar -EmailMaster $EmailMaster -Ip $Ip }
+            # -RecriarBanco: o setup ja perguntou antes de comecar. Senao, dentro do setup.exe (sem janela de console) a
+            # confirmacao e feita na tela do instalador, por arquivos na pasta PULYN_PERGUNTA_DIR. Rodando a mao, o 02 pede
+            # para digitar APAGAR.
+            if ($RecriarBanco) {
+                $env:PULYN_RECRIAR_CONFIRMADO = '1'
+            } elseif ($env:PULYN_PERGUNTA_DIR) {
+                $pergunta = Join-Path $env:PULYN_PERGUNTA_DIR 'pergunta.txt'
+                $resposta = Join-Path $env:PULYN_PERGUNTA_DIR 'resposta.txt'
+                Remove-Item $resposta -ErrorAction SilentlyContinue
+                [IO.File]::WriteAllText($pergunta + '.tmp', 'recriar-banco')
+                Move-Item ($pergunta + '.tmp') $pergunta -Force
+                for ($i = 0; $i -lt 3600 -and -not (Test-Path $resposta); $i++) { Start-Sleep -Milliseconds 500 }
+                $ok = (Test-Path $resposta) -and ((Get-Content $resposta -Raw).Trim() -eq 'S')
+                if (-not $ok) { throw 'Instalacao cancelada: o banco antigo nao foi apagado.' }
+                $env:PULYN_RECRIAR_CONFIRMADO = '1'
+            }
+            & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Recriar -Ip $Ip
         } else {
-            & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -EmailMaster $EmailMaster -Ip $Ip
+            & "$PSScriptRoot\02-banco-producao.ps1" -BancoLimpo -Ip $Ip
         }
         if (-not (Test-Path (Join-Path $Backend '.env'))) { throw 'O banco nao foi criado (o .env nao apareceu).' }
     }
@@ -235,7 +270,8 @@ try {
     } else {
         Write-Host ('Tablets e celulares: instale o certificado ' + (Join-Path $Certs 'PulynCA.cer') + ' (guia, secao 6).')
         Write-Host ('O IP ' + $Ip + ' precisa ficar fixo (reserva no roteador).')
-        Write-Host ('Entre com o master (' + $EmailMaster + ') e cadastre o buffet em Master > Clientes.')
+        Write-Host ('Os dados da empresa ' + $env:PULYN_EMPRESA_ID + ' vieram da nuvem e a sincronizacao ja esta ligada.')
+        Write-Host 'Entre com o usuario da empresa (ele veio da nuvem).'
     }
 } catch {
     Write-Host ''

@@ -1,0 +1,11 @@
+backups-nuvem
+backups
+debug
+test
+supabase
+deploy
+pulyn_app
+*.log
+.env
+.env.*
+.git

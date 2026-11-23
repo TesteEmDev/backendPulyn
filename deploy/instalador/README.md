@@ -34,7 +34,7 @@ O arquivo sai em `BackEnd\deploy\instalador\saida\`. O `C:\Pulyn\pacote\VERSAO.t
 O assistente usa o visual do Pulyn: fundo escuro, logo e mascote. As imagens ficam em `imagens/`. Na segunda tela você escolhe o que fazer:
 
 - **Primeira instalação.** Só aparece liberada se o Pulyn ainda não estiver instalado.
-- **Atualizar.** Só aparece liberada se o Pulyn já estiver instalado. Sempre baixa a versão mais nova pela internet; o sistema que veio dentro do setup.exe só é usado na primeira instalação.
+- **Atualizar pela internet (GitHub)** e **Atualizar com este instalador (sem internet).** Só aparecem liberadas se o Pulyn já estiver instalado.
 - **Voltar à versão anterior.** Só aparece liberada se uma atualização já tiver guardado a versão anterior. Mostra qual versão é.
 - **Desinstalar.** Aparece liberada se existir alguma coisa do Pulyn no computador.
 
@@ -49,11 +49,21 @@ Para ver as telas sem instalar nada (não pede administrador e não executa nada
 2. Rode o `Pulyn-Setup-<versão>.exe`. Ele pede permissão de administrador.
 3. O assistente pede três coisas:
    - o **IP** da máquina (já vem preenchido). Se não der para reservar o IP no roteador, marque **Deixar o IP atual fixo no Windows**: a placa de rede deste computador passa de automático (DHCP) para fixo, com o mesmo IP, a mesma máscara, o mesmo gateway e os mesmos DNS. O campo do IP fica travado no IP atual. Se o Windows não aceitar, a placa volta para o automático e a instalação para. Para desfazer depois: `C:\Pulyn\scripts\fixar-ip.ps1 -Desfazer` (como administrador);
-   - a **senha do postgres**: se o PostgreSQL ainda não estiver instalado, é a senha que será criada; se já estiver, é a senha que ele já usa. Nesse caso, o assistente confere a senha antes de começar;
-   - o **e-mail e a senha do usuário master**.
-4. O andamento aparece na própria tela do instalador: a etapa atual, a barra de progresso e os detalhes logo abaixo. Nenhuma janela do PowerShell é aberta. No fim aparece o endereço `https://IP/`; se algo der errado, a última tela mostra o motivo e onde está o registro.
+   - a **senha do postgres**: se o PostgreSQL ainda não estiver instalado, é a senha que será criada; se já estiver, é a senha que ele já usa;
+   - o **ID da empresa** do buffet e a **conexão da nuvem** dele (`postgresql://usuario:senha@servidor:porta/banco`).
+4. O andamento de cada etapa aparece dentro do próprio instalador (nenhuma janela de PowerShell abre). No fim aparece o endereço `https://IP/`.
 
-O banco começa vazio, só com a estrutura e o usuário master. Não há dados de teste nem sincronização com a nuvem (`SYNC_ENABLED=0`). Depois da instalação, siga o guia a partir da seção 5 (cadastrar o buffet, tablets e placas).
+O buffet **não tem usuário master**: quem cria e administra tudo é o dono, pela nuvem. A conexão da nuvem é de um usuário próprio do buffet, criado com `debug/preparar-acesso-buffet-nuvem.js`, que só enxerga os dados da empresa dele (Row Level Security). Não coloque no instalador uma conexão de administrador da nuvem.
+
+O que o instalador faz com isso:
+1. Antes de mexer no IIS, confere a conexão e se a empresa existe na nuvem (`deploy/iis/carga-empresa.js --conferir`). Se estiver errado, para ali.
+2. Cria o banco só com a estrutura (`banco-base.sql`), sem usuário master.
+3. Copia da nuvem tudo o que é da empresa (eventos, crianças, pulseiras, usuários etc.) e confere a quantidade de linhas tabela por tabela.
+4. Grava no `.env`: `SYNC_ENABLED=1`, `SYNC_NUVEM_URL`, `SYNC_NUVEM_SSL=true` e `SYNC_EMPRESA_ID`. O backend passa a sincronizar nos dois sentidos, só com a empresa.
+
+Limite que vale saber: com `SYNC_EMPRESA_ID` definido, o sincronizador só trata as tabelas que têm a coluna `empresaId`. As que não têm (por exemplo `zona`, `eventoBrincadeira`, `conquista`, `pulseiraMovimento`) não descem nem sobem. A carga mostra a lista delas no final.
+
+A estrutura da nuvem precisa ser a mesma do `banco-base.sql`: se faltar tabela ou coluna na nuvem, a instalação para e mostra o que falta. Gere o `banco-base.sql` de novo quando o banco ganhar tabelas.
 
 O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 
@@ -61,7 +71,8 @@ O registro de cada execução fica em `C:\Pulyn\logs\instalacao-*.log`.
 
 O setup.exe não leva nenhum `.env`: ele cria `C:\Pulyn\backend\.env` no buffet, com **todas** as chaves que o backend lê, separadas em blocos comentados. Cada chave tem uma explicação.
 - **Geradas na instalação:** `DATABASE_URL` (senha aleatória do usuário `pulyn_app`), `JWT_SECRET` (aleatório, diferente em cada buffet) e `FRONTEND_URL` (`https://IP`).
-- **Vazias, para preencher depois:** o e-mail (`BREVO_API_KEY` e `EMAIL_REMETENTE`; sem elas, o "Esqueci minha senha" não envia o código), a nuvem (`SYNC_NUVEM_URL` e `SYNC_EMPRESA_ID`; `SYNC_ENABLED` fica `0`), `CHECKPOINT_SERVER_URL` e `EMAIL_LOGO_URL`.
+- **Da tela "Empresa do buffet":** `SYNC_NUVEM_URL` e `SYNC_EMPRESA_ID`, com `SYNC_ENABLED=1`.
+- **Vazias, para preencher depois:** o e-mail (`BREVO_API_KEY` e `EMAIL_REMETENTE`; sem elas, o "Esqueci minha senha" não envia o código), `CHECKPOINT_SERVER_URL` e `EMAIL_LOGO_URL`.
 - **As demais** vêm com o valor padrão do sistema.
 
 Uma chave vazia funciona como se não existisse. Para mudar alguma coisa, abra o Bloco de Notas como administrador, edite o arquivo e rode `Restart-Service PulynBackend`. O acesso ao arquivo é só de administradores.
@@ -70,7 +81,7 @@ A atualização nunca muda nem apaga linhas do `.env`. Se uma versão nova do si
 
 ## Atualizar um buffet já instalado
 
-Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Iniciar. Também dá para rodar o setup e escolher **Atualizar**. Funciona como o `atualizar.ps1`:
+**Pela internet (recomendado).** Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Iniciar. Também dá para rodar o setup e escolher **Atualizar pela internet (GitHub)**. Funciona como o `atualizar.ps1`:
 1. Faz `git pull` da `main` dos dois repositórios em `C:\Pulyn\fonte`. Baixa só o que mudou; na primeira vez, baixa o código todo.
 2. Compara o que baixou com a versão que está no ar, registrada em `C:\Pulyn\pacote\VERSAO.txt`. Se for igual, avisa e para, sem mexer no sistema. Para publicar mesmo assim, use `-Forcar`. Depois de voltar à versão anterior, ou de uma publicação que falhou, a versão no ar é outra, e ele publica de novo.
 3. Instala as dependências das telas, só se o `package-lock.json` mudou. Na primeira vez isso leva alguns minutos.
@@ -78,14 +89,16 @@ Use o atalho **Atualizar Pulyn**, que fica na área de trabalho e no menu Inicia
 
 O Git portátil fica em `C:\Pulyn\git`. Precisa de internet. O registro fica em `C:\Pulyn\logs\atualizacao-*.log`. Para usar outra branch: `C:\Pulyn\scripts\atualizar-github.ps1 -Branch <nome>`.
 
-O banco, o `.env`, as senhas e o certificado continuam os mesmos, e o Node.js, o PostgreSQL e o IIS não são reinstalados.
+**Com o setup, sem internet.** Rode o setup.exe da versão nova e escolha **Atualizar com este instalador**. Ele publica a versão que veio dentro do arquivo e, antes, também guarda em `C:\Pulyn\anterior` a versão que estava no ar.
+
+Nos dois casos, o banco, o `.env`, as senhas e o certificado continuam os mesmos, e o Node.js, o PostgreSQL e o IIS não são reinstalados. O `.env` só ganha no fim as chaves novas que faltarem.
 
 ## Voltar à versão anterior
 
 Se uma atualização trouxe um problema, rode o setup.exe e escolha **Voltar à versão anterior**. A opção não precisa de internet. Também dá para rodar `C:\Pulyn\scripts\voltar-versao.ps1` como administrador.
 
 - Cada atualização guarda em `C:\Pulyn\anterior` a versão que estava no ar: o backend com as dependências, as telas e os scripts (uns 140 MB). Só fica guardada uma versão, a da última atualização.
-- A volta faz um backup do banco e troca os arquivos. A versão que estava no ar fica guardada no lugar da anterior, então escolher a opção de novo volta para ela. **Atualizar** também traz a versão mais nova da `main`.
+- A volta faz um backup do banco e troca os arquivos. A versão que estava no ar fica guardada no lugar da anterior, então escolher a opção de novo volta para ela. **Atualizar pela internet** também traz a versão mais nova da `main`.
 - Se a versão anterior não responder em 40 segundos, a troca é desfeita sozinha e o sistema continua como estava.
 - **O banco de dados não volta.** Os dados continuam como estão, e o `.env`, as senhas e o certificado não mudam. Em geral as migrações só acrescentam colunas e tabelas, e por isso a versão anterior costuma funcionar com o banco mais novo. Se for preciso voltar também os dados, há um backup em `C:\Pulyn\backups`, feito antes da atualização. Restaurá-lo apaga o que foi registrado depois dela.
 
@@ -108,6 +121,4 @@ O desinstalador só aparece nos Aplicativos depois que o Pulyn for instalado (ou
 
 ## Se der erro
 
-Corrija o problema e rode o setup.exe de novo: o que já foi feito é reaproveitado. Se a instalação parou depois de criar o banco e antes de gravar o `.env`, o assistente avisa que o banco `AdvPulyn` já existe e pergunta se ele pode ser recriado vazio. Ele só é recriado se você confirmar, e sempre depois de um backup.
-
-Os scripts rodam sem janela e não podem fazer perguntas: se algum tentar perguntar algo, ele para com erro em vez de ficar esperando.
+Corrija o problema e rode o setup.exe de novo: o que já foi feito é reaproveitado. Se a instalação parou depois de criar o banco e antes de gravar o `.env`, o assistente avisa, na tela dele, que o banco `AdvPulyn` já existe e pergunta se ele pode ser recriado vazio. Ele só é recriado se você confirmar, e sempre depois de um backup.

@@ -7,7 +7,9 @@
 // Uma família tem acesso a um evento quando:
 //  - ele é do buffet da própria conta; ou
 //  - ela entrou nele pelo código (familiaEvento); ou
-//  - ela já tem criança vinculada nele.
+//  - ela já tem criança vinculada nele; ou
+//  - ela pré-cadastrou a criança (perfilVinculoFamiliar) e a recepção já a cadastrou nele. Sem isto o responsável de
+//    outro buffet nunca conseguia vincular a pulseira: o vínculo precisa do acesso, e o acesso só vinha com o vínculo.
 // Qualquer outro caso é tratado como se o evento não existisse, para não revelar eventos de outros buffets.
 const { queryOne } = require('../database');
 
@@ -34,7 +36,14 @@ async function eventoDaFamilia(user, eventoId) {
      WHERE v.loginId = @loginId AND v.status IN ('approved', 'pending') AND LOWER(c.eventoId) = LOWER(@eventoId)`,
     { loginId: user.id, eventoId: evento.eventoId }
   );
-  return comCrianca ? evento : null;
+  if (comCrianca) return evento;
+
+  const porPreCadastro = await queryOne(
+    `SELECT 1 AS x FROM perfilVinculoFamiliar pv JOIN crianca c ON c.perfilCriancaId = pv.perfilCriancaId
+     WHERE pv.loginId = @loginId AND LOWER(c.eventoId) = LOWER(@eventoId)`,
+    { loginId: user.id, eventoId: evento.eventoId }
+  );
+  return porPreCadastro ? evento : null;
 }
 
 // Empresa a usar nas consultas de um evento. Para a família é a do evento (se ela tem acesso a ele); para os demais

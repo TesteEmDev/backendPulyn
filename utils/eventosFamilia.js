@@ -41,10 +41,13 @@ const dataEmMs = (valor) => {
   return Number.isNaN(ms) ? 0 : ms;
 };
 
-// Junta as duas origens num item por evento. Os mais recentes primeiro (sem data vão para o fim).
+// Junta as origens num item por evento. Os mais recentes primeiro (sem data vão para o fim).
 //   porConvite: linhas de familiaEvento    -> { eventoId, nome, data, status, buffetNome }
 //   porCrianca: linhas de vinculo+crianca  -> { eventoId, nome, data, status, buffetNome, criancaId, criancaNome, apelido, pontos }
-function montarEventosDaFamilia(porConvite = [], porCrianca = []) {
+//   porPerfil:  linhas de pré-cadastro que a recepção já cadastrou no evento, ainda sem vínculo -> { eventoId, nome, data, status, buffetNome }
+//               O evento aparece (o app precisa dele para vincular a pulseira), mas sem a criança nem os pontos dela:
+//               só entram no evento depois do vínculo, e não é "adicionado por código".
+function montarEventosDaFamilia(porConvite = [], porCrianca = [], porPerfil = []) {
   const eventos = new Map();
   const garantir = (linha, adicionadoPorConvite) => {
     let evento = eventos.get(linha.eventoId);
@@ -67,6 +70,7 @@ function montarEventosDaFamilia(porConvite = [], porCrianca = []) {
   };
 
   for (const linha of porConvite) garantir(linha, true);
+  for (const linha of porPerfil) garantir(linha, false);
   for (const linha of porCrianca) {
     const evento = garantir(linha, false);
     if (evento.criancas.some((c) => c.id === linha.criancaId)) continue;

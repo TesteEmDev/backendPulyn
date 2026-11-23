@@ -7,11 +7,13 @@
 # administrador do PostgreSQL local (-AdminLocal, padrao postgres) - a senha e pedida, ou vem de PULYN_PG_ADMIN_SENHA.
 #
 # -BancoLimpo: instalacao de um buffet novo. NAO copia o desenvolvimento: cria o banco so com a estrutura (banco-base.sql),
-# cadastra a empresa da Pulyn e o usuario master (-EmailMaster; a senha vem de PULYN_MASTER_SENHA ou e pedida) e gera o
-# .env sem sincronizacao com a nuvem. Nao precisa do .env de desenvolvimento.
+# copia da NUVEM os dados da empresa do buffet (carga-empresa.js) e gera o .env ja com a sincronizacao ligada. Nao cria
+# usuario master (quem administra o sistema e o dono, pela nuvem). Nao precisa do .env de desenvolvimento.
+# Entradas (variaveis de ambiente, nunca na linha de comando): PULYN_EMPRESA_ID e PULYN_NUVEM_URL (conexao do usuario do buffet).
 #
-# -Confirmado: com -Recriar, nao pede a confirmacao digitada (o setup.exe ja perguntou na tela dele).
-param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$EmailMaster, [string]$Ip,
+# Com -Recriar, a confirmacao digitada e pulada quando o setup.exe ja perguntou na tela dele (PULYN_RECRIAR_CONFIRMADO=1
+# ou -Confirmado).
+param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$Ip,
       [switch]$Confirmado)
 . "$PSScriptRoot\config.ps1"
 Exigir-Repo
@@ -23,15 +25,9 @@ $pgRestore = Join-Path $PgBin 'pg_restore.exe'
 if ($BancoLimpo) {
     $arquivoBase = Join-Path $PSScriptRoot 'banco-base.sql'
     if (-not (Test-Path $arquivoBase)) { throw ('Nao achei ' + $arquivoBase + ' (gere com gerar-banco-base.ps1).') }
-    if (-not $EmailMaster) { $EmailMaster = Read-Host '    E-mail do usuario master' }
-    $senhaMaster = $env:PULYN_MASTER_SENHA
-    if (-not $senhaMaster) {
-        $s1 = [Net.NetworkCredential]::new('', (Read-Host '    Senha do usuario master (minimo 6 caracteres)' -AsSecureString)).Password
-        $s2 = [Net.NetworkCredential]::new('', (Read-Host '    Repita a senha do master' -AsSecureString)).Password
-        if ($s1 -cne $s2) { throw 'As senhas do master nao conferem.' }
-        $senhaMaster = $s1
-    }
-    if ($senhaMaster.Length -lt 6) { throw 'A senha do master precisa ter pelo menos 6 caracteres.' }
+    $empresaId = $env:PULYN_EMPRESA_ID
+    $nuvemUrlEmpresa = $env:PULYN_NUVEM_URL
+    if (-not $empresaId -or -not $nuvemUrlEmpresa) { throw 'Falta o ID da empresa e a conexao da nuvem (PULYN_EMPRESA_ID e PULYN_NUVEM_URL).' }
     $envDev = $null
     $dev = $null
     $connOrigem = $null
@@ -94,9 +90,10 @@ if ($existe -and $Recriar) {
     & $pgDump @connDestino -Fc -f $seg $BancoProd
     Conferir-Saida 'Falha no backup de seguranca'
     Escrever-Ok $seg
-    if (-not $Confirmado) {
-        Write-Host ''
-        Write-Host ('    Isto vai APAGAR o banco "' + $BancoProd + '" (os dados de producao atuais) e refazer a copia.') -ForegroundColor Yellow
+    Write-Host ''
+    Write-Host ('    Isto vai APAGAR o banco "' + $BancoProd + '" (os dados de producao atuais) e refazer a copia.') -ForegroundColor Yellow
+    # O instalador (setup.exe) ja perguntou na tela dele (PULYN_RECRIAR_CONFIRMADO=1); rodando a mao, pede para digitar.
+    if (-not $Confirmado -and $env:PULYN_RECRIAR_CONFIRMADO -ne '1') {
         $conf = Read-Host ('    Digite APAGAR ' + $BancoProd + ' para confirmar')
         if ($conf -cne ('APAGAR ' + $BancoProd)) { Write-Host 'Cancelado, nada foi apagado.'; return }
     }
@@ -128,15 +125,14 @@ if ($BancoLimpo) {
     } finally { $env:PGPASSWORD = $null }
     Escrever-Ok ([string]$qtdTabelas + ' tabelas criadas')
 
-    Escrever-Passo 'Usuario master'
+    Escrever-Passo ('Copiando da nuvem os dados da empresa ' + $empresaId)
     $env:DATABASE_URL = 'postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd
-    $env:MASTER_EMAIL = $EmailMaster
-    $env:MASTER_SENHA = $senhaMaster
+    $env:SYNC_NUVEM_URL = $nuvemUrlEmpresa
+    $env:SYNC_EMPRESA_ID = $empresaId
     try {
-        & node (Join-Path $PSScriptRoot 'criar-master.js')
-        Conferir-Saida 'Nao consegui criar o usuario master'
-    } finally { Remove-Item Env:\DATABASE_URL, Env:\MASTER_EMAIL, Env:\MASTER_SENHA -ErrorAction SilentlyContinue }
-    $senhaMaster = $null
+        & node (Join-Path $PSScriptRoot 'carga-empresa.js')
+        Conferir-Saida 'Nao consegui copiar os dados da empresa da nuvem (rode o instalador de novo depois de corrigir)'
+    } finally { Remove-Item Env:\DATABASE_URL, Env:\SYNC_NUVEM_URL, Env:\SYNC_EMPRESA_ID -ErrorAction SilentlyContinue }
 } else {
 Escrever-Passo ('Copiando os dados de ' + $BancoOrigem)
 $dump = Join-Path $Backups ($BancoOrigem + '-copia-' + $carimbo + '.dump')
@@ -173,18 +169,22 @@ if (Test-Path $envProd) {
 } else {
     $ip = if ($Ip) { $Ip } else { Obter-IpLan }
     # Todas as chaves vao para o arquivo; as que nao sao geradas aqui ficam vazias ou com o padrao, prontas para preencher.
+    # Buffet novo (banco limpo): usa a conexao e a empresa informadas no instalador (usuario proprio na nuvem, que so enxerga a
+    # empresa dele) e ja liga a sincronizacao. Nao herda a nuvem do desenvolvimento.
+    $nuvemUrl = if ($BancoLimpo) { $nuvemUrlEmpresa } elseif ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_URL' } else { $null }
+    $nuvemSsl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_SSL' } else { $null }
+    $sincronizar = [bool]($BancoLimpo -and $nuvemUrl -and $empresaId)
     $valores = @{
         DATABASE_URL = 'postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd
         JWT_SECRET   = Novo-Segredo 32
         FRONTEND_URL = 'https://' + $ip
     }
-    # Buffet novo (banco limpo) nao herda a nuvem do desenvolvimento: os dados dele iriam para o Supabase da Pulyn.
-    $nuvemUrl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_URL' } else { $null }
-    $nuvemSsl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_SSL' } else { $null }
     if ($nuvemUrl) { $valores.SYNC_NUVEM_URL = $nuvemUrl }
     if ($nuvemSsl) { $valores.SYNC_NUVEM_SSL = $nuvemSsl }
+    if ($sincronizar) { $valores.SYNC_ENABLED = '1'; $valores.SYNC_EMPRESA_ID = $empresaId }
     Gravar-TextoUtf8 $envProd (Montar-Env $valores ('# Producao (IIS). Gerado por 02-banco-producao.ps1 em ' + (Get-Date -Format 'dd/MM/yyyy HH:mm')))
-    Escrever-Ok ('criado ' + $envProd + ' (todas as chaves; e-mail e nuvem ficam vazios, para preencher depois)')
+    if ($sincronizar) { Escrever-Ok ('criado ' + $envProd + ' (todas as chaves; sincronizacao ligada para a empresa ' + $empresaId + '; e-mail vazio, para preencher depois)') }
+    else { Escrever-Ok ('criado ' + $envProd + ' (todas as chaves; e-mail e nuvem ficam vazios, para preencher depois)') }
     Escrever-Aviso ('FRONTEND_URL ficou https://' + $ip + ' (IP atual desta maquina). Se o IP mudar, ajuste aqui.')
 }
 # Restringe o arquivo (tem senha do banco e segredo dos tokens): Administradores, SYSTEM e quem rodou este script.

@@ -814,7 +814,18 @@ router.get('/eventos', verifyToken, async (req, res) => {
       WHERE l.loginId = @loginId AND l.status IN ('approved', 'pending')
     `, { loginId: req.user.id });
 
-    res.json({ eventos: montarEventosDaFamilia(porConvite, porCrianca) });
+    // Pré-cadastro que a recepção já cadastrou no evento, ainda sem vínculo: o evento tem de aparecer para o app
+    // poder vincular a pulseira nele (mesma regra de acesso de eventoDaFamilia).
+    const porPerfil = await allQuery(`
+      SELECT DISTINCT c.eventoId, e.nome, e.data, e.status, emp.nome AS "buffetNome"
+      FROM perfilVinculoFamiliar pv
+      JOIN crianca c ON c.perfilCriancaId = pv.perfilCriancaId
+      JOIN evento e ON e.eventoId = c.eventoId
+      LEFT JOIN empresa emp ON emp.empresaId = e.empresaId
+      WHERE pv.loginId = @loginId
+    `, { loginId: req.user.id });
+
+    res.json({ eventos: montarEventosDaFamilia(porConvite, porCrianca, porPerfil) });
   } catch (err) {
     console.error('❌ [FAMILIAS] Erro ao listar eventos da família:', err.message);
     res.status(500).json({ error: err.message });
@@ -958,6 +969,12 @@ router.post('/perfis', verifyToken, async (req, res) => {
     const empresaId = req.user.empresaId;
     if (!empresaId) return res.status(400).json({ error: 'Sua conta não está ligada a um buffet' });
 
+    // O Kiosk só acha o cadastro se o nome do responsável digitado bater com o gravado no perfil (buscarPerfisParaKiosk):
+    // sem ele o cadastro do app nunca aparece lá. O responsável é o dono da conta, e é o mesmo nome que
+    // buscarCadastroParecido já usa para reconhecer cadastros dele.
+    const responsavel = await queryOne('SELECT nomeFamilia FROM login WHERE loginId = @loginId', { loginId: req.user.id });
+    const nomeResponsavel = String(responsavel?.nomeFamilia || '').trim().slice(0, 200) || null;
+
     const perfilCriancaId = await withTransaction(async () => {
       const perfilId = await criarPerfil({
         empresaId,
@@ -967,6 +984,7 @@ router.post('/perfis', verifyToken, async (req, res) => {
         idade,
         avatar: getAvatarForCreate(null),
         dataNascimento,
+        nomeResponsavel,
       });
       await query(
         `INSERT INTO perfilVinculoFamiliar (vinculoId, loginId, perfilCriancaId, empresaId, relacionamento)

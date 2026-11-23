@@ -3,8 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const { withTransaction } = require('../database');
 const { verifyToken, requireRole } = require('../utils/middleware');
 const { normalizeUid, uidSqlExpression } = require('../utils/uid');
-const { controleAtivo, MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE } = require('../utils/pulseiraControle');
-const { isAvatarValido } = require('../utils/avatar');
+const { isAvatarValido, gerarAvatarMontado } = require('../utils/avatar');
 const { escolherAvatar, avataresEmUso, MENSAGEM_AVATAR_EM_USO } = require('../utils/avatarEvento');
 const { normalizarCor, escolherCor, coresEmUso, MENSAGEM_COR_EM_USO } = require('../utils/corParticipante');
 const {
@@ -177,7 +176,7 @@ router.get('/profiles', async (req, res) => {
       empresaId: req.user.empresaId,
       eventoId: eventId,
       termo: req.query.busca,
-      // AAAA-MM-DD: sem a data de nascimento a busca não devolve ninguém
+      // AAAA-MM-DD, opcional (kiosk antigo ainda envia): não é mais exigida; nome da criança e do responsável bastam
       dataNascimento: String(req.query.dataNascimento || '').trim(),
       nomeResponsavel: String(req.query.nomeResponsavel || '').trim().slice(0, 200),
     });
@@ -395,6 +394,7 @@ router.post('/participants', async (req, res) => {
       const escolhaAvatar = escolherAvatar({
         pedido: avatarPedido,
         preferido: perfilExistente?.avatar,
+        gerarNovo: gerarAvatarMontado,
         emUso: await avataresEmUso(tx, event.eventoId),
       });
       if (escolhaAvatar.conflito) {
@@ -448,7 +448,7 @@ router.post('/participants', async (req, res) => {
           perfilId,
         }
       );
-      await copiarVinculosParaParticipacao({ perfilCriancaId: perfilId, criancaId: childId, empresaId: event.empresaId });
+      // O pai NÃO é vinculado automaticamente: o vínculo nasce quando ele lê a pulseira no app (POST /family/bracelet/validate).
 
       const braceletUpdate = await tx.query(
         `UPDATE pulseira

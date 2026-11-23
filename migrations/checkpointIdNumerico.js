@@ -48,6 +48,7 @@ const COLUNAS_COM_FK = [
 const LISTAS_JSON = [
   ['brincadeira', 'checkpoints', 'brincadeiraId'],
   ['cacaTesourPartida', 'checkpointsCompletadosIds', 'partidaId'],
+  ['cacaTesourPartida', 'checkpointsUsadosIds', 'partidaId'],
   ['partidaBomba', 'locaisIds', 'partidaId'],
   ['partidaRefem', 'sequenciaIds', 'partidaId'],
 ];

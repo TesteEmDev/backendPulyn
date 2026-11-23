@@ -41,3 +41,8 @@ schema-export.json
 
 # Backups gerados por debug/corrigir-acentos.js
 backups-acentos/
+
+# Instalação Docker: dados e segredos locais (nunca versionar)
+backups/
+deploy/docker/certs/
+deploy/docker/site/
