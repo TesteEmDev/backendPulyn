@@ -130,8 +130,7 @@ if ($BancoLimpo) {
     $env:SYNC_NUVEM_URL = $nuvemUrlEmpresa
     $env:SYNC_EMPRESA_ID = $empresaId
     try {
-        & node (Join-Path $PSScriptRoot 'carga-empresa.js')
-        Conferir-Saida 'Nao consegui copiar os dados da empresa da nuvem (rode o instalador de novo depois de corrigir)'
+        Executar-Visivel 'node' @((Join-Path $PSScriptRoot 'carga-empresa.js')) 'Nao consegui copiar os dados da empresa da nuvem (rode o instalador de novo depois de corrigir)'
     } finally { Remove-Item Env:\DATABASE_URL, Env:\SYNC_NUVEM_URL, Env:\SYNC_EMPRESA_ID -ErrorAction SilentlyContinue }
 } else {
 Escrever-Passo ('Copiando os dados de ' + $BancoOrigem)

@@ -155,8 +155,7 @@ try {
         $env:SYNC_NUVEM_URL = $env:PULYN_NUVEM_URL
         $env:SYNC_EMPRESA_ID = $env:PULYN_EMPRESA_ID
         try {
-            & node (Join-Path $PSScriptRoot 'carga-empresa.js') --conferir
-            if ($LASTEXITCODE -ne 0) { throw 'Nao consegui conferir a nuvem. Corrija o ID da empresa ou a conexao e rode o instalador de novo.' }
+            Executar-Visivel 'node' @((Join-Path $PSScriptRoot 'carga-empresa.js'), '--conferir') 'Nao consegui conferir a nuvem (corrija o ID da empresa ou a conexao e rode o instalador de novo)'
         } finally { Remove-Item Env:\SYNC_NUVEM_URL, Env:\SYNC_EMPRESA_ID -ErrorAction SilentlyContinue }
         Escrever-Ok 'nuvem e empresa conferidas'
     }

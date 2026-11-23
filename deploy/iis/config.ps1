@@ -75,6 +75,32 @@ function Executar-Nativo($exe, [string[]]$argumentos, $mensagem) {
     return $saida
 }
 
+# Roda um programa mostrando cada linha que ele escreve, na hora e tambem no registro (o Start-Transcript do PowerShell
+# 5.1 nao grava a saida de programas externos, so o que passa pelo Write-Host). Se falhar, interrompe com o motivo: a
+# linha "ERRO: ..." (carga-empresa.js), senao a primeira "Error: ..." (queda do node), senao a ultima linha.
+function Executar-Visivel($exe, [string[]]$argumentos, $mensagem) {
+    $anterior = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'   # no PowerShell 5.1, 2>&1 com 'Stop' vira excecao na primeira linha de erro
+    $erro = ''; $queda = ''; $ultima = ''
+    try {
+        & $exe @argumentos 2>&1 | ForEach-Object {
+            # linha do stderr chega como ErrorRecord; uma linha vazia dele vira o texto "...RemoteException"
+            $linha = if ($_ -is [Management.Automation.ErrorRecord]) { $_.Exception.Message } else { [string]$_ }
+            if ($linha -and $linha.Trim() -and $linha -notmatch '^System\.Management\.Automation\.RemoteException$') {
+                Write-Host ('    ' + $linha)
+                $t = $linha.Trim()
+                $ultima = $t
+                if ($t -match '^ERRO:') { $erro = $t }
+                elseif (-not $queda -and $t -match '^[A-Za-z]*Error\b') { $queda = $t }
+            }
+        }
+    } finally { $ErrorActionPreference = $anterior }
+    if ($LASTEXITCODE -ne 0) {
+        $motivo = $(if ($erro) { $erro -replace '^ERRO:\s*', '' } elseif ($queda) { $queda } else { $ultima })
+        throw ($mensagem + $(if ($motivo) { ': ' + $motivo } else { ' (codigo ' + $LASTEXITCODE + ')' }))
+    }
+}
+
 function Novo-Segredo([int]$bytes = 24) {
     $b = New-Object byte[] $bytes
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
