@@ -131,11 +131,15 @@ try {
         if ($LASTEXITCODE -ne 0) { Get-Content $logFront -Tail 20; throw 'npm ci do frontend falhou' }
     }
     $env:VITE_API_URL = '/api'
+    # Sem as demos locais (src/demos, fora do Git): com -Origem Local elas existiriam na pasta do FrontEnd
+    $env:VITE_DEMOS = '0'
     Remove-Item Env:\VITE_WS_URL -ErrorAction SilentlyContinue
     & cmd.exe /c ('npm.cmd run build -- --outDir "' + $siteBuild + '" --emptyOutDir > "' + $logFront + '" 2>&1')
     if ($LASTEXITCODE -ne 0) { Get-Content $logFront -Tail 20; throw 'build do frontend falhou' }
-} finally { Pop-Location; Remove-Item Env:\VITE_API_URL -ErrorAction SilentlyContinue }
+} finally { Pop-Location; Remove-Item Env:\VITE_API_URL, Env:\VITE_DEMOS -ErrorAction SilentlyContinue }
 if (-not (Test-Path (Join-Path $siteBuild 'index.html'))) { throw 'o build do frontend nao gerou index.html' }
+# Voz do Lumi (public/mascote/voz, fora do Git): audios do plano gratis da ElevenLabs, nao podem ir para os buffets
+Remove-Item (Join-Path $siteBuild 'mascote\voz') -Recurse -Force -ErrorAction SilentlyContinue
 Ok 'frontend compilado'
 
 # ------------------------------------------------------------------ instaladores
