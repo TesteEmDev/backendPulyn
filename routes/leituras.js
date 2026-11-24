@@ -872,8 +872,8 @@ router.post('/', async (req, res) => {
           });
         }
 
-        if (treasureResult.finished && typeof global.finishTreasureGameEstado === 'function') {
-          global.finishTreasureGameEstado(checkpoint.eventoId, now.toISOString());
+        if (treasureResult.finished && typeof global.finishTreasureGameState === 'function') {
+          global.finishTreasureGameState(checkpoint.eventoId, now.toISOString());
         }
 
         return res.json({
