@@ -718,8 +718,8 @@ router.post('/', async (req, res) => {
           });
         }
 
-        if (monsterResult.gameCompleted && typeof global.finishMonsterGameEstado === 'function') {
-          global.finishMonsterGameEstado(checkpoint.eventoId, now.toISOString());
+        if (monsterResult.gameCompleted && typeof global.finishMonsterGameState === 'function') {
+          global.finishMonsterGameState(checkpoint.eventoId, now.toISOString());
         }
 
         return res.json({

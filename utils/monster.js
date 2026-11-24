@@ -2,6 +2,7 @@ const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
 const { sortearMonstros } = require('./sorteioMonstros');
 const { awardWinnerBonus, escolherLider } = require('./winnerBonus');
+const { classificacaoDosMonstros } = require('./classificacaoMonstros');
 
 const MONSTER_GAME_TYPE = 'monster_hunt';
 const MONSTER_DEFAULTS = Object.freeze({
@@ -250,21 +251,14 @@ async function getMonsterWinnerTeamId(session) {
   return first?.timeId || session.timeVencedorId || null;
 }
 
-// Equipes que não venceram, da melhor para a pior: as que derrotaram o monstro (a mais rápida primeiro), depois
-// as outras pelo dano causado ao monstro dela.
+// Equipes que não venceram, da melhor para a pior (classificacaoDosMonstros): quem derrotou o monstro primeiro, depois
+// as outras pela vida que sobrou no monstro delas (menos vida = mais à frente).
 async function getMonsterLoserTeamIds(session, vencedoraId) {
   const estados = await allQuery(`
     SELECT timeId, vida, vidaMaxima, derrotadoEm FROM monsterCacaEstadoTime
     WHERE LOWER(partidaId) = LOWER(@partidaId)`, { partidaId: session.id });
-  const outras = estados.filter((estado) => String(estado.timeId).toLowerCase() !== String(vencedoraId).toLowerCase());
-  const derrotaram = outras.filter((e) => e.derrotadoEm).sort((a, b) => new Date(a.derrotadoEm) - new Date(b.derrotadoEm));
-  const dano = (e) => Number(e.vidaMaxima || 0) - Number(e.vida || 0);
-  const restantes = outras.filter((e) => !e.derrotadoEm).sort((a, b) => dano(b) - dano(a));
-  // Mesma chave = empate (derrotaram o monstro no mesmo instante, ou causaram o mesmo dano)
-  return [
-    ...derrotaram.map((estado) => ({ teamId: estado.timeId, chave: `d${new Date(estado.derrotadoEm).getTime()}` })),
-    ...restantes.map((estado) => ({ teamId: estado.timeId, chave: `h${dano(estado)}` })),
-  ];
+  return classificacaoDosMonstros(estados)
+    .filter((item) => String(item.teamId).toLowerCase() !== String(vencedoraId).toLowerCase());
 }
 
 async function awardMonsterWinnerBonus(session) {
@@ -595,36 +589,30 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     throw error;
   }
 
-  const progress = await getMonsterProgress(eventoId, session.id);
-  let gameCompleted = currentBefore.teamStateId
-    ? progress.length > 0 && progress.every(monster => monster.monsterDefeated)
-    : monsterDefeated;
-
-  if (currentBefore.teamStateId) {
-    // A atualização da partida é serializada pela própria linha da partida.
-    // Se duas equipes derrotarem seus monstros ao mesmo tempo, a segunda
-    // transação reavalia os estados depois que a primeira confirmar.
+  // O jogo acaba assim que o primeiro monstro é derrotado: a partida é encerrada e os monstros das outras equipes param
+  // (ninguém mais ataca). A atualização da partida é serializada pela própria linha dela: se duas equipes derrotarem
+  // seus monstros ao mesmo tempo, só a primeira a confirmar encerra a partida (e paga os bônus); vence quem derrotou
+  // primeiro (derrotadoEm).
+  let gameCompleted = !currentBefore.teamStateId && monsterDefeated;
+  if (currentBefore.teamStateId && monsterDefeated) {
     const completionUpdate = await query(`
       UPDATE monsterCacaPartida SET
         status = 'completed', finalizadoEm = @finishedAt, versao = versao + 1
-      WHERE id = @partidaId
-        AND status = 'active'
-        AND EXISTS (
-          SELECT 1 FROM monsterCacaEstadoTime
-          WHERE partidaId = @partidaId
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM monsterCacaEstadoTime
-          WHERE partidaId = @partidaId AND status <> 'defeated'
-        )`, {
+      WHERE id = @partidaId AND status = 'active'`, {
       partidaId: session.id,
       finishedAt: now,
     });
-    gameCompleted = gameCompleted || Boolean(completionUpdate.rowsAffected?.[0]);
+    gameCompleted = Boolean(completionUpdate.rowsAffected?.[0]);
+    if (gameCompleted) {
+      await query(`
+        UPDATE monsterCacaEstadoTime SET status = 'finished', versao = versao + 1
+        WHERE partidaId = @partidaId AND status = 'active'`, { partidaId: session.id });
+    }
   }
+  const progress = await getMonsterProgress(eventoId, session.id);
 
-  // Caça ao Monstro não pontua durante a partida: quando todos os monstros caem,
-  // a equipe que derrotou o seu primeiro leva o bônus de vitória (cada membro).
+  // Caça ao Monstro não pontua durante a partida: quando o primeiro monstro cai, a equipe dele leva o bônus de
+  // vitória (cada membro) e as outras recebem pela classificação (vida que sobrou no monstro).
   let winnerBonus = null;
   if (gameCompleted) {
     winnerBonus = await awardMonsterWinnerBonus(session);
@@ -660,7 +648,7 @@ async function processMonsterScan({ eventoId, checkpointId, crianca, brincadeira
     remainingSeconds: 0,
     checkpointCooldownSeconds,
     message: gameCompleted
-      ? 'Todos os monstros foram derrotados!'
+      ? `O monstro da equipe ${team.nome} foi derrotado! Fim de jogo.`
       : monsterDefeated
         ? `O monstro da equipe ${team.nome} foi derrotado!`
         : `Ataque confirmado: -${damage} HP`,
