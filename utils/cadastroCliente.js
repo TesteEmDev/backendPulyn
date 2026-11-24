@@ -41,4 +41,57 @@ function validarCadastroCliente(corpo) {
   return { valores: { nome, cnpj, endereco, cidade, estado, email, telefone, senha } };
 }
 
-module.exports = { validarCadastroCliente, ESTADOS };
+// Edição pelo master: só valida os campos que vieram no corpo (os demais ficam como estão). Um campo que veio
+// em branco é erro: os dados do cadastro são todos obrigatórios. Plano e status são tratados na rota.
+function validarEdicaoCliente(corpo) {
+  const veio = (campo) => corpo?.[campo] !== undefined && corpo?.[campo] !== null;
+  const valores = {};
+
+  if (veio('nome')) {
+    const nome = texto(corpo.nome);
+    if (!nome) return { erro: 'Informe o nome do buffet' };
+    if (nome.length > 100) return { erro: 'Nome do buffet excede 100 caracteres' };
+    valores.nome = nome;
+  }
+  if (veio('cnpj')) {
+    const cnpj = normalizeCnpj(corpo.cnpj);
+    if (!cnpj) return { erro: 'Informe o CNPJ' };
+    if (!isValidCnpj(cnpj)) return { erro: 'CNPJ inválido. Confira os 14 dígitos.' };
+    valores.cnpj = cnpj;
+  }
+  if (veio('endereco')) {
+    const endereco = texto(corpo.endereco);
+    if (!endereco) return { erro: 'Informe o endereço' };
+    if (endereco.length > 255) return { erro: 'Endereço excede 255 caracteres' };
+    valores.endereco = endereco;
+  }
+  if (veio('cidade')) {
+    const cidade = texto(corpo.cidade);
+    if (!cidade) return { erro: 'Informe a cidade' };
+    valores.cidade = cidade;
+  }
+  if (veio('estado')) {
+    const estado = texto(corpo.estado).toUpperCase();
+    if (!estado) return { erro: 'Informe o estado (UF)' };
+    if (!ESTADOS.has(estado)) return { erro: 'Estado inválido. Use a sigla da UF, por exemplo SP.' };
+    valores.estado = estado;
+  }
+  if (veio('email')) {
+    const email = texto(corpo.email);
+    if (!email) return { erro: 'Informe o e-mail' };
+    if (email.length > 100 || !EMAIL_PATTERN.test(email)) return { erro: 'E-mail inválido' };
+    valores.email = email;
+  }
+  if (veio('telefone')) {
+    const telefone = texto(corpo.telefone);
+    if (!telefone) return { erro: 'Informe o telefone' };
+    const problemaTelefone = phoneError(telefone);
+    if (problemaTelefone) return { erro: problemaTelefone };
+    if (telefone.length > 20) return { erro: 'Telefone excede 20 caracteres' };
+    valores.telefone = telefone;
+  }
+
+  return { valores };
+}
+
+module.exports = { validarCadastroCliente, validarEdicaoCliente, ESTADOS };

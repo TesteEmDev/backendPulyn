@@ -36,6 +36,7 @@ async function listPlatformClients({ includeFamily = false } = {}) {
       FROM empresa e
       LEFT JOIN login l ON e.empresaId = l.empresaId
       WHERE e.nome <> 'Master Admin'
+        AND e.empresaId NOT IN (SELECT empresaId FROM login WHERE perfil = 'master' AND empresaId IS NOT NULL)
         ${includeFamily ? '' : "AND LOWER(COALESCE(e.plano, '')) <> 'family'"}
       GROUP BY e.empresaId, e.nome, e.cidade, e.estado, e.telefone, e.plano, e.status, e.dataCriacao
     `),
@@ -48,6 +49,9 @@ async function listPlatformClients({ includeFamily = false } = {}) {
     allQuery(`
       SELECT clienteId, nome, cidade, estado, email, telefone, plano, status, eventosRealizados, ultimoAcesso, criadoEm
       FROM cliente
+      -- A conta do próprio master não é um cliente: fica de fora (pelo e-mail dele ou pela empresa dele)
+      WHERE LOWER(COALESCE(email, '')) NOT IN (SELECT LOWER(email) FROM login WHERE perfil = 'master' AND email IS NOT NULL)
+        AND COALESCE(empresaId, '') NOT IN (SELECT empresaId FROM login WHERE perfil = 'master' AND empresaId IS NOT NULL)
     `),
   ]);
 

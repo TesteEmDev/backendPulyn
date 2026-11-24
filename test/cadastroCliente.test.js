@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validarCadastroCliente } = require('../utils/cadastroCliente');
+const { validarCadastroCliente, validarEdicaoCliente } = require('../utils/cadastroCliente');
 
 const completo = {
   nome: 'Buffet Feliz', cnpj: '11.222.333/0001-81', endereco: 'Rua A, 10', cidade: 'São Paulo', estado: 'sp',
@@ -27,4 +27,21 @@ test('valida CNPJ, UF, e-mail, telefone e senha', () => {
   assert.match(validarCadastroCliente({ ...completo, email: 'sem-arroba' }).erro, /E-mail/);
   assert.ok(validarCadastroCliente({ ...completo, telefone: '123' }).erro);
   assert.match(validarCadastroCliente({ ...completo, senha: '123' }).erro, /Senha/);
+});
+
+test('edição valida só os campos que vieram e normaliza', () => {
+  const r = validarEdicaoCliente({ nome: ' Buffet Novo ', cnpj: '11.222.333/0001-81', estado: 'rj' });
+  assert.equal(r.erro, undefined);
+  assert.deepEqual(r.valores, { nome: 'Buffet Novo', cnpj: '11222333000181', estado: 'RJ' });
+  assert.deepEqual(validarEdicaoCliente({}).valores, {});
+});
+
+test('edição: campo enviado em branco ou inválido dá erro', () => {
+  for (const campo of ['nome', 'cnpj', 'endereco', 'cidade', 'estado', 'email', 'telefone']) {
+    assert.ok(validarEdicaoCliente({ [campo]: '  ' }).erro, `${campo} em branco deveria dar erro`);
+  }
+  assert.match(validarEdicaoCliente({ cnpj: '11.222.333/0001-82' }).erro, /CNPJ/);
+  assert.match(validarEdicaoCliente({ estado: 'XX' }).erro, /Estado/);
+  assert.match(validarEdicaoCliente({ email: 'sem-arroba' }).erro, /E-mail/);
+  assert.ok(validarEdicaoCliente({ telefone: '123' }).erro);
 });
