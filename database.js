@@ -43,7 +43,9 @@ function postgresConfig() {
     min: 2,
     idleTimeoutMillis: 5000, // Reduzido de 10000 para 5000 - libera conexões mais rápido
     application_name: 'pulyn-app',
-    statement_timeout: 30000
+    ...(process.env.PG_STATEMENT_TIMEOUT 
+      ? { statement_timeout: Number(process.env.PG_STATEMENT_TIMEOUT) } 
+      : {}),
   };
 }
 
