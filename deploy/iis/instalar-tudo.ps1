@@ -21,12 +21,20 @@
 #   PULYN_NUVEM_URL       conexao (postgresql://...) do usuario desse buffet na nuvem
 #   -Modo          Instalar ou Atualizar (o que a pessoa escolheu no setup). Sem ele, decide sozinho pelo .env.
 #   -MinGitZip     MinGit (.zip): instala o Git em C:\Pulyn\git, usado pelo atalho "Atualizar Pulyn" (atualizar-github.ps1)
+#   -RecriarBanco  se o banco ja existir (instalacao que parou no meio), recria sem pedir a confirmacao digitada: o setup
+#                  ja perguntou na tela dele. Sem esta opcao a confirmacao e pedida no console.
+#   -FixarIp       deixa o -Ip fixo no Windows (fixar-ip.ps1: desliga o DHCP da placa, mantendo mascara, gateway e DNS)
+#   -VersaoNoAr    na atualizacao: copia do VERSAO.txt da versao que estava no ar, feita pelo setup antes de trocar o pacote
+#                  (vai junto com essa versao para C:\Pulyn\anterior, para "Voltar a versao anterior" mostrar qual e)
 param(
     [string]$Ip,
     [string]$Terceiros,
     [string]$SiteBuild,
     [ValidateSet('', 'Instalar', 'Atualizar')][string]$Modo = '',
     [string]$MinGitZip,
+    [switch]$RecriarBanco,
+    [switch]$FixarIp,
+    [string]$VersaoNoAr,
     [switch]$SemPausa
 )
 . "$PSScriptRoot\config.ps1"
@@ -81,6 +89,8 @@ try {
     if (-not $Ip) { $Ip = Obter-IpLan }
     if ($Ip -notmatch '^\d{1,3}(\.\d{1,3}){3}$') { throw ('IP invalido: ' + $Ip) }
     Escrever-Ok ('Windows com IIS; IP do servidor: ' + $Ip)
+    # Antes de tudo: o certificado e o endereco do sistema usam este IP.
+    if ($FixarIp -and -not $atualizacao) { & "$PSScriptRoot\fixar-ip.ps1" -Ip $Ip }
 
     # ------------------------------------------------------------------ 2
     Atualizar-Path
@@ -145,8 +155,7 @@ try {
         $env:SYNC_NUVEM_URL = $env:PULYN_NUVEM_URL
         $env:SYNC_EMPRESA_ID = $env:PULYN_EMPRESA_ID
         try {
-            & node (Join-Path $PSScriptRoot 'carga-empresa.js') --conferir
-            if ($LASTEXITCODE -ne 0) { throw 'Nao consegui conferir a nuvem. Corrija o ID da empresa ou a conexao e rode o instalador de novo.' }
+            Executar-Visivel 'node' @((Join-Path $PSScriptRoot 'carga-empresa.js'), '--conferir') 'Nao consegui conferir a nuvem (corrija o ID da empresa ou a conexao e rode o instalador de novo)'
         } finally { Remove-Item Env:\SYNC_NUVEM_URL, Env:\SYNC_EMPRESA_ID -ErrorAction SilentlyContinue }
         Escrever-Ok 'nuvem e empresa conferidas'
     }
@@ -168,6 +177,15 @@ try {
     if ($atualizacao) {
         Proximo-Passo 'Backup do banco antes de atualizar (os dados nao sao alterados)'
         & "$PSScriptRoot\backup-banco.ps1"
+        # Guarda a versao que esta no ar, como o atualizar.ps1, para poder voltar a ela (voltar-versao.ps1).
+        if (Versao-Completa $Raiz) {
+            Guardar-Publicado $Anterior
+            # O setup ja trocou o pacote (e o VERSAO.txt dele) pela versao nova: usa a copia do VERSAO.txt de antes.
+            $versaoGuardada = Join-Path $Anterior 'VERSAO.txt'
+            if ($VersaoNoAr -and (Test-Path $VersaoNoAr)) { Copy-Item $VersaoNoAr $versaoGuardada -Force }
+            elseif (Test-Path $versaoGuardada) { Remove-Item $versaoGuardada -Force }
+            Escrever-Ok ('versao que estava no ar guardada em ' + $Anterior)
+        }
     } else {
         Proximo-Passo 'Criando o banco de dados'
         # Banco que sobrou de uma instalacao que parou no meio (sem .env): o 02 recria, mas so depois de um backup
@@ -176,9 +194,12 @@ try {
         try { $bancoExiste = & $psql -h localhost -p 5432 -U postgres -d postgres -At -c ("select 1 from pg_database where datname = '" + $BancoProd + "'") 2>$null } catch { $bancoExiste = $null } finally { $env:PGPASSWORD = $null }
         if ($bancoExiste -eq '1') {
             Escrever-Aviso ('o banco ' + $BancoProd + ' ja existe, mas o Pulyn nao terminou de ser instalado. Ele sera recriado vazio.')
-            # Dentro do setup.exe (sem janela de console) a confirmacao e feita na tela do instalador, por arquivos na pasta
-            # PULYN_PERGUNTA_DIR. Rodando a mao, o 02 pede para digitar APAGAR.
-            if ($env:PULYN_PERGUNTA_DIR) {
+            # -RecriarBanco: o setup ja perguntou antes de comecar. Senao, dentro do setup.exe (sem janela de console) a
+            # confirmacao e feita na tela do instalador, por arquivos na pasta PULYN_PERGUNTA_DIR. Rodando a mao, o 02 pede
+            # para digitar APAGAR.
+            if ($RecriarBanco) {
+                $env:PULYN_RECRIAR_CONFIRMADO = '1'
+            } elseif ($env:PULYN_PERGUNTA_DIR) {
                 $pergunta = Join-Path $env:PULYN_PERGUNTA_DIR 'pergunta.txt'
                 $resposta = Join-Path $env:PULYN_PERGUNTA_DIR 'resposta.txt'
                 Remove-Item $resposta -ErrorAction SilentlyContinue

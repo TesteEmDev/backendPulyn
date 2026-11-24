@@ -7,6 +7,7 @@
 ;                        BackEnd\deploy\iis\instalar-tudo.ps1 -Modo Instalar
 ;   Atualizar pela internet: roda atualizar-github.ps1 (git pull da main do GitHub, so o que mudou, backup e publicacao)
 ;   Atualizar com este instalador: copia o pacote e roda instalar-tudo.ps1 -Modo Atualizar (sem internet)
+;   Voltar a versao anterior: roda voltar-versao.ps1, que troca o sistema pela versao guardada em C:\Pulyn\anterior
 ;   Desinstalar:         roda desinstalar.ps1 (o banco so e apagado se a pessoa marcar, com backup antes)
 ; O andamento de cada etapa aparece dentro do proprio instalador (o PowerShell roda escondido). O desinstalador de Configuracoes > Aplicativos faz o mesmo que a opcao
 ; Desinstalar. O atalho "Atualizar Pulyn" (area de trabalho e menu Iniciar) roda C:\Pulyn\scripts\atualizar-github.ps1.
@@ -24,6 +25,12 @@ AppName=Pulyn
 AppVersion={#Versao}
 AppVerName=Pulyn {#Versao}
 AppPublisher=Pulyn
+; Propriedades do setup.exe (Detalhes): empresa e produto Pulyn
+VersionInfoCompany=Pulyn
+VersionInfoProductName=Pulyn
+VersionInfoDescription=Instalador do Pulyn
+VersionInfoCopyright=Pulyn
+VersionInfoProductTextVersion={#Versao}
 DefaultDirName=C:\Pulyn\pacote
 DisableDirPage=yes
 DisableProgramGroupPage=yes
@@ -69,9 +76,11 @@ Source: "imagens\pulyn.ico"; DestDir: "{app}"; Flags: ignoreversion; Check: not 
 ; Instaladores do Node.js, PostgreSQL, URL Rewrite, ARR e WinSW (~380 MB): so na primeira instalacao. Ficam num bloco
 ; comprimido separado (solidbreak) para a atualizacao nem precisar descompacta-los.
 Source: "{#Montagem}\pacote\terceiros\*"; DestDir: "{app}\terceiros"; Flags: ignoreversion solidbreak; Check: EhPrimeiraInstalacao
-; Usados pelas opcoes Desinstalar e Atualizar pela internet (extraidos para a pasta temporaria do setup)
+; Usados pelas opcoes Desinstalar, Atualizar pela internet e Voltar a versao anterior (extraidos para a pasta temporaria)
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\desinstalar.ps1"; Flags: dontcopy solidbreak
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\atualizar-github.ps1"; Flags: dontcopy
+Source: "{#Montagem}\pacote\BackEnd\deploy\iis\voltar-versao.ps1"; Flags: dontcopy
+Source: "{#Montagem}\pacote\BackEnd\deploy\iis\configurar-empresa.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\config.ps1"; Flags: dontcopy
 Source: "{#Montagem}\pacote\BackEnd\deploy\iis\backup-banco.ps1"; Flags: dontcopy
 ; Git portatil (MinGit) para a atualizacao pela internet
@@ -86,12 +95,16 @@ const
   MODO_INSTALAR = 0;
   MODO_ATUALIZAR_GITHUB = 1;
   MODO_ATUALIZAR_PACOTE = 2;
-  MODO_DESINSTALAR = 3;
+  MODO_VOLTAR = 3;
+  MODO_DESINSTALAR = 4;
   CHAVE_DESINSTALADOR = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{8F3C2B1A-6D4E-4B7F-9A21-5C3E7D9B0F42}_is1';
 
 var
   PaginaModo: TInputOptionWizardPage;
   PaginaIp: TInputQueryWizardPage;
+  CaixaFixarIp: TNewCheckBox;
+  NotaFixarIp: TNewStaticText;
+  IpDetectado: string;
   PaginaPg: TInputQueryWizardPage;
   PaginaEmpresa: TInputQueryWizardPage;
   PaginaRemover: TInputOptionWizardPage;
@@ -99,6 +112,14 @@ var
   TemRestos: Boolean;
   PgInstalado: Boolean;
   VersaoInstalada: string;
+  // Versao guardada pela ultima atualizacao (C:\Pulyn\anterior), para "Voltar a versao anterior"
+  TemAnterior: Boolean;
+  VersaoAnterior: string;
+  // Empresa e nuvem que ja estao no .env (atualizacao: a tela "Empresa do buffet" vem com elas e da para trocar)
+  EmpresaAtual: string;
+  NuvemAtual: string;
+  SyncLigado: Boolean;
+  EmpresaPreenchida: Boolean;
   CodigoResultado: Integer;
 
 function SetEnvironmentVariable(lpName: string; lpValue: string): Boolean;
@@ -295,13 +316,24 @@ begin
       Result := Trim(String(Texto));
 end;
 
-function LerVersaoInstalada: string;
+// Primeira linha de um VERSAO.txt (C:\Pulyn\pacote = versao no ar; C:\Pulyn\anterior = versao guardada).
+function LerVersao(Arquivo: string): string;
 var
   Linhas: TArrayOfString;
+  Data: string;
 begin
   Result := '';
-  if LoadStringsFromFile('C:\Pulyn\pacote\VERSAO.txt', Linhas) and (GetArrayLength(Linhas) > 0) then
+  if LoadStringsFromFile(Arquivo, Linhas) and (GetArrayLength(Linhas) > 0) then
     Result := Trim(Linhas[0]);
+  // Formato antigo da atualizacao ("Pulyn GitHub main 2026-11-13 10:11"): mostra so a data.
+  if Pos('Pulyn GitHub ', Result) = 1 then
+  begin
+    Data := Copy(Result, Length(Result) - 15, 16);
+    if (Length(Data) = 16) and (Data[5] = '-') and (Data[8] = '-') and (Data[11] = ' ') then
+      Result := 'Pulyn atualizado em ' + Copy(Data, 9, 2) + '/' + Copy(Data, 6, 2) + '/' + Copy(Data, 1, 4) + ' ' + Copy(Data, 12, 5)
+    else
+      StringChangeEx(Result, ' GitHub', '', True);
+  end;
 end;
 
 function IpValido(Ip: string): Boolean;
@@ -339,10 +371,67 @@ begin
 end;
 
 // ID da empresa: sem espacos, aspas nem barras (vai para o .env e para consultas).
+// Valor de uma chave do .env instalado (C:\Pulyn\backend\.env), ou '' se nao houver. So administradores leem o arquivo.
+function LerChaveEnv(Chave: string): string;
+var
+  Linhas: TArrayOfString;
+  I, Igual: Integer;
+  Linha: string;
+begin
+  Result := '';
+  if not LoadStringsFromFile('C:\Pulyn\backend\.env', Linhas) then Exit;
+  for I := 0 to GetArrayLength(Linhas) - 1 do
+  begin
+    Linha := Trim(Linhas[I]);
+    Igual := Pos('=', Linha);
+    if (Igual > 1) and (Trim(Copy(Linha, 1, Igual - 1)) = Chave) then
+    begin
+      Result := Trim(Copy(Linha, Igual + 1, Length(Linha)));
+      if (Length(Result) >= 2) and ((Result[1] = '"') or (Result[1] = '''')) and (Result[Length(Result)] = Result[1]) then
+        Result := Copy(Result, 2, Length(Result) - 2);
+    end;
+  end;
+end;
+
+// Atualizacao: a pessoa mudou a empresa ou a conexao (ou a sincronizacao ainda nao estava ligada)? Campos vazios = nao mexer.
+function EmpresaMudou: Boolean;
+begin
+  Result := EhAtualizacao and (PaginaEmpresa.Values[0] <> '') and (PaginaEmpresa.Values[1] <> '')
+    and ((PaginaEmpresa.Values[0] <> EmpresaAtual) or (PaginaEmpresa.Values[1] <> NuvemAtual) or not SyncLigado);
+end;
+
+// Linha da empresa no resumo da atualizacao.
+function TextoEmpresa(NewLine: string): string;
+begin
+  if EmpresaMudou then
+  begin
+    Result := NewLine + NewLine + 'Empresa: ' + PaginaEmpresa.Values[0];
+    if PaginaEmpresa.Values[0] <> EmpresaAtual then
+    begin
+      if EmpresaAtual <> '' then Result := Result + ' (troca da ' + EmpresaAtual + ')' else Result := Result + ' (nova)';
+    end
+    else if PaginaEmpresa.Values[1] <> NuvemAtual then
+      Result := Result + ' (conexão da nuvem nova)';
+    Result := Result + NewLine + 'Antes de atualizar: confere na nuvem, grava no .env, liga a sincronização e reinicia o servidor.';
+  end
+  else if EmpresaAtual <> '' then
+    Result := NewLine + NewLine + 'Empresa: ' + EmpresaAtual + ' (sem mudança)'
+  else
+    Result := NewLine + NewLine + 'Empresa: não configurada (sem sincronização com a nuvem)';
+end;
+
 function IdEmpresaValido(Id: string): Boolean;
 begin
   Result := (Length(Id) > 0) and (Pos(' ', Id) = 0) and (Pos('"', Id) = 0) and (Pos('''', Id) = 0)
     and (Pos('\', Id) = 0) and (Pos('/', Id) = 0);
+end;
+
+// Fixar o IP = o IP atual da maquina: o campo volta para ele e fica travado.
+procedure CaixaFixarIpClick(Sender: TObject);
+begin
+  if CaixaFixarIp.Checked then
+    PaginaIp.Values[0] := IpDetectado;
+  PaginaIp.Edits[0].Enabled := not CaixaFixarIp.Checked;
 end;
 
 procedure InitializeWizard;
@@ -353,7 +442,23 @@ begin
   TemRestos := JaInstalado or DirExists('C:\Pulyn\backend') or DirExists('C:\Pulyn\site')
     or RegKeyExists(HKLM, 'SYSTEM\CurrentControlSet\Services\PulynBackend');
   PgInstalado := FileExists(ExpandConstant('{commonpf64}\PostgreSQL\18\bin\psql.exe'));
-  VersaoInstalada := LerVersaoInstalada;
+  VersaoInstalada := LerVersao('C:\Pulyn\pacote\VERSAO.txt');
+  TemAnterior := JaInstalado and FileExists('C:\Pulyn\anterior\backend\index.js') and FileExists('C:\Pulyn\anterior\site\index.html');
+  VersaoAnterior := '';
+  if TemAnterior then
+  begin
+    VersaoAnterior := LerVersao('C:\Pulyn\anterior\VERSAO.txt');
+    if VersaoAnterior = '' then VersaoAnterior := 'versão sem identificação';
+  end;
+  EmpresaAtual := '';
+  NuvemAtual := '';
+  SyncLigado := False;
+  if JaInstalado then
+  begin
+    EmpresaAtual := LerChaveEnv('SYNC_EMPRESA_ID');
+    NuvemAtual := LerChaveEnv('SYNC_NUVEM_URL');
+    SyncLigado := LerChaveEnv('SYNC_ENABLED') = '1';
+  end;
 
   if JaInstalado then
   begin
@@ -372,10 +477,15 @@ begin
   PaginaModo.Add('Primeira instalação' + #13#10 + 'Instala o Pulyn completo: banco de dados novo, servidor, telas e certificado HTTPS.');
   PaginaModo.Add('Atualizar pela internet (GitHub)' + #13#10 + 'Como o comando atualizar: baixa do GitHub só o que mudou, faz backup do banco e publica. Dados, senhas e certificado continuam os mesmos.');
   PaginaModo.Add('Atualizar com este instalador (sem internet)' + #13#10 + 'Publica a versão {#Versao} que veio dentro deste arquivo, com backup do banco antes.');
+  if TemAnterior then
+    PaginaModo.Add('Voltar à versão anterior' + #13#10 + 'Volta para a versão que estava no ar antes da última atualização (' + VersaoAnterior + '). Não precisa de internet. Os dados continuam como estão.')
+  else
+    PaginaModo.Add('Voltar à versão anterior' + #13#10 + 'Fica disponível depois da primeira atualização: cada atualização guarda a versão que estava no ar.');
   PaginaModo.Add('Desinstalar' + #13#10 + 'Remove o Pulyn deste computador. O banco de dados só é apagado se você escolher.');
   PaginaModo.CheckListBox.ItemEnabled[MODO_INSTALAR] := not JaInstalado;
   PaginaModo.CheckListBox.ItemEnabled[MODO_ATUALIZAR_GITHUB] := JaInstalado;
   PaginaModo.CheckListBox.ItemEnabled[MODO_ATUALIZAR_PACOTE] := JaInstalado;
+  PaginaModo.CheckListBox.ItemEnabled[MODO_VOLTAR] := TemAnterior;
   PaginaModo.CheckListBox.ItemEnabled[MODO_DESINSTALAR] := TemRestos;
   if JaInstalado then
     PaginaModo.SelectedValueIndex := MODO_ATUALIZAR_GITHUB
@@ -387,7 +497,28 @@ begin
     'Qual é o IP fixo deste computador?',
     'Tablets, celulares e placas vão acessar o sistema por este endereço (https://IP). Ele precisa estar reservado no roteador para não mudar.');
   PaginaIp.Add('IP do servidor:', False);
-  PaginaIp.Values[0] := DetectarIp;
+  IpDetectado := DetectarIp;
+  PaginaIp.Values[0] := IpDetectado;
+  CaixaFixarIp := TNewCheckBox.Create(PaginaIp);
+  CaixaFixarIp.Parent := PaginaIp.Surface;
+  CaixaFixarIp.Left := PaginaIp.Edits[0].Left;
+  CaixaFixarIp.Top := PaginaIp.Edits[0].Top + PaginaIp.Edits[0].Height + ScaleY(16);
+  CaixaFixarIp.Width := PaginaIp.SurfaceWidth - CaixaFixarIp.Left;
+  CaixaFixarIp.Height := ScaleY(20);
+  CaixaFixarIp.Caption := 'Deixar o IP atual fixo no Windows (hoje ele é automático)';
+  CaixaFixarIp.Checked := False;
+  CaixaFixarIp.Enabled := IpDetectado <> '';
+  CaixaFixarIp.OnClick := @CaixaFixarIpClick;
+  NotaFixarIp := TNewStaticText.Create(PaginaIp);
+  NotaFixarIp.Parent := PaginaIp.Surface;
+  NotaFixarIp.Left := CaixaFixarIp.Left + ScaleX(18);
+  NotaFixarIp.Top := CaixaFixarIp.Top + CaixaFixarIp.Height + ScaleY(4);
+  NotaFixarIp.Width := PaginaIp.SurfaceWidth - NotaFixarIp.Left;
+  NotaFixarIp.AutoSize := False;
+  NotaFixarIp.WordWrap := True;
+  NotaFixarIp.Height := ScaleY(80);
+  NotaFixarIp.Caption := 'Nada muda além disso: o mesmo IP, a mesma máscara, o mesmo gateway e os mesmos DNS, só que ' +
+    'fixos em vez de automáticos. Se puder, reserve também o IP no roteador, para ele não entregar o mesmo IP a outro aparelho.';
 
   if PgInstalado then
     PaginaPg := CreateInputQueryPage(PaginaIp.ID, 'Banco de dados',
@@ -426,8 +557,10 @@ end;
 function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
-  if (PageID = PaginaIp.ID) or (PageID = PaginaPg.ID) or (PageID = PaginaEmpresa.ID) then
+  if (PageID = PaginaIp.ID) or (PageID = PaginaPg.ID) then
     Result := Modo <> MODO_INSTALAR
+  else if PageID = PaginaEmpresa.ID then
+    Result := (Modo <> MODO_INSTALAR) and not EhAtualizacao
   else if PageID = PaginaRemover.ID then
     Result := Modo <> MODO_DESINSTALAR;
 end;
@@ -474,7 +607,10 @@ begin
   begin
     PaginaEmpresa.Values[0] := Trim(PaginaEmpresa.Values[0]);
     PaginaEmpresa.Values[1] := Trim(PaginaEmpresa.Values[1]);
-    if not IdEmpresaValido(PaginaEmpresa.Values[0]) then
+    // Na atualizacao, os dois vazios = deixar o .env como esta.
+    if EhAtualizacao and (PaginaEmpresa.Values[0] = '') and (PaginaEmpresa.Values[1] = '') then
+      Result := True
+    else if not IdEmpresaValido(PaginaEmpresa.Values[0]) then
     begin
       MsgBox('Digite o ID da empresa (sem espaços, aspas ou barras).', mbError, MB_OK);
       Result := False;
@@ -483,7 +619,11 @@ begin
     begin
       MsgBox('A conexão da nuvem deve começar com postgresql:// e não pode ter espaços nem aspas.', mbError, MB_OK);
       Result := False;
-    end;
+    end
+    else if EhAtualizacao and (EmpresaAtual <> '') and (PaginaEmpresa.Values[0] <> EmpresaAtual) then
+      Result := MsgBox('Este computador hoje é da empresa ' + EmpresaAtual + ' e vai passar para a empresa ' + PaginaEmpresa.Values[0] + '.' + #13#10#13#10 +
+        'O banco de dados deste computador NÃO é trocado: ele continua com os dados que já tinha, e a sincronização passa a ' +
+        'usar a empresa nova.' + #13#10#13#10 + 'Confirma a troca?', mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
   end
   else if CurPageID = PaginaRemover.ID then
   begin
@@ -495,12 +635,25 @@ end;
 
 procedure CurPageChanged(CurPageID: Integer);
 begin
+  // Atualizacao: a tela da empresa vem com o que ja esta no .env (so na primeira vez que aparece).
+  if (CurPageID = PaginaEmpresa.ID) and EhAtualizacao and not EmpresaPreenchida then
+  begin
+    EmpresaPreenchida := True;
+    PaginaEmpresa.Values[0] := EmpresaAtual;
+    PaginaEmpresa.Values[1] := NuvemAtual;
+    PaginaEmpresa.SubCaptionLabel.Caption :=
+      'Estes são o ID da empresa e a conexão da nuvem que este computador usa hoje. Para trocar, mude aqui: antes de atualizar, ' +
+      'o instalador confere na nuvem, grava no .env, liga a sincronização e reinicia o servidor. Os dados do banco não mudam.' + #13#10#13#10 +
+      'Deixe como está para não mudar nada (os dois vazios também não mudam nada).';
+  end;
   if CurPageID = wpReady then
   begin
     if Modo = MODO_DESINSTALAR then
       WizardForm.NextButton.Caption := '&Desinstalar'
     else if EhAtualizacao then
       WizardForm.NextButton.Caption := '&Atualizar'
+    else if Modo = MODO_VOLTAR then
+      WizardForm.NextButton.Caption := '&Trocar versão'
     else
       WizardForm.NextButton.Caption := '&Instalar';
   end
@@ -509,7 +662,7 @@ begin
     if CodigoResultado <> 0 then
       WizardForm.FinishedLabel.Caption :=
         'A operação NÃO terminou.' + #13#10#13#10 +
-        'O motivo aparece nas últimas linhas do andamento e no registro (C:\Pulyn\logs\instalacao-*.log ou %TEMP%\pulyn-desinstalacao-*.log).' + #13#10#13#10 +
+        'O motivo aparece nas últimas linhas do andamento e no registro (C:\Pulyn\logs ou %TEMP%\pulyn-desinstalacao-*.log).' + #13#10#13#10 +
         'Corrija o problema e rode este instalador de novo: o que já foi feito é reaproveitado.'
     else if Modo = MODO_DESINSTALAR then
       WizardForm.FinishedLabel.Caption :=
@@ -520,6 +673,11 @@ begin
         'O Pulyn está com a versão mais nova do GitHub.' + #13#10#13#10 +
         'Da próxima vez, basta usar o atalho "Atualizar Pulyn" da área de trabalho.' + #13#10 +
         'Os tablets e as placas continuam funcionando sem mudar nada.'
+    else if Modo = MODO_VOLTAR then
+      WizardForm.FinishedLabel.Caption :=
+        'O Pulyn voltou para a versão anterior (' + VersaoAnterior + ').' + #13#10#13#10 +
+        'A versão que estava no ar ficou guardada: para voltar a ela, rode este instalador e escolha "Voltar à versão anterior" de novo, ou atualize.' + #13#10#13#10 +
+        'Os dados não mudaram. Os tablets e as placas continuam funcionando.'
     else if Modo = MODO_ATUALIZAR_PACOTE then
       WizardForm.FinishedLabel.Caption :=
         'O Pulyn foi atualizado para a versão {#Versao}.' + #13#10#13#10 +
@@ -553,7 +711,7 @@ begin
       '- baixa do GitHub só o que mudou (na primeira vez, o código todo);' + NewLine +
       '- se não houver nada novo, para e avisa;' + NewLine +
       '- backup do banco, compilação das telas e publicação.' + NewLine + NewLine +
-      'Precisa de internet. Dados, senhas e certificado continuam os mesmos.';
+      'Precisa de internet. Dados, senhas e certificado continuam os mesmos.' + TextoEmpresa(NewLine);
   end
   else if Modo = MODO_ATUALIZAR_PACOTE then
   begin
@@ -563,13 +721,29 @@ begin
       'O que acontece:' + NewLine +
       '- backup do banco;' + NewLine +
       '- publicação da versão nova do sistema (servidor e telas).' + NewLine + NewLine +
-      'Não são reinstalados: Node.js, PostgreSQL, IIS. Dados, senhas e certificado continuam os mesmos.';
+      'Não são reinstalados: Node.js, PostgreSQL, IIS. Dados, senhas e certificado continuam os mesmos.' + TextoEmpresa(NewLine);
+  end
+  else if Modo = MODO_VOLTAR then
+  begin
+    Result := 'VOLTAR À VERSÃO ANTERIOR do Pulyn' + NewLine + NewLine;
+    if VersaoInstalada <> '' then Result := Result + 'No ar agora: ' + VersaoInstalada + NewLine;
+    Result := Result + 'Vai voltar para: ' + VersaoAnterior + NewLine + NewLine +
+      'O que acontece:' + NewLine +
+      '- backup do banco;' + NewLine +
+      '- o sistema e as telas são trocados pela versão anterior, guardada neste computador;' + NewLine +
+      '- a versão que está no ar fica guardada no lugar dela (dá para voltar a ela depois);' + NewLine +
+      '- se a versão anterior não funcionar, a troca é desfeita sozinha.' + NewLine + NewLine +
+      'Não precisa de internet. O banco de dados NÃO volta: os dados continuam como estão. Senhas e certificado também não mudam.';
   end
   else
+  begin
     Result := 'PRIMEIRA INSTALAÇÃO do Pulyn {#Versao}' + NewLine + NewLine +
-      'Endereço do sistema: https://' + PaginaIp.Values[0] + NewLine +
-      'Empresa: ' + PaginaEmpresa.Values[0] + ' (dados copiados da nuvem)' + NewLine + NewLine +
+      'Endereço do sistema: https://' + PaginaIp.Values[0] + NewLine;
+    if CaixaFixarIp.Checked then
+      Result := Result + 'IP: passa de automático para fixo (mesmo IP, máscara, gateway e DNS)' + NewLine;
+    Result := Result + 'Empresa: ' + PaginaEmpresa.Values[0] + ' (dados copiados da nuvem)' + NewLine + NewLine +
       'O andamento de cada etapa aparece aqui no instalador. Pode levar de 5 a 20 minutos.';
+  end;
 end;
 
 procedure Desinstalar;
@@ -593,6 +767,22 @@ begin
     DelTree('C:\Pulyn\pacote', True, True, True);
 end;
 
+// Atualizacao com a empresa ou a conexao trocada: grava no .env antes de atualizar (configurar-empresa.ps1).
+// Devolve False se nao deu certo (a atualizacao nao roda).
+function ConfigurarEmpresa: Boolean;
+begin
+  WizardForm.StatusLabel.Caption := 'Configurando a empresa e a nuvem...';
+  ExtractTemporaryFile('config.ps1');
+  ExtractTemporaryFile('configurar-empresa.ps1');
+  // A conexao tem senha: vai por variavel de ambiente (herdada pelo PowerShell), nunca pela linha de comando.
+  SetEnvironmentVariable('PULYN_EMPRESA_ID', PaginaEmpresa.Values[0]);
+  SetEnvironmentVariable('PULYN_NUVEM_URL', PaginaEmpresa.Values[1]);
+  CodigoResultado := RodarComAndamento('-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\configurar-empresa.ps1') + '" -SemPausa');
+  SetEnvironmentVariable('PULYN_EMPRESA_ID', '');
+  SetEnvironmentVariable('PULYN_NUVEM_URL', '');
+  Result := CodigoResultado = 0;
+end;
+
 procedure AtualizarPeloGithub;
 var
   Parametros: string;
@@ -608,6 +798,31 @@ begin
   Parametros := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{tmp}\atualizar-github.ps1') + '"' +
     ' -MinGitZip "' + ExpandConstant('{tmp}\MinGit.zip') + '" -SemPausa';
   CodigoResultado := RodarComAndamento(Parametros);
+end;
+
+procedure VoltarVersao;
+var
+  Pasta: string;
+begin
+  WizardForm.StatusLabel.Caption := 'Voltando à versão anterior...';
+  // Prefere os scripts da versao que esta no ar (podem ser mais novos que os deste setup). Eles sao copiados para fora de
+  // C:\Pulyn\scripts porque essa pasta e trocada durante a volta.
+  Pasta := ExpandConstant('{tmp}\voltar');
+  if FileExists('C:\Pulyn\scripts\voltar-versao.ps1') and FileExists('C:\Pulyn\scripts\config.ps1')
+    and FileExists('C:\Pulyn\scripts\backup-banco.ps1') and ForceDirectories(Pasta)
+    and FileCopy('C:\Pulyn\scripts\voltar-versao.ps1', Pasta + '\voltar-versao.ps1', False)
+    and FileCopy('C:\Pulyn\scripts\config.ps1', Pasta + '\config.ps1', False)
+    and FileCopy('C:\Pulyn\scripts\backup-banco.ps1', Pasta + '\backup-banco.ps1', False) then
+    Log('Voltar versao: scripts de C:\Pulyn\scripts')
+  else
+  begin
+    ExtractTemporaryFile('config.ps1');
+    ExtractTemporaryFile('backup-banco.ps1');
+    ExtractTemporaryFile('voltar-versao.ps1');
+    Pasta := ExpandConstant('{tmp}');
+    Log('Voltar versao: scripts deste setup');
+  end;
+  CodigoResultado := RodarComAndamento('-NoProfile -ExecutionPolicy Bypass -File "' + Pasta + '\voltar-versao.ps1" -SemPausa');
 end;
 
 procedure InstalarOuAtualizar;
@@ -630,9 +845,16 @@ begin
     SetEnvironmentVariable('PULYN_EMPRESA_ID', PaginaEmpresa.Values[0]);
     SetEnvironmentVariable('PULYN_NUVEM_URL', PaginaEmpresa.Values[1]);
     Parametros := Parametros + ' -Modo Instalar -Ip ' + PaginaIp.Values[0];
+    if CaixaFixarIp.Checked then
+      Parametros := Parametros + ' -FixarIp';
   end
   else
+  begin
     Parametros := Parametros + ' -Modo Atualizar';
+    // VERSAO.txt da versao que estava no ar (copiado antes de o pacote ser trocado; vai para C:\Pulyn\anterior)
+    if FileExists(ExpandConstant('{tmp}\versao-no-ar.txt')) then
+      Parametros := Parametros + ' -VersaoNoAr "' + ExpandConstant('{tmp}\versao-no-ar.txt') + '"';
+  end;
   CodigoResultado := RodarComAndamento(Parametros);
   SetEnvironmentVariable('PULYN_PG_ADMIN_SENHA', '');
   SetEnvironmentVariable('PULYN_EMPRESA_ID', '');
@@ -641,14 +863,22 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
+  // Antes de copiar o pacote novo: guarda o VERSAO.txt da versao no ar (a atualizacao a guarda em C:\Pulyn\anterior).
+  if (CurStep = ssInstall) and (Modo = MODO_ATUALIZAR_PACOTE) and FileExists('C:\Pulyn\pacote\VERSAO.txt') then
+    FileCopy('C:\Pulyn\pacote\VERSAO.txt', ExpandConstant('{tmp}\versao-no-ar.txt'), False);
   if CurStep <> ssPostInstall then Exit;
 #ifdef Previa
   Exit;
 #endif
+  // Empresa ou conexao trocada na tela "Empresa do buffet": grava antes; se falhar, a atualizacao nao roda.
+  if EmpresaMudou then
+    if not ConfigurarEmpresa then Exit;
   if Modo = MODO_DESINSTALAR then
     Desinstalar
   else if Modo = MODO_ATUALIZAR_GITHUB then
     AtualizarPeloGithub
+  else if Modo = MODO_VOLTAR then
+    VoltarVersao
   else
     InstalarOuAtualizar;
 end;

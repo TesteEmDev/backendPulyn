@@ -10,7 +10,11 @@
 # copia da NUVEM os dados da empresa do buffet (carga-empresa.js) e gera o .env ja com a sincronizacao ligada. Nao cria
 # usuario master (quem administra o sistema e o dono, pela nuvem). Nao precisa do .env de desenvolvimento.
 # Entradas (variaveis de ambiente, nunca na linha de comando): PULYN_EMPRESA_ID e PULYN_NUVEM_URL (conexao do usuario do buffet).
-param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$Ip)
+#
+# Com -Recriar, a confirmacao digitada e pulada quando o setup.exe ja perguntou na tela dele (PULYN_RECRIAR_CONFIRMADO=1
+# ou -Confirmado).
+param([switch]$Recriar, [string]$AdminLocal = 'postgres', [int]$PortaLocal = 5432, [switch]$BancoLimpo, [string]$Ip,
+      [switch]$Confirmado)
 . "$PSScriptRoot\config.ps1"
 Exigir-Repo
 
@@ -89,7 +93,7 @@ if ($existe -and $Recriar) {
     Write-Host ''
     Write-Host ('    Isto vai APAGAR o banco "' + $BancoProd + '" (os dados de producao atuais) e refazer a copia.') -ForegroundColor Yellow
     # O instalador (setup.exe) ja perguntou na tela dele (PULYN_RECRIAR_CONFIRMADO=1); rodando a mao, pede para digitar.
-    if ($env:PULYN_RECRIAR_CONFIRMADO -ne '1') {
+    if (-not $Confirmado -and $env:PULYN_RECRIAR_CONFIRMADO -ne '1') {
         $conf = Read-Host ('    Digite APAGAR ' + $BancoProd + ' para confirmar')
         if ($conf -cne ('APAGAR ' + $BancoProd)) { Write-Host 'Cancelado, nada foi apagado.'; return }
     }
@@ -126,8 +130,7 @@ if ($BancoLimpo) {
     $env:SYNC_NUVEM_URL = $nuvemUrlEmpresa
     $env:SYNC_EMPRESA_ID = $empresaId
     try {
-        & node (Join-Path $PSScriptRoot 'carga-empresa.js')
-        Conferir-Saida 'Nao consegui copiar os dados da empresa da nuvem (rode o instalador de novo depois de corrigir)'
+        Executar-Visivel 'node' @((Join-Path $PSScriptRoot 'carga-empresa.js')) 'Nao consegui copiar os dados da empresa da nuvem (rode o instalador de novo depois de corrigir)'
     } finally { Remove-Item Env:\DATABASE_URL, Env:\SYNC_NUVEM_URL, Env:\SYNC_EMPRESA_ID -ErrorAction SilentlyContinue }
 } else {
 Escrever-Passo ('Copiando os dados de ' + $BancoOrigem)
@@ -160,36 +163,27 @@ if (Test-Path $envProd) {
     if ($texto -match '(?m)^DATABASE_URL=.*$') { $texto = [regex]::Replace($texto, '(?m)^DATABASE_URL=.*$', $novaUrl) } else { $texto += "`r`n" + $novaUrl + "`r`n" }
     Gravar-TextoUtf8 $envProd $texto
     Escrever-Ok 'DATABASE_URL atualizado no .env existente (o resto foi mantido)'
+    $acrescentadas = Completar-Env $envProd
+    if ($acrescentadas -gt 0) { Escrever-Ok ([string]$acrescentadas + ' chave(s) que faltavam acrescentadas no fim, com o valor padrao') }
 } else {
     $ip = if ($Ip) { $Ip } else { Obter-IpLan }
+    # Todas as chaves vao para o arquivo; as que nao sao geradas aqui ficam vazias ou com o padrao, prontas para preencher.
     # Buffet novo (banco limpo): usa a conexao e a empresa informadas no instalador (usuario proprio na nuvem, que so enxerga a
-    # empresa dele). Nao herda a nuvem do desenvolvimento.
+    # empresa dele) e ja liga a sincronizacao. Nao herda a nuvem do desenvolvimento.
     $nuvemUrl = if ($BancoLimpo) { $nuvemUrlEmpresa } elseif ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_URL' } else { $null }
     $nuvemSsl = if ($envDev) { Ler-Env $envDev 'SYNC_NUVEM_SSL' } else { $null }
-    if (-not $nuvemSsl) { $nuvemSsl = 'true' }
     $sincronizar = [bool]($BancoLimpo -and $nuvemUrl -and $empresaId)
-    # Atencao: cada elemento com "+" precisa de parenteses (a virgula tem precedencia sobre o +).
-    $linhas = @(
-        ('# Producao (IIS). Gerado por 02-banco-producao.ps1 em ' + (Get-Date -Format 'yyyy-MM-dd HH:mm')),
-        'NODE_ENV=production',
-        ('PORT=' + $PortaBackend),
-        'HOST=127.0.0.1',
-        'DB_DRIVER=postgres',
-        ('DATABASE_URL=postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd),
-        'DB_SSL=false',
-        ('JWT_SECRET=' + (Novo-Segredo 32)),
-        ('FRONTEND_URL=https://' + $ip),
-        '',
-        '# Sincronizacao com a nuvem: so UM backend deve sincronizar com o Supabase.',
-        $(if ($sincronizar) { '# Buffet com empresa definida: so os dados da empresa descem e sobem (usuario proprio na nuvem).' } else { '# Deixe 0 ate desligar a sincronizacao do ambiente de desenvolvimento (veja README-IIS.md).' }),
-        ('SYNC_ENABLED=' + $(if ($sincronizar) { '1' } else { '0' })),
-        'SYNC_INTERVALO_MS=15000',
-        ('SYNC_NUVEM_URL=' + $(if ($nuvemUrl) { $nuvemUrl } else { '' })),
-        ('SYNC_NUVEM_SSL=' + $nuvemSsl),
-        ('SYNC_EMPRESA_ID=' + $(if ($sincronizar) { $empresaId } else { '' }))
-    )
-    Gravar-TextoUtf8 $envProd (($linhas -join "`r`n") + "`r`n")
-    Escrever-Ok ('criado ' + $envProd)
+    $valores = @{
+        DATABASE_URL = 'postgresql://' + $UsuarioApp + ':' + $senhaApp + '@localhost:' + $destino.Porta + '/' + $BancoProd
+        JWT_SECRET   = Novo-Segredo 32
+        FRONTEND_URL = 'https://' + $ip
+    }
+    if ($nuvemUrl) { $valores.SYNC_NUVEM_URL = $nuvemUrl }
+    if ($nuvemSsl) { $valores.SYNC_NUVEM_SSL = $nuvemSsl }
+    if ($sincronizar) { $valores.SYNC_ENABLED = '1'; $valores.SYNC_EMPRESA_ID = $empresaId }
+    Gravar-TextoUtf8 $envProd (Montar-Env $valores ('# Producao (IIS). Gerado por 02-banco-producao.ps1 em ' + (Get-Date -Format 'dd/MM/yyyy HH:mm')))
+    if ($sincronizar) { Escrever-Ok ('criado ' + $envProd + ' (todas as chaves; sincronizacao ligada para a empresa ' + $empresaId + '; e-mail vazio, para preencher depois)') }
+    else { Escrever-Ok ('criado ' + $envProd + ' (todas as chaves; e-mail e nuvem ficam vazios, para preencher depois)') }
     Escrever-Aviso ('FRONTEND_URL ficou https://' + $ip + ' (IP atual desta maquina). Se o IP mudar, ajuste aqui.')
 }
 # Restringe o arquivo (tem senha do banco e segredo dos tokens): Administradores, SYSTEM e quem rodou este script.

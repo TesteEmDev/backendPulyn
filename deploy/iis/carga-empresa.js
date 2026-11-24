@@ -44,6 +44,11 @@ function servidorDaNuvem() {
   try { return new URL(nuvemUrl).hostname; } catch { return '(endereco invalido)'; }
 }
 
+// Usuario da conexao, sem a senha e sem o sufixo do pooler do Supabase (usuario.<referencia>).
+function usuarioDaConexao() {
+  try { return decodeURIComponent(new URL(nuvemUrl).username).split('.')[0].toLowerCase(); } catch { return ''; }
+}
+
 // Confere a conexao e a empresa. Devolve o que a nuvem tem dela.
 async function conferirNuvem(nuvem) {
   let empresa;
@@ -54,7 +59,17 @@ async function conferirNuvem(nuvem) {
       '. Confira a conexao, a internet e se o usuario do buffet foi preparado na nuvem.');
   }
   if (!empresa.rows.length) {
-    throw new Falha('A nuvem nao tem a empresa "' + empresaId + '" (ou o usuario dessa conexao nao tem acesso a ela). Confira o ID da empresa e a conexao.');
+    // Cada buffet tem o proprio usuario na nuvem (buffet_<8 primeiros do id>, criado por debug/preparar-acesso-buffet-nuvem.js),
+    // e o RLS esconde dele as outras empresas: a conexao de outro buffet "nao enxerga" esta empresa.
+    const usuario = usuarioDaConexao();
+    const esperado = 'buffet_' + empresaId.replace(/-/g, '').slice(0, 8).toLowerCase();
+    let dica = ' Cada buffet tem a propria conexao da nuvem (criada com debug/preparar-acesso-buffet-nuvem.js para esta empresa);' +
+      ' a conexao de outro buffet nao enxerga esta empresa.';
+    if (/^buffet_/.test(usuario) && usuario !== esperado) {
+      dica = ' A conexao informada e do usuario "' + usuario + '", e o desta empresa seria "' + esperado + '": parece a conexao de' +
+        ' outro buffet. Crie a conexao deste com debug/preparar-acesso-buffet-nuvem.js (EMPRESA_ID=' + empresaId + ').';
+    }
+    throw new Falha('A nuvem nao tem a empresa "' + empresaId + '" ou o usuario dessa conexao nao tem acesso a ela.' + dica);
   }
   const fila = await nuvem.query(`SELECT to_regclass('public."sincronizacaoFila"') AS fila`);
   if (!fila.rows[0].fila) throw new Falha('A nuvem ainda nao tem a fila de sincronizacao (migracao 018 + 021).');

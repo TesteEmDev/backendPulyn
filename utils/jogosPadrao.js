@@ -3,6 +3,9 @@
 // O cliente não cria nem renomeia jogos: ele recebe um jogo de cada tipo que o plano permite (utils/jogosDoPlano.js) e só
 // muda a duração, que vale para todos os eventos dele. Nome, descrição, regras e pontos abaixo são o padrão do sistema.
 // Os pontos e os checkpoints de cada jogo continuam sendo configurados como antes.
+// `regrasTelao` (jogos de buffet): versão curta e simples das regras, para as crianças, que o telão mostra e o Lumi fala
+// (public/mascote/voz no FrontEnd). As `regras` completas continuam nas telas da equipe. Sem `regrasTelao`, o telão usa
+// as completas (jogos PulynBall).
 const JOGOS_PADRAO = {
   team: {
     nome: "Zona - Equipe",
@@ -10,13 +13,15 @@ const JOGOS_PADRAO = {
     pontosPadrao: 10,
     descricao: "As equipes disputam os checkpoints espalhados pelo espaço. Encoste a pulseira em um checkpoint para conquistá-lo para a sua equipe e ganhar pontos. Quando uma equipe domina todos os checkpoints de uma zona, a zona inteira fica com a cor dela. Vence a equipe com mais pontos quando o tempo acabar.",
     regras: "1- Todas as equipes jogam ao mesmo tempo, sem fila nem turnos. Qualquer checkpoint online pode ser lido a qualquer momento.\n2- Cada leitura vale 10 pontos para o participante e para a equipe.\n3- Ao ler um checkpoint, ele passa a ser da sua equipe, mesmo que estivesse com outra.\n4- Você não pode reler um checkpoint que você mesmo já domina. Ele só libera quando outra equipe o conquistar, ou depois de 1m30s sem nenhuma leitura, quando volta a ficar livre para todos.\n5- Uma zona só é dominada quando todos os checkpoints dentro dela pertencem à mesma equipe. Se estiverem misturados ou algum estiver livre, a zona fica \"em disputa\".\n6- O jogo termina quando o tempo configurado acaba ou o recreador encerra. Os pontos ficam salvos e os domínios são zerados.\n7- É preciso estar com a pulseira ativa, vinculada à sua conta e ao evento, e pertencer a uma equipe.",
+    regrasTelao: "1- Todas as equipes jogam ao mesmo tempo.\n2- Encoste a pulseira num checkpoint para ele ficar com a sua equipe.\n3- Cada checkpoint conquistado vale pontos!\n4- Quando o tempo acabar, ganha a equipe com mais pontos.",
   },
   individual: {
     nome: "Zona - Individual",
     duracao: 10,
     pontosPadrao: 10,
     descricao: "Cada participante joga por si. Conquiste checkpoints com a pulseira, acumule pontos e mantenha o seu nome e a sua cor no mapa. Quem tiver mais pontos no fim do tempo lidera o ranking.",
-    regras: "1- Não há equipes: cada participante disputa por conta própria, e o telão mostra o nome e a cor de quem domina cada checkpoint.\n2- Cada leitura vale 10 pontos, com bónus progressivo: a cada 10 checkpoints lidos, cada nova leitura passa a valer 1 ponto a mais (11, 12, 13...).\n3- Ao ler um checkpoint, ele passa a ser seu, mesmo que fosse de outro participante.\n4- Para reler o mesmo checkpoint, você precisa antes ler 3 checkpoints diferentes.\n5- O domónio de um checkpoint não expira: ele só muda de dono quando outro participante o lê, e é zerado no fim do jogo.\n6- Uma zona só é dominada quando todos os seus checkpoints são do mesmo participante. Caso contrário, fica \"em disputa\".\n7- O ranking é por pontos totais. Os pontos ficam salvos ao final.",
+    regras: "1- Não há equipes: cada participante disputa por conta própria, e o telão mostra o nome e a cor de quem domina cada checkpoint.\n2- Cada leitura vale 10 pontos, com bônus progressivo: a cada 10 checkpoints lidos, cada nova leitura passa a valer 1 ponto a mais (11, 12, 13...).\n3- Ao ler um checkpoint, ele passa a ser seu, mesmo que fosse de outro participante.\n4- Para reler o mesmo checkpoint, você precisa antes ler 3 checkpoints diferentes.\n5- O domínio de um checkpoint não expira: ele só muda de dono quando outro participante o lê, e é zerado no fim do jogo.\n6- Uma zona só é dominada quando todos os seus checkpoints são do mesmo participante. Caso contrário, fica \"em disputa\".\n7- O ranking é por pontos totais. Os pontos ficam salvos ao final.",
+    regrasTelao: "1- Aqui cada um joga sozinho.\n2- Encoste a pulseira nos checkpoints para ganhar pontos.\n3- Quanto mais checkpoints você pegar, mais pontos você ganha!\n4- No fim, ganha quem tiver mais pontos.",
   },
   treasure_hunt: {
     nome: "Caça ao Tesouro",
@@ -24,13 +29,15 @@ const JOGOS_PADRAO = {
     pontosPadrao: 10,
     descricao: "Uma corrida contra o relógio entre equipes. Uma equipe de cada vez precisa \"acender\" todos os checkpoints do jogo, sempre lendo o checkpoint-alvo indicado. A equipe mais rápida vence.",
     regras: "1- São necessárias pelo menos 2 equipes com participantes. Só entram os checkpoints online configurados no jogo.\n2- As equipes jogam uma por vez. A primeira é sorteada, e cada vez começa após 10 segundos de preparação. O cronômetro de cada equipe começa quando a sua vez é liberada.\n3- Em cada etapa existe um checkpoint-alvo sorteado. Só ele conta, e só a equipe da vez pode lê-lo.\n4- Todos os integrantes da equipe precisam ler o alvo, e cada criança conta uma vez por etapa. Quando o último lê, o checkpoint fica com a cor da equipe e um novo alvo é sorteado.\n5- A equipe termina quando domina todos os checkpoints do jogo. A vez passa para a próxima equipe que ainda não terminou, e o mapa é limpo para ela recomeçar.\n6- O jogo acaba quando todas as equipes terminam. Vence a equipe com o menor tempo. Se o tempo configurado do jogo se esgotar antes, o jogo é encerrado automaticamente.\n7- Os membros da equipe vencedora ganham 200 pontos ao final.",
+    regrasTelao: "1- As equipes jogam uma de cada vez.\n2- O telão mostra qual checkpoint vocês precisam achar.\n3- Todos da equipe precisam encostar a pulseira nele.\n4- Ganha a equipe que acender todos os checkpoints mais rápido!",
   },
   monster_hunt: {
     nome: "Caça ao Monstro",
     duracao: 28,
     pontosPadrao: 10,
     descricao: "Cada equipe tem o seu próprio monstro de 500 de vida. Percorra os checkpoints atacando o monstro da sua equipe e derrote-o antes das outras.",
-    regras: "1- Cada equipe tem um monstro com 500 HP. Todas as equipes jogam ao mesmo tempo.\n2- Cada leitura em um checkpoint do jogo é um ataque: 10 de dano em checkpoint normal e 30 no checkpoint especial (marcado pelo administrador ou sorteado).\n3- Ataque especial: quando o último integrante da equipe que ainda não tinha atacado faz o seu primeiro ataque, o dano é de 50.\n4- Depois de uma leitura, aquele checkpoint fica bloqueado para a sua equipe por um tempo de recarga (de 1 a 120 segundos, padrão de 15).\n5- Quando o HP chega a zero, o monstro é derrotado e a equipe vence. O jogo acaba quando todos os monstros forem derrotados ou o tempo se esgotar.\n6- Os membros da equipe vencedora ganham 200 pontos ao final.",
+    regras: "1- Cada equipe tem um monstro com 500 HP. Todas as equipes jogam ao mesmo tempo.\n2- Cada leitura em um checkpoint do jogo é um ataque: 10 de dano em checkpoint normal e 30 no checkpoint especial (marcado pelo administrador ou sorteado).\n3- Ataque especial: quando o último integrante da equipe que ainda não tinha atacado faz o seu primeiro ataque, o dano é de 50.\n4- Depois de uma leitura, aquele checkpoint fica bloqueado para a sua equipe por um tempo de recarga (de 1 a 120 segundos, padrão de 15).\n5- Quando o HP chega a zero, o monstro é derrotado, a equipe vence e o jogo acaba na hora. As outras equipes ficam classificadas pela vida que sobrou no monstro delas: quem deixou menos vida fica na frente. Se o tempo se esgotar antes, vale a mesma classificação.\n6- Os membros da equipe vencedora ganham 200 pontos ao final; as outras equipes ganham pontos pela classificação (100, 50, 25...).",
+    regrasTelao: "1- Cada equipe tem o seu próprio monstro.\n2- Encoste a pulseira nos checkpoints para atacar o monstro.\n3- O checkpoint especial dá um ataque mais forte!\n4- Ganha a equipe que derrotar o monstro primeiro.",
   },
   bomb_defusal: {
     nome: "Conquistar e Destruir",

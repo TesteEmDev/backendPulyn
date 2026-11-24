@@ -21,8 +21,13 @@ $sucesso = $false
 $avisos = 0
 
 # Cada etapa continua mesmo que outra falhe: a ideia e tirar o maximo possivel e dizer o que sobrou.
+# Etapas numeradas: o setup.exe usa o [n/total] para a barra de progresso.
+$totalEtapas = if ($ApagarBanco) { 7 } else { 6 }
+$etapa = 0
 function Etapa($texto, [scriptblock]$acao) {
-    Escrever-Passo $texto
+    $script:etapa++
+    Write-Host ''
+    Write-Host ('[' + $script:etapa + '/' + $totalEtapas + '] ' + $texto) -ForegroundColor Cyan
     try { & $acao } catch { $script:avisos++; Escrever-Aviso ($_.Exception.Message) }
 }
 
@@ -108,7 +113,9 @@ try {
         # Fica: backups, o pacote do setup (o proprio desinstalador apaga) e, se o banco ficou, o .env com a senha dele.
         $manterEnv = (-not $bancoApagado) -and (Test-Path $envProd)
         # fonte = repositorios baixados do GitHub (atualizacao pela internet); git = Git portatil
-        foreach ($pasta in $Site, (Join-Path $Raiz 'site-build'), $Servico, $Scripts, $Certs, $Instaladores, $Logs, (Join-Path $Raiz 'fonte'), (Join-Path $Raiz 'git')) {
+        # anterior = versao guardada para "Voltar a versao anterior"
+        foreach ($pasta in $Site, (Join-Path $Raiz 'site-build'), $Servico, $Scripts, $Certs, $Instaladores, $Logs, (Join-Path $Raiz 'fonte'), (Join-Path $Raiz 'git'),
+                           (Join-Path $Raiz 'anterior'), (Join-Path $Raiz 'anterior-troca')) {
             if (Test-Path $pasta) { Remove-Item $pasta -Recurse -Force }
         }
         if (Test-Path $Backend) {
