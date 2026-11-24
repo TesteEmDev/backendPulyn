@@ -8,6 +8,7 @@ const { normalizeUid, uidSqlExpression } = require('../utils/uid');
 const { empresaParaEvento } = require('../utils/acessoEventoFamilia');
 const { processParallelScan } = require('../utils/parallelGame');
 const { controleAtivo, MENSAGEM_PULSEIRA_DE_OUTRO_CLIENTE } = require('../utils/pulseiraControle');
+const { montarPontosDaPartida } = require('../utils/pontosDaPartida');
 const {
   getActiveSession,
   processTreasureScan,
@@ -1414,8 +1415,9 @@ router.get('/evento/:eventoId/pontos-da-partida', verifyToken, async (req, res) 
 
     let sessionId = String(req.query.sessionId || 'atual').trim();
     if (sessionId.toLowerCase() === 'atual') sessionId = await partidaAtualDoEvento(evento.eventoId);
-    if (!sessionId) return res.json({ sessionId: null, equipes: [], participantes: [] });
 
+    // Todas as crianças e equipes do evento entram, com 0 enquanto não pontuarem na partida (o telão mostra todo mundo
+    // desde o início). Sem partida, todos ficam zerados.
     const linhas = await allQuery(`
       SELECT c.criancaId AS "criancaId",
              COALESCE(NULLIF(c.apelido, ''), c.nome) AS nome,
@@ -1423,31 +1425,29 @@ router.get('/evento/:eventoId/pontos-da-partida', verifyToken, async (req, res) 
              t.timeId AS "timeId",
              t.nome AS "timeNome",
              t.cor AS "timeCor",
-             COALESCE(SUM(l.pontosAtribuidos), 0) AS pontos
-      FROM leitura l
-      JOIN crianca c ON c.criancaId = l.criancaId
+             COALESCE(p.pontos, 0) AS pontos
+      FROM crianca c
       LEFT JOIN "time" t ON t.timeId = c.timeId
-      WHERE l.sessaoId = @sessionId
-        AND l.autorizado = 1
-        AND LOWER(c.eventoId) = LOWER(@eventoId)
-        AND (l.empresaId = @empresaId OR @master = 1)
-      GROUP BY c.criancaId, c.apelido, c.nome, c.avatar, t.timeId, t.nome, t.cor
-    `, { sessionId, eventoId: evento.eventoId, empresaId, master });
+      LEFT JOIN (
+        SELECT l.criancaId AS "criancaId", SUM(l.pontosAtribuidos) AS pontos
+        FROM leitura l
+        WHERE l.sessaoId = @sessionId
+          AND l.autorizado = 1
+          AND (l.empresaId = @empresaId OR @master = 1)
+        GROUP BY l.criancaId
+      ) p ON p."criancaId" = c.criancaId
+      WHERE LOWER(c.eventoId) = LOWER(@eventoId)
+    `, { sessionId: sessionId || '', eventoId: evento.eventoId, empresaId, master });
+    const equipesDoEvento = await allQuery(
+      'SELECT timeId AS "timeId", nome, cor FROM "time" WHERE LOWER(eventoId) = LOWER(@eventoId)',
+      { eventoId: evento.eventoId }
+    );
 
-    const porEquipe = new Map();
-    const participantes = linhas.map((linha) => {
-      const pontos = Number(linha.pontos) || 0;
-      if (linha.timeId) {
-        const atual = porEquipe.get(linha.timeId) || { id: linha.timeId, nome: linha.timeNome, cor: linha.timeCor, pontos: 0 };
-        atual.pontos += pontos;
-        porEquipe.set(linha.timeId, atual);
-      }
-      return { id: linha.criancaId, nome: linha.nome, cor: linha.timeCor || null, avatar: linha.avatar || null, pontos };
-    }).sort((a, b) => b.pontos - a.pontos);
+    const { equipes, participantes } = montarPontosDaPartida(linhas, equipesDoEvento);
 
     res.json({
-      sessionId,
-      equipes: [...porEquipe.values()].sort((a, b) => b.pontos - a.pontos),
+      sessionId: sessionId || null,
+      equipes,
       participantes,
     });
   } catch (error) {
