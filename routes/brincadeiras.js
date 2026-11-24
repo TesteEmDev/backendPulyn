@@ -128,7 +128,9 @@ router.get('/', verifyToken, async (req, res) => {
 
     const parsed = brincadeira.map(b => ({
       ...b,
-      checkpoints: b.checkpoints ? JSON.parse(b.checkpoints) : []
+      checkpoints: b.checkpoints ? JSON.parse(b.checkpoints) : [],
+      // Versão curta das regras para o telão e a voz do Lumi (jogos de buffet); vem do catálogo, não do banco
+      regrasTelao: JOGOS_PADRAO[b.tipo]?.regrasTelao || null,
     }));
 
     res.json(parsed);
