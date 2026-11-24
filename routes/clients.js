@@ -1,6 +1,6 @@
 // routes/clients.js - Clientes/Empresas
 const express = require('express');
-const { validarCadastroCliente } = require('../utils/cadastroCliente');
+const { validarCadastroCliente, validarEdicaoCliente } = require('../utils/cadastroCliente');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { query, queryOne, allQuery, withTransaction } = require('../database');
@@ -97,6 +97,7 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       origin: cliente.origin,
       name: cliente.name,
       cnpj: null,
+      address: '',
       city: cliente.city,
       state: cliente.state,
       email: cliente.email,
@@ -115,6 +116,13 @@ router.get('/:id/detalhes', verifyToken, async (req, res) => {
       events: [],
       support: { open: 0, total: 0 },
     };
+
+    // Endereço fica no cadastro legado `cliente`: o próprio registro (sem empresa) ou o espelho da empresa
+    const idsDoCadastro = cliente.empresaId ? await legacyClienteIdsFor(cliente.empresaId) : [cliente.id];
+    if (idsDoCadastro.length > 0) {
+      const cadastro = await queryOne('SELECT endereco FROM cliente WHERE clienteId = @id', { id: idsDoCadastro[0] });
+      details.address = cadastro?.endereco || '';
+    }
 
     if (cliente.empresaId) {
       const empresaId = cliente.empresaId;
@@ -323,10 +331,23 @@ router.put('/:id', verifyToken, async (req, res) => {
       return res.status(403).json({ error: 'Acesso negado: apenas master pode atualizar cliente' });
     }
 
-    const { nome, cidade, estado, email, telefone, plan, status } = req.body;
+    const { plan, status } = req.body;
 
     if (planoInvalido(plan)) {
       return res.status(400).json({ error: `Plano inválido. Use: ${Object.keys(PLAN_DEFINITIONS).join(', ')}` });
+    }
+    if (status !== undefined && status !== null && !['active', 'blocked', 'trial'].includes(status)) {
+      return res.status(400).json({ error: 'Status inválido. Use: active, blocked ou trial' });
+    }
+
+    // Edição dos dados do cadastro (só valida o que veio no corpo)
+    const edicao = validarEdicaoCliente(req.body);
+    if (edicao.erro) return res.status(400).json({ error: edicao.erro });
+    const { nome, cnpj, endereco, cidade, estado, email, telefone } = edicao.valores;
+
+    if (cnpj) {
+      const cnpjRepetido = await queryOne('SELECT empresaId FROM empresa WHERE cnpj = @cnpj AND empresaId <> @id', { cnpj, id: req.params.id });
+      if (cnpjRepetido) return res.status(409).json({ error: 'Este CNPJ já está cadastrado em outro buffet.' });
     }
 
     try {
@@ -337,11 +358,12 @@ router.put('/:id', verifyToken, async (req, res) => {
       // Atualizar EMPRESA
       await query(
         // Atualização parcial: trocar só o plano (como a tela do master faz) não pode apagar nome, cidade ou status.
-        `UPDATE empresa SET nome = COALESCE(@nome, nome), cidade = COALESCE(@cidade, cidade), estado = COALESCE(@estado, estado),
+        `UPDATE empresa SET nome = COALESCE(@nome, nome), cnpj = COALESCE(@cnpj, cnpj), cidade = COALESCE(@cidade, cidade), estado = COALESCE(@estado, estado),
          telefone = COALESCE(@telefone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status), dataAtualizacao = GETDATE()
          WHERE empresaId = @id`,
         {
           nome: nome ?? null,
+          cnpj: cnpj ?? null,
           cidade: cidade ?? null,
           estado: estado ?? null,
           telefone: telefone ?? null,
@@ -369,11 +391,11 @@ router.put('/:id', verifyToken, async (req, res) => {
       for (const legacyId of legacyIds) {
         await query(
           `UPDATE cliente SET nome = COALESCE(@nome, nome), cidade = COALESCE(@cidade, cidade),
-           estado = COALESCE(@estado, estado), email = COALESCE(@email, email),
+           estado = COALESCE(@estado, estado), email = COALESCE(@email, email), endereco = COALESCE(@endereco, endereco),
            telefone = COALESCE(@telefone, telefone), plano = COALESCE(@plano, plano), status = COALESCE(@status, status)
            WHERE clienteId = @id`,
           {
-            nome: nome ?? null, cidade: cidade ?? null, estado: estado ?? null, email: email || null,
+            nome: nome ?? null, cidade: cidade ?? null, estado: estado ?? null, email: email || null, endereco: endereco ?? null,
             telefone: telefone ?? null, plano: plan ?? null, status: status ?? null, id: legacyId,
           }
         );
