@@ -28,7 +28,8 @@ function assinarToken(login, role, papeis, expiresIn = '24h', { semConta = false
       id: login.loginId,
       email: login.email,
       empresaId: login.empresaId,
-      empresa_nome: login.empresa_nome,
+      // Nome exibido no painel: o nome da conta (master, família) quando existe; senão o da empresa
+      empresa_nome: login.nomeFamilia || login.empresa_nome,
       role,
       papeis,
       plan: login.plano,   // o painel usa para mostrar os jogos do plano (o backend confere no banco)
@@ -478,6 +479,61 @@ router.post('/alterar-senha', verifyToken, async (req, res) => {
     res.json({ success: true, token, message: 'Senha alterada. As outras sessões foram encerradas.' });
   } catch (err) {
     console.error('❌ Erro ao alterar senha:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Master edita a própria conta: nome de exibição e e-mail de login (trocar o e-mail pede a senha atual).
+// O nome fica em login.nomeFamilia (o que o login já usa como nome da conta), sem mexer na empresa 'Master Admin'.
+// PUT /auth/perfil  { nome?, email?, senhaAtual? }
+const EMAIL_PERFIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+router.put('/perfil', verifyToken, async (req, res) => {
+  try {
+    if (req.user.role !== 'master') return res.status(403).json({ error: 'Apenas o master edita o próprio perfil aqui' });
+    const { nome, email, senhaAtual } = req.body || {};
+
+    const conta = await queryOne(
+      `SELECT l.loginId, l.email, l.senha, l.nomeFamilia, e.nome AS empresa_nome
+       FROM login l JOIN empresa e ON l.empresaId = e.empresaId WHERE l.loginId = @id`,
+      { id: req.user.id }
+    );
+    if (!conta) return res.status(401).json({ error: 'Sessão inválida. Entre de novo.' });
+
+    let nomeNovo = null;
+    if (nome !== undefined && nome !== null) {
+      nomeNovo = String(nome).trim();
+      if (!nomeNovo) return res.status(400).json({ error: 'Informe o nome' });
+      if (nomeNovo.length > 100) return res.status(400).json({ error: 'Nome excede 100 caracteres' });
+    }
+
+    let emailNovo = null;
+    if (email !== undefined && email !== null) {
+      const candidato = String(email).trim();
+      if (!candidato) return res.status(400).json({ error: 'Informe o e-mail' });
+      if (candidato.length > 100 || !EMAIL_PERFIL.test(candidato)) return res.status(400).json({ error: 'E-mail inválido' });
+      if (candidato.toLowerCase() !== String(conta.email).toLowerCase()) {
+        if (!senhaAtual) return res.status(400).json({ error: 'Informe a senha atual para trocar o e-mail' });
+        if (!verificarSenha(String(senhaAtual), conta.senha)) return res.status(403).json({ error: 'A senha atual está incorreta' });
+        const repetido = await queryOne('SELECT loginId FROM login WHERE LOWER(email) = LOWER(@email) AND loginId <> @id', { email: candidato, id: conta.loginId });
+        if (repetido) return res.status(409).json({ error: 'Este e-mail já é usado por outra conta.' });
+        emailNovo = candidato;
+      }
+    }
+
+    await query(
+      'UPDATE login SET nomeFamilia = COALESCE(@nome, nomeFamilia), email = COALESCE(@email, email), dataAtualizacao = GETDATE() WHERE loginId = @id',
+      { nome: nomeNovo, email: emailNovo, id: conta.loginId }
+    );
+
+    const nomeFinal = nomeNovo ?? (conta.nomeFamilia || conta.empresa_nome);
+    const emailFinal = emailNovo ?? conta.email;
+    // Token novo com os dados novos (o painel monta o nome e o e-mail a partir dele ao recarregar)
+    const { iat, exp, ...payload } = req.user;
+    const token = jwt.sign({ ...payload, email: emailFinal, empresa_nome: nomeFinal }, JWT_SECRET, { expiresIn: '24h' });
+    console.log(`✅ Perfil do master atualizado: loginId ${conta.loginId}`);
+    res.json({ success: true, token, user: { nome: nomeFinal, name: nomeFinal, email: emailFinal }, message: 'Perfil atualizado.' });
+  } catch (err) {
+    console.error('❌ Erro ao atualizar perfil do master:', err);
     res.status(500).json({ error: err.message });
   }
 });
